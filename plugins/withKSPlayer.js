@@ -18,7 +18,18 @@ const withKSPlayerPod = (config) => {
       let podfile = fs.readFileSync(podfilePath, 'utf8');
 
       if (podfile.includes('kingslay/KSPlayer') && podfile.includes('DisplayCriteria')) {
-        console.log('[withKSPlayer] KSPlayer pods already present, skipping');
+        // If an existing Podfile still points to 'main', update it to 'GPLv3' and '6.1.4'
+        if (podfile.includes(":branch => 'main'")) {
+          podfile = podfile
+            .replace(/pod 'KSPlayer', :git => 'https:\/\/github\.com\/kingslay\/KSPlayer\.git', :branch => 'main'/g, "pod 'KSPlayer', :git => 'https://github.com/kingslay/KSPlayer.git', :branch => 'GPLv3'")
+            .replace(/pod 'DisplayCriteria', :git => 'https:\/\/github\.com\/kingslay\/KSPlayer\.git', :branch => 'main'/g, "pod 'DisplayCriteria', :git => 'https://github.com/kingslay/KSPlayer.git', :branch => 'GPLv3'")
+            .replace(/pod 'FFmpegKit', :git => 'https:\/\/github\.com\/kingslay\/FFmpegKit\.git', :branch => 'main'/g, "pod 'FFmpegKit', :git => 'https://github.com/kingslay/FFmpegKit.git', :tag => '6.1.4'")
+            .replace(/pod 'Libass', :git => 'https:\/\/github\.com\/kingslay\/FFmpegKit\.git', :branch => 'main'/g, "pod 'Libass', :git => 'https://github.com/kingslay/FFmpegKit.git', :tag => '6.1.4'");
+          fs.writeFileSync(podfilePath, podfile, 'utf8');
+          console.log('[withKSPlayer] Updated existing Podfile KSPlayer & FFmpegKit pods from main branch to GPLv3 branch / 6.1.4 tag');
+        } else {
+          console.log('[withKSPlayer] KSPlayer pods already present, skipping');
+        }
         return mod;
       }
 
@@ -26,10 +37,10 @@ const withKSPlayerPod = (config) => {
       // use_frameworks! :linkage => :static satisfies both — confirmed by tapframe/KSPNUVIO.
       const ksplayerPods = `
   # KSPlayer — iOS video player with FFmpeg/AVPlayer support
-  pod 'KSPlayer', :git => 'https://github.com/kingslay/KSPlayer.git', :branch => 'main'
-  pod 'DisplayCriteria', :git => 'https://github.com/kingslay/KSPlayer.git', :branch => 'main', :modular_headers => true
-  pod 'FFmpegKit', :git => 'https://github.com/kingslay/FFmpegKit.git', :branch => 'main', :modular_headers => true
-  pod 'Libass', :git => 'https://github.com/kingslay/FFmpegKit.git', :branch => 'main', :modular_headers => true
+  pod 'KSPlayer', :git => 'https://github.com/kingslay/KSPlayer.git', :branch => 'GPLv3'
+  pod 'DisplayCriteria', :git => 'https://github.com/kingslay/KSPlayer.git', :branch => 'GPLv3', :modular_headers => true
+  pod 'FFmpegKit', :git => 'https://github.com/kingslay/FFmpegKit.git', :tag => '6.1.4', :modular_headers => true
+  pod 'Libass', :git => 'https://github.com/kingslay/FFmpegKit.git', :tag => '6.1.4', :modular_headers => true
 `;
 
       if (!podfile.includes('use_react_native!')) {
