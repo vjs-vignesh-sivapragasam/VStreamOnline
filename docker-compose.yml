@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  tmv:
+    image: vjdev1212/tmv:latest
+    container_name: tmv
+    ports:
+      - "3333:80"
+    environment:
+      - EXPO_PUBLIC_TMDB_API_KEY=your_tmdb_api_key_here      
+      - EXPO_PUBLIC_BUY_ME_COFFEE=your_buymeacoffee_username
+      - EXPO_PUBLIC_FEEDBACK_URL=https://your-feedback-url.com      
+      - EXPO_PUBLIC_SHOW_CONTACT=false      
+    restart: unless-stopped
