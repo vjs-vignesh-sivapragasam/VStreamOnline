@@ -1,102 +1,100 @@
-﻿{
-    "expo":  {
-                 "name":  "VStreamOnline",
-                 "slug":  "vstreamonline",
-                 "version":  "1.0.0",
-                 "orientation":  "default",
-                 "icon":  "assets/images/icon.png",
-                 "scheme":  "vstreamonline",
-                 "platforms":  [
-                                   "ios",
-                                   "android",
-                                   "web"
-                               ],
-                 "userInterfaceStyle":  "dark",
-                 "splash":  {
-                                "image":  "assets/images/splash.png",
-                                "resizeMode":  "contain",
-                                "backgroundColor":  "#000000"
-                            },
-                 "ios":  {
-                             "icon":  "assets/images/icon.png",
-                             "supportsTablet":  true,
-                             "backgroundColor":  "#000000",
-                             "bundleIdentifier":  "com.vijayyuvi.vstreamonline",
-                             "infoPlist":  {
-                                               "ITSAppUsesNonExemptEncryption":  false,
-                                               "NSAppTransportSecurity":  {
-                                                                              "NSAllowsArbitraryLoads":  true,
-                                                                              "NSAllowsLocalNetworking":  true
-                                                                          }
-                                           }
-                         },
-                 "android":  {
-                                 "adaptiveIcon":  {
-                                                      "foregroundImage":  "assets/images/adaptive-icon.png",
-                                                      "backgroundColor":  "#000000"
-                                                  },
-                                 "package":  "com.vijayyuvi.vstreamonline",
-                                 "icon":  "assets/images/icon.png"
-                             },
-                 "web":  {
-                             "bundler":  "metro",
-                             "output":  "single",
-                             "favicon":  "assets/images/favicon.png"
-                         },
-                 "plugins":  [
-                                 "./plugins/withKSPlayer",
-                                 "expo-router",
-                                 "expo-font",
-                                 "expo-build-properties",
-                                 [
-                                     "expo-build-properties",
-                                     {
-                                         "android":  {
-                                                         "usesCleartextTraffic":  true,
-                                                         "networkSecurityConfig":  "@xml/network_security_config",
-                                                         "minSdkVersion":  26,
-                                                         "compileSdkVersion":  35,
-                                                         "targetSdkVersion":  35,
-                                                         "buildToolsVersion":  "35.0.0",
-                                                         "packagingOptions":  {
-                                                                                  "pickFirst":  [
-
-                                                                                                ]
-                                                                              },
-                                                         "extraMavenRepos":  [
-
-                                                                             ],
-                                                         "abiFilters":  [
-                                                                            "arm64-v8a",
-                                                                            "armeabi-v7a"
-                                                                        ]
-                                                     }
-                                     }
-                                 ],
-                                 [
-                                     "expo-dev-client",
-                                     {
-                                         "launchMode":  "most-recent"
-                                     }
-                                 ]
-                             ],
-                 "experiments":  {
-                                     "typedRoutes":  true
-                                 },
-                 "extra":  {
-                               "router":  {
-                                              "origin":  false
-                                          },
-                               "eas":  {
-                                           "projectId":  "79c70d7a-9507-41fd-86a4-c935b292399d"
-                                       }
-                           },
-                 "owner":  "vijayvcm",
-                 "runtimeVersion":  {
-                                        "policy":  "appVersion"
-                                    },
-                 "updates":  {
-                                 "url":  "https://u.expo.dev/79c70d7a-9507-41fd-86a4-c935b292399d"
-                             }
-             }
+{
+  "expo": {
+    "name": "VStreamOnline",
+    "slug": "vstreamonline",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "assets/images/icon.png",
+    "scheme": "vstreamonline",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "icon": "assets/images/icon.png",
+      "supportsTablet": true,
+      "backgroundColor": "#000000",
+      "bundleIdentifier": "com.vijayyuvi.vstreamonline",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "assets/images/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "package": "com.vijayyuvi.vstreamonline",
+      "icon": "assets/images/icon.png"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "assets/images/favicon.png"
+    },
+    "plugins": [
+      "./plugins/withKSPlayer",
+      "expo-router",
+      "expo-font",
+      "expo-build-properties",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "networkSecurityConfig": "@xml/network_security_config",
+            "minSdkVersion": 26,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "buildToolsVersion": "35.0.0",
+            "packagingOptions": {
+              "pickFirst": []
+            },
+            "extraMavenRepos": [],
+            "abiFilters": [
+              "arm64-v8a",
+              "armeabi-v7a"
+            ]
+          }
+        }
+      ],
+      [
+        "expo-dev-client",
+        {
+          "launchMode": "most-recent"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "79c70d7a-9507-41fd-86a4-c935b292399d"
+      }
+    },
+    "owner": "vijayvcm",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/79c70d7a-9507-41fd-86a4-c935b292399d"
+    }
+  }
 }

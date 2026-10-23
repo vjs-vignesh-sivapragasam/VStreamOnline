@@ -505,6 +505,9 @@ export const ErrorDisplay: React.FC<{
     if (!error) return null;
     return (
         <View style={styles.errorContainer}>
+            <TouchableOpacity style={styles.errorBackButton} onPress={onBack}>
+                <Ionicons name="arrow-back" size={28} color="#ffffff" />
+            </TouchableOpacity>
             <MaterialIcons name="error-outline" size={64} color="#ff6b6b" />
             <Text style={styles.errorTitle}>Playback Error</Text>
             <Text style={styles.errorText}>{error}</Text>

@@ -1,5 +1,7 @@
 import React, { useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import {
+  Platform,
+  Text,
   requireNativeComponent,
   UIManager,
   findNodeHandle,
@@ -79,7 +81,29 @@ export interface KSPlayerRef {
 
 // ─── Native component ─────────────────────────────────────────────────────────
 
-const KSPlayerNative = requireNativeComponent<any>('KSPlayerView');
+export const isKSPlayerAvailable = (): boolean => {
+  if (Platform.OS !== 'ios') return false;
+  try {
+    return Boolean(
+      UIManager.getViewManagerConfig &&
+      UIManager.getViewManagerConfig('KSPlayerView')
+    );
+  } catch {
+    return false;
+  }
+};
+
+const getKSPlayerNative = () => {
+  if (!isKSPlayerAvailable()) return null;
+  try {
+    return requireNativeComponent<any>('KSPlayerView');
+  } catch (e) {
+    console.warn('[KSPlayerView] Failed to load native KSPlayerView:', e);
+    return null;
+  }
+};
+
+const KSPlayerNative = getKSPlayerNative();
 
 function dispatchCommand(ref: React.RefObject<any>, command: string, args: any[] = []) {
   const node = findNodeHandle(ref.current);
@@ -141,6 +165,16 @@ export const KSPlayerView = forwardRef<KSPlayerRef, KSPlayerViewProps>((props, r
     (e: NativeSyntheticEvent<KSOnSubtitleTextData>) => props.onSubtitleText?.(e.nativeEvent),
     [props.onSubtitleText]
   );
+
+  if (!KSPlayerNative) {
+    return (
+      <View style={[styles.container, props.style, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#fff', fontSize: 14, textAlign: 'center', marginHorizontal: 20 }}>
+          KSPlayer native component is not available in this build.
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, props.style]}>

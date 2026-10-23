@@ -1,5 +1,6 @@
 import { MagnetParser } from '@/utils/MagnetParser';
 import { StorageKeys, storageService } from '@/utils/StorageService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState, useCallback } from 'react';
 
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -7,6 +8,14 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 // ─── Base URL & Constants ─────────────────────────────────────────────────────
 
 export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.com';
+
+export const KNOWN_TAMILMV_MIRRORS = [
+  'https://www.1tamilmv.pm',
+  'https://www.1tamilmv.yt',
+  'https://www.1tamilmv.tf',
+  'https://www.1tamilmv.mx',
+  'https://www.1tamilmv.com',
+];
 
 type BaseUrlListener = (newUrl: string) => void;
 const baseUrlListeners = new Set<BaseUrlListener>();
@@ -28,28 +37,94 @@ function notifyBaseUrlChanged(newUrl: string): void {
   });
 }
 
+// In-memory cache for fast synchronous access
+let cachedTamilMVBaseUrl: string = DEFAULT_TAMILMV_BASE_URL;
+
+// 1. Initial attempt from synchronous storage (if available)
+try {
+  const customUrl = storageService.getItem(StorageKeys.TAMILMV_BASE_URL_KEY);
+  if (customUrl && customUrl.trim()) {
+    cachedTamilMVBaseUrl = customUrl.trim().replace(/\/+$/, '');
+  }
+} catch (e) {
+  console.warn('Failed to read TamilMV base URL from storageService', e);
+}
+
+// 2. Hydrate from AsyncStorage immediately so domain persists across app reloads/restarts
+AsyncStorage.getItem(StorageKeys.TAMILMV_BASE_URL_KEY)
+  .then(storedUrl => {
+    if (storedUrl && storedUrl.trim()) {
+      const sanitized = storedUrl.trim().replace(/\/+$/, '');
+      if (sanitized !== cachedTamilMVBaseUrl) {
+        cachedTamilMVBaseUrl = sanitized;
+        try {
+          storageService.setItem(StorageKeys.TAMILMV_BASE_URL_KEY, sanitized);
+        } catch {}
+        notifyBaseUrlChanged(sanitized);
+      }
+    }
+  })
+  .catch(err => {
+    console.warn('[useTamilMv] Failed to load TamilMV domain from AsyncStorage:', err);
+  });
+
 export function getTamilMVBaseUrl(): string {
+  if (cachedTamilMVBaseUrl && cachedTamilMVBaseUrl !== DEFAULT_TAMILMV_BASE_URL) {
+    return cachedTamilMVBaseUrl;
+  }
   try {
     const customUrl = storageService.getItem(StorageKeys.TAMILMV_BASE_URL_KEY);
     if (customUrl && customUrl.trim()) {
-      return customUrl.trim().replace(/\/+$/, '');
+      cachedTamilMVBaseUrl = customUrl.trim().replace(/\/+$/, '');
+      return cachedTamilMVBaseUrl;
     }
   } catch (e) {
     console.warn('Failed to read TamilMV base URL from storage', e);
   }
-  return DEFAULT_TAMILMV_BASE_URL;
+  return cachedTamilMVBaseUrl || DEFAULT_TAMILMV_BASE_URL;
 }
 
-export function setTamilMVBaseUrl(url: string): void {
+export async function getTamilMVBaseUrlAsync(): Promise<string> {
+  try {
+    const stored = await AsyncStorage.getItem(StorageKeys.TAMILMV_BASE_URL_KEY);
+    if (stored && stored.trim()) {
+      const sanitized = stored.trim().replace(/\/+$/, '');
+      cachedTamilMVBaseUrl = sanitized;
+      return sanitized;
+    }
+  } catch (e) {
+    console.warn('[useTamilMv] Failed to read TamilMV base URL from AsyncStorage', e);
+  }
+  return getTamilMVBaseUrl();
+}
+
+export async function setTamilMVBaseUrl(url: string): Promise<void> {
   const sanitized = url.trim().replace(/\/+$/, '');
-  storageService.setItem(StorageKeys.TAMILMV_BASE_URL_KEY, sanitized);
+  cachedTamilMVBaseUrl = sanitized;
+
+  try {
+    storageService.setItem(StorageKeys.TAMILMV_BASE_URL_KEY, sanitized);
+  } catch (e) {
+    console.warn('Failed to save TamilMV base URL to storageService', e);
+  }
+
+  try {
+    await AsyncStorage.setItem(StorageKeys.TAMILMV_BASE_URL_KEY, sanitized);
+  } catch (e) {
+    console.warn('Failed to save TamilMV base URL to AsyncStorage', e);
+  }
+
   clearAllRssCache();
   notifyBaseUrlChanged(sanitized);
 }
 
-export function resetTamilMVBaseUrl(): void {
+export async function resetTamilMVBaseUrl(): Promise<void> {
+  cachedTamilMVBaseUrl = DEFAULT_TAMILMV_BASE_URL;
   try {
     storageService.removeItem(StorageKeys.TAMILMV_BASE_URL_KEY);
+  } catch { }
+  try {
+    await AsyncStorage.removeItem(StorageKeys.TAMILMV_BASE_URL_KEY);
   } catch { }
   clearAllRssCache();
   notifyBaseUrlChanged(DEFAULT_TAMILMV_BASE_URL);
@@ -66,6 +141,9 @@ export function clearAllRssCache(): void {
 export function useTamilMVBaseUrl(): string {
   const [url, setUrl] = useState<string>(() => getTamilMVBaseUrl());
   useEffect(() => {
+    getTamilMVBaseUrlAsync().then(u => {
+      if (u) setUrl(u);
+    });
     return subscribeTamilMVBaseUrl(newUrl => setUrl(newUrl));
   }, []);
   return url;
@@ -222,6 +300,35 @@ async function pingFallbackRoot(baseUrl: string, elapsedMs: number, feedStatus?:
       error: errObj?.message,
     };
   }
+}
+
+let isAutoDiscovering = false;
+
+/**
+ * Pings known TamilMV mirrors and automatically selects & saves the first working mirror to AsyncStorage.
+ */
+export async function autoDiscoverWorkingDomain(): Promise<string | null> {
+  if (isAutoDiscovering) return null;
+  isAutoDiscovering = true;
+  try {
+    for (const mirror of KNOWN_TAMILMV_MIRRORS) {
+      try {
+        const res = await pingTamilMV(mirror);
+        if (res.success && res.rssWorking) {
+          console.log(`[TamilMV] Active mirror found: ${mirror} (${res.latencyMs}ms). Persisting to AsyncStorage.`);
+          await setTamilMVBaseUrl(mirror);
+          return mirror;
+        }
+      } catch (err) {
+        // Continue testing other mirrors
+      }
+    }
+  } catch (e) {
+    console.warn('[TamilMV] Error during domain auto-discovery:', e);
+  } finally {
+    isAutoDiscovering = false;
+  }
+  return null;
 }
 
 export type Language = 'tamil' | 'english' | 'hindi' | 'telugu' | 'malayalam' | 'kannada';
@@ -457,23 +564,59 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-      'Cache-Control': 'no-cache',
-    },
-    signal: controller.signal,
-  });
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+        'Cache-Control': 'no-cache',
+      },
+      signal: controller.signal,
+    });
 
-  clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
 
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-  const xml = await response.text();
-  const groups = parseRSSFeed(xml, language, category);
-  writeCache(cacheKey, groups);
-  return groups;
+    const xml = await response.text();
+    const groups = parseRSSFeed(xml, language, category);
+    writeCache(cacheKey, groups);
+    return groups;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+
+    // If the active domain fails (blocked by ISP / offline), auto-discover a working mirror from presets and persist to AsyncStorage
+    const currentBase = getTamilMVBaseUrl();
+    const workingMirror = await autoDiscoverWorkingDomain();
+    if (workingMirror && workingMirror !== currentBase) {
+      const retryUrl = getRssUrl(language, category, workingMirror);
+      if (retryUrl) {
+        const retryController = new AbortController();
+        const retryTimeout = setTimeout(() => retryController.abort(), 15000);
+        try {
+          const retryRes = await fetch(retryUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+              'Cache-Control': 'no-cache',
+            },
+            signal: retryController.signal,
+          });
+          clearTimeout(retryTimeout);
+          if (retryRes.ok) {
+            const xml = await retryRes.text();
+            const groups = parseRSSFeed(xml, language, category);
+            writeCache(cacheKey, groups);
+            return groups;
+          }
+        } catch {
+          clearTimeout(retryTimeout);
+        }
+      }
+    }
+
+    throw error;
+  }
 }
 
 // ─── Hook: single category ────────────────────────────────────────────────────

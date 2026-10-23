@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backgroundGradient: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   screenContent: {
   },

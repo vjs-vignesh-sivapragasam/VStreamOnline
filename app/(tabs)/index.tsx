@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import React, { useState, useCallback, useEffect } from 'react';
-import nodejs from 'nodejs-mobile-react-native';
+import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
 import {
   ScrollView,
   StyleSheet,
@@ -82,11 +82,7 @@ export default function HomeScreen() {
   }, [refresh]);
 
   useEffect(() => {
-    try {
-      nodejs.start('wrapper.js');
-    } catch (err: any) {
-      console.log('ServerJs Error', err);
-    }
+    startEmbeddedNodeServer();
   }, []);
 
   const handleLanguageChange = async (newLanguage: Language) => {

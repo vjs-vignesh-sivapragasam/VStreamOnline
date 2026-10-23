@@ -9,6 +9,7 @@ import { StreamingServerClient } from "@/clients/stremio";
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { TorrentItem } from "@/hooks/useTamilMv";
 import { StorageKeys, storageService } from "@/utils/StorageService";
+import { isKSPlayerAvailable } from "@/components/ksplayer/KSPlayerView";
 
 interface UpdateProgressEvent {
   progress: number;
@@ -421,10 +422,10 @@ const MediaPlayerScreen: React.FC = () => {
   // Fallback: KSPlayer (FFmpeg-based, better format support)
 
   function getPlayer() {
-    if (Platform.OS === "ios") {
+    if (Platform.OS === "ios" && isKSPlayerAvailable()) {
       return require("../../components/ksplayer").MediaPlayer;
     }
-    if (currentPlayerType === "ksplayer") {
+    if (currentPlayerType === "ksplayer" && isKSPlayerAvailable()) {
       return require("../../components/ksplayer").MediaPlayer;
     }
     return require("../../components/nativeplayer").MediaPlayer;

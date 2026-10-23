@@ -1,5 +1,11 @@
 import React from 'react';
-import { NativeTabs, Label, Icon } from 'expo-router/unstable-native-tabs';
+import { Label, Icon } from 'expo-router';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
+
+export {
+  // Catch any errors thrown by the Layout component.
+  ErrorBoundary,
+} from 'expo-router';
 
 export default function TabLayout() {
   return (

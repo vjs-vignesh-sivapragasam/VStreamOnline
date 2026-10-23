@@ -63,7 +63,7 @@ export function View(props: ViewProps) {
 export function StatusBar(props: StatusBarProps) {
   const { ...otherProps } = props;
 
-  return <DefaultStatusBar {...otherProps} style="light" translucent backgroundColor="transparent" />;
+  return <DefaultStatusBar {...otherProps} style="light" />;
 }
 
 export function Card(props: ViewProps) {

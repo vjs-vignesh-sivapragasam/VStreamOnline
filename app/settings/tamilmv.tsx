@@ -20,8 +20,10 @@ import * as Haptics from 'expo-haptics';
 import {
   DEFAULT_TAMILMV_BASE_URL,
   getTamilMVBaseUrl,
+  getTamilMVBaseUrlAsync,
   setTamilMVBaseUrl,
   resetTamilMVBaseUrl,
+  autoDiscoverWorkingDomain,
   pingTamilMV,
   PingResult,
 } from '@/hooks/useTamilMv';
@@ -70,10 +72,12 @@ const TamilMvSettingsScreen: React.FC = () => {
   }, [triggerHaptic]);
 
   useEffect(() => {
-    const current = getTamilMVBaseUrl();
-    setActiveUrl(current);
-    setUrlInput(current);
-    runPing(current);
+    (async () => {
+      const current = await getTamilMVBaseUrlAsync();
+      setActiveUrl(current);
+      setUrlInput(current);
+      runPing(current);
+    })();
   }, [runPing]);
 
   const handleTestPing = async () => {
@@ -84,6 +88,26 @@ const TamilMvSettingsScreen: React.FC = () => {
       return;
     }
     await runPing(candidate);
+  };
+
+  const handleAutoDetect = async () => {
+    await triggerHaptic();
+    setIsPinging(true);
+    try {
+      const working = await autoDiscoverWorkingDomain();
+      if (working) {
+        setActiveUrl(working);
+        setUrlInput(working);
+        showAlert('Working Mirror Found', `Discovered and saved active mirror to AsyncStorage:\n${working}`);
+        await runPing(working);
+      } else {
+        showAlert('Auto-Detect Failed', 'None of the known TamilMV mirrors responded. Please check your internet connection or enter a custom mirror URL.');
+      }
+    } catch (e: any) {
+      showAlert('Error', e?.message || 'Failed to auto-detect working mirror');
+    } finally {
+      setIsPinging(false);
+    }
   };
 
   const handleSave = async () => {
@@ -103,9 +127,9 @@ const TamilMvSettingsScreen: React.FC = () => {
 
     setIsSaving(true);
     try {
-      setTamilMVBaseUrl(candidate);
+      await setTamilMVBaseUrl(candidate);
       setActiveUrl(candidate);
-      showAlert('Success', 'TamilMV base URL updated. RSS cache has been cleared.');
+      showAlert('Success', 'TamilMV base URL saved to AsyncStorage. RSS cache has been cleared.');
       await runPing(candidate);
     } catch (e: any) {
       showAlert('Error', `Failed to save URL: ${e?.message || 'Unknown error'}`);
@@ -116,7 +140,7 @@ const TamilMvSettingsScreen: React.FC = () => {
 
   const handleReset = async () => {
     await triggerHaptic();
-    resetTamilMVBaseUrl();
+    await resetTamilMVBaseUrl();
     setActiveUrl(DEFAULT_TAMILMV_BASE_URL);
     setUrlInput(DEFAULT_TAMILMV_BASE_URL);
     showAlert('Reset', `Reset base URL to default: ${DEFAULT_TAMILMV_BASE_URL}`);
@@ -331,6 +355,16 @@ const TamilMvSettingsScreen: React.FC = () => {
             {/* Action Buttons */}
             <View style={styles.actionsContainer}>
               <TouchableOpacity
+                style={[styles.autoDetectButton, isPinging && styles.buttonDisabled]}
+                onPress={handleAutoDetect}
+                disabled={isPinging}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="flash-outline" size={18} color="#ffd60a" style={{ marginRight: 6 }} />
+                <Text style={styles.autoDetectButtonText}>Auto-Find Working Mirror</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={[styles.saveButton, isSaving && styles.buttonDisabled]}
                 onPress={handleSave}
                 disabled={isSaving}
@@ -341,7 +375,7 @@ const TamilMvSettingsScreen: React.FC = () => {
                 ) : (
                   <>
                     <Ionicons name="save-outline" size={18} color="#ffffff" style={{ marginRight: 6 }} />
-                    <Text style={styles.saveButtonText}>Save & Apply</Text>
+                    <Text style={styles.saveButtonText}>Save to AsyncStorage</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -361,7 +395,7 @@ const TamilMvSettingsScreen: React.FC = () => {
           <View style={styles.infoCard}>
             <Ionicons name="information-circle" size={20} color="#535aff" style={{ marginRight: 10 }} />
             <Text style={styles.infoText}>
-              TamilMV frequently rotates domains or gets blocked by ISPs. If content fails to load on the Home screen, enter an active mirror or proxy URL above and tap "Save & Apply".
+              TamilMV frequently rotates domains or gets blocked by ISPs. Your chosen domain is saved permanently in AsyncStorage so you don't have to set it each time. The app will also automatically fallback to working mirrors if needed.
             </Text>
           </View>
 
@@ -583,6 +617,21 @@ const styles = StyleSheet.create({
   actionsContainer: {
     gap: 10,
     marginTop: 4,
+  },
+  autoDetectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 214, 10, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 214, 10, 0.35)',
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  autoDetectButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffd60a',
   },
   saveButton: {
     flexDirection: 'row',

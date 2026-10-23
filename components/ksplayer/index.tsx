@@ -32,7 +32,7 @@ import {
 import { View, Text } from "../Themed";
 import { GlassView } from 'expo-glass-effect';
 
-const { KSPlayerView: VideoComponent } = require('@/components/ksplayer/KSPlayerView');
+const { KSPlayerView: VideoComponent, isKSPlayerAvailable } = require('@/components/ksplayer/KSPlayerView');
 
 const RNResizeMode = { COVER: 'cover', CONTAIN: 'contain', STRETCH: 'stretch' };
 
@@ -53,6 +53,23 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     currentStreamIndex = 0,
     onStreamChange
 }) => {
+    if (!isKSPlayerAvailable()) {
+        const { MediaPlayer: NativePlayer } = require('@/components/nativeplayer');
+        return (
+            <NativePlayer
+                videoUrl={videoUrl}
+                title={title}
+                back={onBack}
+                progress={progress}
+                artwork={artwork}
+                updateProgress={updateProgress}
+                onPlaybackError={onPlaybackError}
+                streams={streams}
+                currentStreamIndex={currentStreamIndex}
+                onStreamChange={onStreamChange}
+            />
+        );
+    }
     const videoRef = useRef<any>(null);
     const shouldAutoHideControls = useRef(true);
     const isSeeking = useRef(false);

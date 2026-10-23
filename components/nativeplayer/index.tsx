@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { TouchableOpacity, Animated, Platform, Dimensions } from "react-native";
+import { TouchableOpacity, Animated, Platform, Dimensions, UIManager } from "react-native";
 import Video, { OnLoadData, OnProgressData, VideoRef, OnBufferData, ResizeMode, SelectedTrack } from "react-native-video";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { MenuComponentRef, MenuView } from '@react-native-menu/menu';
@@ -39,6 +39,17 @@ const MenuWrapper: React.FC<any> = (props) => {
         return <WebMenu {...props} />;
     }
     return <MenuView {...props} />;
+};
+
+export const isRCTVideoAvailable = (): boolean => {
+    try {
+        return Boolean(
+            UIManager.getViewManagerConfig &&
+            (UIManager.getViewManagerConfig('RCTVideo') || UIManager.getViewManagerConfig('VideoManager'))
+        );
+    } catch {
+        return false;
+    }
 };
 
 export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
@@ -509,6 +520,16 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         }
         return { type: 'disabled' } as SelectedTrack;
     }, [selectedTextTrack]);
+
+    if (!isRCTVideoAvailable()) {
+        return (
+            <ErrorDisplay
+                error="Native video player (react-native-video) is not supported in Expo Go. Please run a Development Build (npx expo run:ios or npx expo run:android)."
+                onBack={handleBack}
+                onRetry={handleRetry}
+            />
+        );
+    }
 
     if (videoError) {
         return <ErrorDisplay error={videoError} onBack={handleBack} onRetry={handleRetry} />;
