@@ -50,6 +50,7 @@ workflows:
         script: |
           rm -rf ios android
           npx expo prebuild --clean --platform ios
+          echo "export NODE_OPTIONS=\"--require $(pwd)/scripts/polyfill-node18.js\"" >> ios/.xcode.env.local
 
       - name: Install iOS dependencies
         script: |
@@ -224,6 +225,7 @@ workflows:
         script: |
           rm -rf ios android
           npx expo prebuild --clean --platform ios
+          echo "export NODE_OPTIONS=\"--require $(pwd)/scripts/polyfill-node18.js\"" >> ios/.xcode.env.local
 
       - name: Install iOS dependencies
         script: |
