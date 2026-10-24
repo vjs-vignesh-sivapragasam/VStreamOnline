@@ -11,7 +11,8 @@
     "web": "expo start --web",
     "test": "jest --watchAll",
     "build:web": "npx expo export -p web",
-    "build:android": "eas build -p android --profile preview"
+    "build:android": "eas build -p android --profile preview",
+    "postinstall": "node scripts/patch-nodejs-mobile.js"
   },
   "jest": {
     "preset": "jest-expo"

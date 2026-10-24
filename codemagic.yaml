@@ -4,13 +4,15 @@ workflows:
   tmv-ios-build:
     name: TMV iOS Build
     environment:
-      node: 20
+      node: 18
       xcode: latest
       groups:
         - EXPO
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          npm install --force
+          node scripts/patch-nodejs-mobile.js
       
       - name: Install Expo CLI
         script: npm install -g @expo/cli@latest --force
@@ -179,13 +181,15 @@ workflows:
   tmv-ios-dev:
     name: TMV iOS Development Build
     environment:
-      node: 20
+      node: 18
       xcode: latest
       groups:
         - EXPO
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          npm install --force
+          node scripts/patch-nodejs-mobile.js
 
       - name: Install Expo CLI
         script: npm install -g @expo/cli@latest --force
@@ -347,14 +351,16 @@ workflows:
   tmv-android-build:
     name: TMV Android Build
     environment:
-      node: 20
+      node: 18
       java: latest
       groups:
         - EXPO
         - ANDROID_KEYSTORE
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          npm install --force
+          node scripts/patch-nodejs-mobile.js
 
       - name: Extract app version from app.json
         script: |
@@ -472,13 +478,15 @@ workflows:
   tmv-android-dev:
     name: TMV Android Development Build
     environment:
-      node: 20
+      node: 18
       java: latest
       groups:
         - EXPO
     scripts:
       - name: Install dependencies
-        script: npm install --force
+        script: |
+          npm install --force
+          node scripts/patch-nodejs-mobile.js
 
       - name: Extract app version from app.json
         script: |
