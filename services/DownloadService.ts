@@ -240,14 +240,38 @@ class DownloadManager {
     }
   }
 
+  // Update item poster (e.g. resolved from TMDB or page extraction in background)
+  updateItemPoster(infoHash: string, poster: string): void {
+    if (!poster || !poster.trim()) return;
+    this.ensureLoaded();
+    let changed = false;
+    this.inMemoryDownloads.forEach((item) => {
+      if (item.infoHash.toLowerCase() === infoHash.toLowerCase()) {
+        if (!item.poster || item.poster.trim() === '' || item.poster !== poster) {
+          item.poster = poster;
+          changed = true;
+        }
+      }
+    });
+
+    if (changed) {
+      this.notifyListeners();
+      this.persistDownloadsImmediately();
+    }
+  }
+
   // Update item metadata when file list resolves in background
-  updateItemMetadata(infoHash: string, fileIdx: number, fileName?: string, fileLength?: number): void {
+  updateItemMetadata(infoHash: string, fileIdx: number, fileName?: string, fileLength?: number, poster?: string): void {
     this.ensureLoaded();
     const id = `${infoHash}_${fileIdx}`;
     const item = this.inMemoryDownloads.find((d) => d.id === id);
     if (!item) return;
 
     let changed = false;
+    if (poster && (!item.poster || item.poster.trim() === '')) {
+      item.poster = poster;
+      changed = true;
+    }
     if (fileName && fileName !== item.fileName) {
       item.fileName = fileName;
       changed = true;
@@ -310,6 +334,7 @@ class DownloadManager {
       item.statusDetail = 'Connecting to streaming engine...';
       item.streamUrl = params.streamUrl;
       item.fileUri = targetFile.uri;
+      if (params.poster && (!item.poster || item.poster.trim() === '')) item.poster = params.poster;
       if (params.fileLength && params.fileLength > 0) item.totalBytes = params.fileLength;
       item.speedBps = 0;
       item.speedFormatted = '0 KB/s';

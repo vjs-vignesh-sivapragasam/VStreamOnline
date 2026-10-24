@@ -17,7 +17,7 @@ import BottomSpacing from '@/components/BottomSpacing';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import { Ionicons } from '@expo/vector-icons';
-import { TorrentItem, fetchTamilMVTopicMagnets } from '@/hooks/useTamilMv';
+import { TorrentItem, fetchTamilMVTopicMagnets, searchTamilMV, cleanTopicTitle } from '@/hooks/useTamilMv';
 import { StreamingServerClient, TorrentFile } from '@/clients/stremio';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
@@ -48,12 +48,21 @@ function extractQualityTag(title: string): string | null {
   return [match[1], match[2]].filter(Boolean).join(' ');
 }
 
-function cleanTitle(title: string): string {
+function cleanTorrentTitle(title: string): string {
   if (!title) return '';
   return title
-    .replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me)\s*[-_:]\s*/i, '')
-    .replace(/^[^-]+-\s*/, '')
+    .replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|pm|tv|info|xyz|app|live)\s*[-_:]\s*/i, '')
+    .replace(/^[a-z0-9\.-]+\.[a-z]{2,6}\s*[-_:]\s*/i, '')
     .trim();
+}
+
+function getMovieSearchTitle(title: string): string {
+  if (!title) return '';
+  return cleanTopicTitle(title).name;
+}
+
+function cleanTitle(title: string): string {
+  return cleanTorrentTitle(title);
 }
 
 function formatFileSize(bytes: number): string {
@@ -182,8 +191,11 @@ const TorrentDetails = () => {
   });
   const [isLoadingVariants, setIsLoadingVariants] = useState(false);
 
-  // When items have no valid magnet URLs (e.g. from TamilMV website search), fetch from topicUrl / groupid
+  // When items have no valid magnet URLs (e.g. from TamilMV website search, or Recommended movies),
+  // fetch from topicUrl / groupid, OR auto-search TamilMV by title
   useEffect(() => {
+    let isMounted = true;
+
     const rawParsed: TorrentItem[] = allItemsRaw ? (() => {
       try { return JSON.parse(allItemsRaw); } catch { return []; }
     })() : [];
@@ -191,6 +203,7 @@ const TorrentDetails = () => {
     const hasRealMagnets = rawParsed.length > 0 && rawParsed.some(i => i.magnetUrl && i.magnetUrl.startsWith('magnet:?'));
     if (hasRealMagnets) {
       setItems(rawParsed);
+      setIsLoadingVariants(false);
       return;
     }
 
@@ -199,20 +212,75 @@ const TorrentDetails = () => {
       setIsLoadingVariants(true);
       fetchTamilMVTopicMagnets(targetUrl)
         .then(res => {
-          if (res.items.length > 0) {
-            setItems(res.items);
+          if (isMounted) {
+            if (res.items.length > 0) {
+              setItems(res.items);
+            } else {
+              setItems(rawParsed);
+            }
           }
         })
         .catch(err => {
           console.warn('[TorrentDetails] Failed to fetch topic magnets:', err);
+          if (isMounted) setItems(rawParsed);
         })
         .finally(() => {
-          setIsLoadingVariants(false);
+          if (isMounted) setIsLoadingVariants(false);
+        });
+      return;
+    }
+
+    // Auto-search TamilMV when opened with just a title (e.g. Recommended or Similar movies)
+    const searchTitle = getMovieSearchTitle(title);
+    if (searchTitle) {
+      setIsLoadingVariants(true);
+      searchTamilMV(searchTitle, 'all')
+        .then(async (groups) => {
+          if (!isMounted) return;
+          if (groups && groups.length > 0) {
+            const targetYear = publishDate ? new Date(publishDate).getFullYear().toString() : null;
+            let candidateGroup = targetYear
+              ? groups.find(g => g.year === targetYear) || groups[0]
+              : groups[0];
+
+            const candidateGroups = [candidateGroup, ...groups.filter(g => g !== candidateGroup)].slice(0, 3);
+
+            for (const grp of candidateGroups) {
+              const bestCandidate = grp.items.find(i => i.groupid?.startsWith('http')) || grp.items[0];
+              const topic = bestCandidate?.groupid || bestCandidate?.guid;
+              if (topic && topic.startsWith('http')) {
+                try {
+                  const res = await fetchTamilMVTopicMagnets(topic);
+                  if (isMounted && res.items.length > 0) {
+                    setItems(res.items);
+                    return;
+                  }
+                } catch (e) {
+                  console.warn('[TorrentDetails] Error fetching topic magnets:', topic, e);
+                }
+              }
+            }
+          }
+          if (isMounted) {
+            setItems([]);
+          }
+        })
+        .catch(err => {
+          console.warn('[TorrentDetails] Auto-search failed for title:', searchTitle, err);
+          if (isMounted) setItems([]);
+        })
+        .finally(() => {
+          if (isMounted) setIsLoadingVariants(false);
         });
     } else {
       setItems(rawParsed);
+      setIsLoadingVariants(false);
     }
-  }, [allItemsRaw, topicUrl, groupid]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [allItemsRaw, topicUrl, groupid, title, publishDate]);
 
   const allItems = items;
 
@@ -269,7 +337,7 @@ const TorrentDetails = () => {
       } else {
         router.push({
           pathname: '/(tabs)/search',
-          params: { query: cleanTitle(title) },
+          params: { query: getMovieSearchTitle(title) },
         } as any);
       }
     }
@@ -436,7 +504,7 @@ const TorrentDetails = () => {
 
         {/* ── Movie Title (Centered & Bold) ── */}
         <View style={styles.titleSection}>
-          <Text style={styles.movieTitleMain}>{cleanTitle(tmdbData?.title || title)}</Text>
+          <Text style={styles.movieTitleMain}>{getMovieSearchTitle(tmdbData?.title || title)}</Text>
         </View>
 
         {/* ── Action Row (Bookmark, Watch Now, Trailer) ── */}
@@ -504,219 +572,6 @@ const TorrentDetails = () => {
           </View>
         ) : null}
 
-        {/* ── Section: Cast & Crew ── */}
-        {tmdbData?.cast && tmdbData.cast.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Cast & Crew</Text>
-            <FlatList
-              data={tmdbData.cast}
-              keyExtractor={(item) => `cast-${item.id}`}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.castListContent}
-              renderItem={({ item }) => (
-                <View style={styles.castCard}>
-                  <View style={styles.castAvatarWrap}>
-                    {item.profileUrl ? (
-                      <Image
-                        source={{ uri: item.profileUrl }}
-                        style={styles.castAvatar}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.castAvatarFallback}>
-                        <Ionicons name="person" size={28} color="#555555" />
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.castName} numberOfLines={2}>
-                    {item.name}
-                  </Text>
-                  {item.character ? (
-                    <Text style={styles.castCharacter} numberOfLines={2}>
-                      {item.character}
-                    </Text>
-                  ) : null}
-                </View>
-              )}
-            />
-          </View>
-        )}
-
-        {/* ── Section: Information ── */}
-        {tmdbData && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Information</Text>
-            <View style={styles.infoTable}>
-              {tmdbData.releaseDateFormatted ? (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Released On:</Text>
-                  <Text style={styles.infoValue}>{tmdbData.releaseDateFormatted}</Text>
-                </View>
-              ) : formattedDate ? (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Released On:</Text>
-                  <Text style={styles.infoValue}>{formattedDate}</Text>
-                </View>
-              ) : null}
-
-              {tmdbData.imdbRating ? (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>IMDB Rating:</Text>
-                  <View style={styles.ratingValueRow}>
-                    <Text style={styles.infoValue}>{tmdbData.imdbRating}</Text>
-                    <Ionicons name="star" size={13} color="#f5c518" style={{ marginLeft: 4 }} />
-                  </View>
-                </View>
-              ) : null}
-
-              {tmdbData.genres ? (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Genre:</Text>
-                  <Text style={styles.infoValue}>{tmdbData.genres}</Text>
-                </View>
-              ) : null}
-
-              {tmdbData.runtimeFormatted ? (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Runtime:</Text>
-                  <Text style={styles.infoValue}>{tmdbData.runtimeFormatted}</Text>
-                </View>
-              ) : null}
-
-              {tmdbData.country ? (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Country:</Text>
-                  <Text style={styles.infoValue}>{tmdbData.country}</Text>
-                </View>
-              ) : null}
-
-              {tmdbData.languages ? (
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Languages:</Text>
-                  <Text style={styles.infoValue}>{tmdbData.languages}</Text>
-                </View>
-              ) : null}
-            </View>
-          </View>
-        )}
-
-        {/* ── Section: Recommended ── */}
-        {tmdbData?.recommended && tmdbData.recommended.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Recommended</Text>
-              <TouchableOpacity
-                style={styles.seeAllRow}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/search',
-                    params: { query: cleanTitle(title) },
-                  } as any)
-                }
-              >
-                <Text style={styles.seeAllText}>See All</Text>
-                <Ionicons name="chevron-forward" size={14} color="#8E8E93" />
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={tmdbData.recommended}
-              keyExtractor={(item) => `rec-${item.id}`}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.mediaListContent}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.mediaCard}
-                  onPress={() => {
-                    router.push({
-                      pathname: '/torrent/details',
-                      params: {
-                        title: item.title,
-                        poster: item.posterUrl || '',
-                      },
-                    });
-                  }}
-                  activeOpacity={0.75}
-                >
-                  <View style={styles.mediaPosterWrap}>
-                    <Image
-                      source={{ uri: item.posterUrl || '' }}
-                      style={styles.mediaPoster}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  <Text style={styles.mediaTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  {item.year ? (
-                    <Text style={styles.mediaYear}>{item.year}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              )}
-            />
-          </View>
-        )}
-
-        {/* ── Section: Similar to this ── */}
-        {tmdbData?.similar && tmdbData.similar.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Similar to this</Text>
-              <TouchableOpacity
-                style={styles.seeAllRow}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/search',
-                    params: { query: cleanTitle(title) },
-                  } as any)
-                }
-              >
-                <Text style={styles.seeAllText}>See All</Text>
-                <Ionicons name="chevron-forward" size={14} color="#8E8E93" />
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={tmdbData.similar}
-              keyExtractor={(item) => `sim-${item.id}`}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.mediaListContent}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.mediaCard}
-                  onPress={() => {
-                    router.push({
-                      pathname: '/torrent/details',
-                      params: {
-                        title: item.title,
-                        poster: item.posterUrl || '',
-                      },
-                    });
-                  }}
-                  activeOpacity={0.75}
-                >
-                  <View style={styles.mediaPosterWrap}>
-                    <Image
-                      source={{ uri: item.posterUrl || '' }}
-                      style={styles.mediaPoster}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  <Text style={styles.mediaTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  {item.year ? (
-                    <Text style={styles.mediaYear}>{item.year}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              )}
-            />
-          </View>
-        )}
-
         {/* ── Section: Choose Quality (Torrents & Downloads) ── */}
         <View
           style={styles.section}
@@ -743,7 +598,7 @@ const TorrentDetails = () => {
           ) : allItems.length > 0 ? (
             <View style={styles.torrentList}>
               {allItems.map((item, index) => {
-                const clean = cleanTitle(item.title);
+                const clean = cleanTorrentTitle(item.title);
                 const qualityTag = extractQualityTag(clean);
                 const isLast = index === allItems.length - 1;
                 const isLoading = loadingItem === item.guid;
@@ -884,21 +739,258 @@ const TorrentDetails = () => {
               })}
             </View>
           ) : (
-            <TouchableOpacity
-              style={styles.searchSourcesBtn}
-              onPress={() => {
-                router.push({
-                  pathname: '/(tabs)/search',
-                  params: { query: cleanTitle(title) },
-                } as any);
-              }}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="search" size={18} color="#ffffff" style={{ marginRight: 8 }} />
-              <Text style={styles.searchSourcesBtnText}>Search Torrent Streams on TamilMV</Text>
-            </TouchableOpacity>
+            <View style={styles.noStreamsContainer}>
+              <Ionicons name="film-outline" size={32} color="#636366" style={{ marginBottom: 8 }} />
+              <Text style={styles.noStreamsText}>No torrent streams directly found on TamilMV</Text>
+              <Text style={styles.noStreamsSubtext}>
+                You can search with alternate keywords or browse TamilMV in the in-app browser
+              </Text>
+              <View style={styles.noStreamsBtnRow}>
+                <TouchableOpacity
+                  style={styles.searchSourcesBtn}
+                  onPress={() => {
+                    router.push({
+                      pathname: '/(tabs)/search',
+                      params: { query: getMovieSearchTitle(title) },
+                    } as any);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="search" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.searchSourcesBtnText}>Search Tab</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.searchSourcesBtn, styles.browserSourcesBtn]}
+                  onPress={() => {
+                    router.push('/(tabs)/browser' as any);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="globe-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                  <Text style={styles.searchSourcesBtnText}>In-App Browser</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           )}
         </View>
+
+        {/* ── Section: Cast & Crew ── */}
+        {tmdbData?.cast && tmdbData.cast.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Cast & Crew</Text>
+            <FlatList
+              data={tmdbData.cast}
+              keyExtractor={(item) => `cast-${item.id}`}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.castListContent}
+              renderItem={({ item }) => (
+                <View style={styles.castCard}>
+                  <View style={styles.castAvatarWrap}>
+                    {item.profileUrl ? (
+                      <Image
+                        source={{ uri: item.profileUrl }}
+                        style={styles.castAvatar}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.castAvatarFallback}>
+                        <Ionicons name="person" size={28} color="#555555" />
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.castName} numberOfLines={2}>
+                    {item.name}
+                  </Text>
+                  {item.character ? (
+                    <Text style={styles.castCharacter} numberOfLines={2}>
+                      {item.character}
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+            />
+          </View>
+        )}
+
+        {/* ── Section: Information ── */}
+        {tmdbData && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Information</Text>
+            <View style={styles.infoTable}>
+              {tmdbData.releaseDateFormatted ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Released On:</Text>
+                  <Text style={styles.infoValue}>{tmdbData.releaseDateFormatted}</Text>
+                </View>
+              ) : formattedDate ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Released On:</Text>
+                  <Text style={styles.infoValue}>{formattedDate}</Text>
+                </View>
+              ) : null}
+
+              {tmdbData.imdbRating ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>IMDB Rating:</Text>
+                  <View style={styles.ratingValueRow}>
+                    <Text style={styles.infoValue}>{tmdbData.imdbRating}</Text>
+                    <Ionicons name="star" size={13} color="#f5c518" style={{ marginLeft: 4 }} />
+                  </View>
+                </View>
+              ) : null}
+
+              {tmdbData.genres ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Genre:</Text>
+                  <Text style={styles.infoValue}>{tmdbData.genres}</Text>
+                </View>
+              ) : null}
+
+              {tmdbData.runtimeFormatted ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Runtime:</Text>
+                  <Text style={styles.infoValue}>{tmdbData.runtimeFormatted}</Text>
+                </View>
+              ) : null}
+
+              {tmdbData.country ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Country:</Text>
+                  <Text style={styles.infoValue}>{tmdbData.country}</Text>
+                </View>
+              ) : null}
+
+              {tmdbData.languages ? (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Languages:</Text>
+                  <Text style={styles.infoValue}>{tmdbData.languages}</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        )}
+
+        {/* ── Section: Recommended ── */}
+        {tmdbData?.recommended && tmdbData.recommended.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Recommended</Text>
+              <TouchableOpacity
+                style={styles.seeAllRow}
+                onPress={() =>
+                  router.push({
+                    pathname: '/(tabs)/search',
+                    params: { query: getMovieSearchTitle(title) },
+                  } as any)
+                }
+              >
+                <Text style={styles.seeAllText}>See All</Text>
+                <Ionicons name="chevron-forward" size={14} color="#8E8E93" />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={tmdbData.recommended}
+              keyExtractor={(item) => `rec-${item.id}`}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.mediaListContent}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.mediaCard}
+                  onPress={() => {
+                    router.push({
+                      pathname: '/torrent/details',
+                      params: {
+                        title: item.title,
+                        poster: item.posterUrl || '',
+                        type: 'movie',
+                        publishDate: item.year ? `${item.year}-01-01` : undefined,
+                      },
+                    });
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <View style={styles.mediaPosterWrap}>
+                    <Image
+                      source={{ uri: item.posterUrl || '' }}
+                      style={styles.mediaPoster}
+                      resizeMode="cover"
+                    />
+                  </View>
+                  <Text style={styles.mediaTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  {item.year ? (
+                    <Text style={styles.mediaYear}>{item.year}</Text>
+                  ) : null}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
+
+        {/* ── Section: Similar to this ── */}
+        {tmdbData?.similar && tmdbData.similar.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Similar to this</Text>
+              <TouchableOpacity
+                style={styles.seeAllRow}
+                onPress={() =>
+                  router.push({
+                    pathname: '/(tabs)/search',
+                    params: { query: getMovieSearchTitle(title) },
+                  } as any)
+                }
+              >
+                <Text style={styles.seeAllText}>See All</Text>
+                <Ionicons name="chevron-forward" size={14} color="#8E8E93" />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={tmdbData.similar}
+              keyExtractor={(item) => `sim-${item.id}`}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.mediaListContent}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.mediaCard}
+                  onPress={() => {
+                    router.push({
+                      pathname: '/torrent/details',
+                      params: {
+                        title: item.title,
+                        poster: item.posterUrl || '',
+                        type: 'movie',
+                        publishDate: item.year ? `${item.year}-01-01` : undefined,
+                      },
+                    });
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <View style={styles.mediaPosterWrap}>
+                    <Image
+                      source={{ uri: item.posterUrl || '' }}
+                      style={styles.mediaPoster}
+                      resizeMode="cover"
+                    />
+                  </View>
+                  <Text style={styles.mediaTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  {item.year ? (
+                    <Text style={styles.mediaYear}>{item.year}</Text>
+                  ) : null}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
 
         <BottomSpacing space={60} />
       </ScrollView>
@@ -1470,14 +1562,47 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(83, 90, 255, 0.15)',
     borderWidth: 1,
     borderColor: '#535aff',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 12,
   },
   searchSourcesBtnText: {
     fontSize: 14,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  browserSourcesBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+
+  noStreamsContainer: {
+    backgroundColor: '#1c1c1e',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2c2c2e',
+  },
+  noStreamsText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ffffff',
+    textAlign: 'center',
+  },
+  noStreamsSubtext: {
+    fontSize: 13,
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  noStreamsBtnRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
   },
 
   /* Modal */

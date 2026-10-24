@@ -4,7 +4,7 @@ workflows:
   tmv-ios-build:
     name: TMV iOS Build
     environment:
-      node: 18
+      node: 20
       xcode: latest
       groups:
         - EXPO
@@ -30,7 +30,7 @@ workflows:
           else
             echo "⚠️  app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=Tmv" >> $CM_ENV
+            echo "APP_NAME=VStreamOnline" >> $CM_ENV
           fi
       
       - name: Fix expo-updates
@@ -52,6 +52,14 @@ workflows:
       - name: Install iOS dependencies
         script: |
           cd ios
+          # Ensure CocoaPods targets have SKIP_INSTALL=YES so archive doesn't fail as generic archive
+          ruby -e '
+            p = File.read("Podfile")
+            unless p.include?("SKIP_INSTALL")
+              p += "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings[\"SKIP_INSTALL\"] = \"YES\"\n    end\n  end\nend\n"
+              File.write("Podfile", p)
+            end
+          '
           pod install --repo-update
 
       - name: Download Metal Toolchain
@@ -62,6 +70,9 @@ workflows:
       
       - name: Build with Xcode (unsigned)
         script: |
+          set -e
+          set -o pipefail
+
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
           if [ -z "$WORKSPACE" ]; then
@@ -71,47 +82,95 @@ workflows:
           
           SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
           echo "📱 Building scheme: $SCHEME_NAME"
-          
+
+          rm -rf build
+          mkdir -p "build/DerivedData"
+
+          # 1. Archive unsigned with custom DerivedData
           xcodebuild -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             -destination generic/platform=iOS \
+            -derivedDataPath "build/DerivedData" \
             -archivePath "build/$SCHEME_NAME.xcarchive" \
             archive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            SWIFT_VERSION=5.0
+            DEVELOPMENT_TEAM="" || {
+              echo "⚠️  Archive action failed. Building directly via xcodebuild build..."
+              xcodebuild -workspace "$WORKSPACE" \
+                -scheme "$SCHEME_NAME" \
+                -configuration Release \
+                -destination generic/platform=iOS \
+                -sdk iphoneos \
+                -derivedDataPath "build/DerivedData" \
+                CODE_SIGN_IDENTITY="" \
+                CODE_SIGNING_REQUIRED=NO \
+                CODE_SIGNING_ALLOWED=NO \
+                build
+            }
 
-          mkdir -p "build/Payload"
-          cp -r "build/$SCHEME_NAME.xcarchive/Products/Applications/"*.app "build/Payload/"
-
-          APP_BUNDLE=$(ls "build/Payload/" | head -1)
-          BASE_NAME="${APP_BUNDLE%.app}"
-          echo "📱 App bundle: $APP_BUNDLE"
-
-          IPA_NAME="${APP_NAME}_v${APP_VERSION}"
-          echo "📦 IPA name: $IPA_NAME"
-
-          EXECUTABLE=$(plutil -extract CFBundleExecutable raw "build/Payload/$APP_BUNDLE/Info.plist" 2>/dev/null || echo "$BASE_NAME")
-          if [ ! -f "build/Payload/$APP_BUNDLE/$EXECUTABLE" ]; then
-            echo "⚠️  Warning: Executable $EXECUTABLE not found"
-          else
-            echo "✅ Executable found: $EXECUTABLE"
+          # 2. Locate the compiled .app bundle across all output paths
+          APP_PATH=""
+          if [ -d "build/$SCHEME_NAME.xcarchive/Products/Applications/$SCHEME_NAME.app" ]; then
+            APP_PATH="build/$SCHEME_NAME.xcarchive/Products/Applications/$SCHEME_NAME.app"
+          elif [ -d "build/$SCHEME_NAME.xcarchive/Products/Applications" ] && [ -n "$(find "build/$SCHEME_NAME.xcarchive/Products/Applications" -name "*.app" 2>/dev/null | head -1)" ]; then
+            APP_PATH=$(find "build/$SCHEME_NAME.xcarchive/Products/Applications" -name "*.app" -maxdepth 1 | head -1)
           fi
 
-          cd build
-          zip -r "$IPA_NAME.ipa" Payload/
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "🔍 Searching in build/DerivedData/Build/Products/Release-iphoneos..."
+            APP_PATH=$(find "build/DerivedData/Build/Products/Release-iphoneos" -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+          fi
 
-          if [ -f "$IPA_NAME.ipa" ]; then
-            echo "✅ IPA created successfully: $IPA_NAME.ipa"
-            echo "📊 IPA size: $(ls -lh "$IPA_NAME.ipa" | awk '{print $5}')"
-            ln -sf "$IPA_NAME.ipa" "latest.ipa"
-          else
-            echo "❌ Failed to create IPA"
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "🔍 Searching anywhere in build/ for .app..."
+            APP_PATH=$(find "build" -name "*.app" -type d 2>/dev/null | grep -i "iphoneos" | head -1)
+          fi
+
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "❌ Error: Could not locate built .app bundle! Compilation must have failed."
             exit 1
           fi
+
+          echo "📱 Found app bundle at: $APP_PATH"
+          APP_BUNDLE=$(basename "$APP_PATH")
+
+          # 3. Create Payload directory and copy the real .app bundle
+          rm -rf "build/Payload"
+          mkdir -p "build/Payload"
+          cp -R "$APP_PATH" "build/Payload/"
+
+          if [ ! -d "build/Payload/$APP_BUNDLE" ]; then
+            echo "❌ Error: Failed to copy app bundle into build/Payload!"
+            exit 1
+          fi
+
+          IPA_NAME="${APP_NAME}_v${APP_VERSION}"
+          echo "📦 Packaging IPA: $IPA_NAME.ipa"
+
+          # 4. Zip Payload to construct the unsigned .ipa
+          cd build
+          rm -f "$IPA_NAME.ipa"
+          zip -r -y "$IPA_NAME.ipa" Payload/
+
+          if [ ! -f "$IPA_NAME.ipa" ]; then
+            echo "❌ Error: Failed to create $IPA_NAME.ipa"
+            exit 1
+          fi
+
+          IPA_SIZE=$(wc -c < "$IPA_NAME.ipa" | tr -d ' ')
+          echo "📊 IPA size: $(ls -lh "$IPA_NAME.ipa" | awk '{print $5}') ($IPA_SIZE bytes)"
+
+          # Validate size: a real React Native + KSPlayer IPA is > 10 MB. 160 bytes means empty!
+          if [ "$IPA_SIZE" -lt 1000000 ]; then
+            echo "❌ Error: Resulting IPA is suspiciously small ($IPA_SIZE bytes). Build failed."
+            exit 1
+          fi
+
+          ln -sf "$IPA_NAME.ipa" "latest.ipa"
+          echo "✅ Production IPA created successfully: $IPA_NAME.ipa"
     
     artifacts:
       - ios/build/*.ipa
@@ -120,7 +179,7 @@ workflows:
   tmv-ios-dev:
     name: TMV iOS Development Build
     environment:
-      node: 18
+      node: 20
       xcode: latest
       groups:
         - EXPO
@@ -143,7 +202,7 @@ workflows:
           else
             echo "⚠️  app.json not found, using defaults"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=Tmv" >> $CM_ENV
+            echo "APP_NAME=VStreamOnline" >> $CM_ENV
           fi
 
       - name: Fix expo-updates
@@ -165,6 +224,14 @@ workflows:
       - name: Install iOS dependencies
         script: |
           cd ios
+          # Ensure CocoaPods targets have SKIP_INSTALL=YES so archive doesn't fail as generic archive
+          ruby -e '
+            p = File.read("Podfile")
+            unless p.include?("SKIP_INSTALL")
+              p += "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings[\"SKIP_INSTALL\"] = \"YES\"\n    end\n  end\nend\n"
+              File.write("Podfile", p)
+            end
+          '
           pod install --repo-update
 
       - name: Download Metal Toolchain
@@ -175,41 +242,103 @@ workflows:
 
       - name: Build with Xcode (Debug, unsigned)
         script: |
+          set -e
+          set -o pipefail
+
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
+          if [ -z "$WORKSPACE" ]; then
+            echo "❌ No .xcworkspace found"
+            exit 1
+          fi
+          
           SCHEME_NAME=$(basename "$WORKSPACE" .xcworkspace)
-
           echo "📱 Building development scheme: $SCHEME_NAME"
+
+          rm -rf build
+          mkdir -p "build/DerivedData"
 
           xcodebuild -workspace "$WORKSPACE" \
             -scheme "$SCHEME_NAME" \
             -configuration Debug \
             -destination generic/platform=iOS \
+            -derivedDataPath "build/DerivedData" \
             -archivePath "build/$SCHEME_NAME-dev.xcarchive" \
             archive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            SWIFT_VERSION=5.0
+            DEVELOPMENT_TEAM="" || {
+              echo "⚠️  Archive action failed. Building directly via xcodebuild build..."
+              xcodebuild -workspace "$WORKSPACE" \
+                -scheme "$SCHEME_NAME" \
+                -configuration Debug \
+                -destination generic/platform=iOS \
+                -sdk iphoneos \
+                -derivedDataPath "build/DerivedData" \
+                CODE_SIGN_IDENTITY="" \
+                CODE_SIGNING_REQUIRED=NO \
+                CODE_SIGNING_ALLOWED=NO \
+                build
+            }
 
-          mkdir -p build/Payload
-          cp -r build/$SCHEME_NAME-dev.xcarchive/Products/Applications/*.app build/Payload/
+          APP_PATH=""
+          if [ -d "build/$SCHEME_NAME-dev.xcarchive/Products/Applications/$SCHEME_NAME.app" ]; then
+            APP_PATH="build/$SCHEME_NAME-dev.xcarchive/Products/Applications/$SCHEME_NAME.app"
+          elif [ -d "build/$SCHEME_NAME-dev.xcarchive/Products/Applications" ] && [ -n "$(find "build/$SCHEME_NAME-dev.xcarchive/Products/Applications" -name "*.app" 2>/dev/null | head -1)" ]; then
+            APP_PATH=$(find "build/$SCHEME_NAME-dev.xcarchive/Products/Applications" -name "*.app" -maxdepth 1 | head -1)
+          fi
 
-          APP_BUNDLE=$(ls build/Payload/ | head -1)
-          IPA_NAME="${APP_NAME}_Dev_v${APP_VERSION}"
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "🔍 Searching in build/DerivedData/Build/Products/Debug-iphoneos..."
+            APP_PATH=$(find "build/DerivedData/Build/Products/Debug-iphoneos" -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+          fi
 
-          cd build
-          zip -r "$IPA_NAME.ipa" Payload/
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "🔍 Searching anywhere in build/ for .app..."
+            APP_PATH=$(find "build" -name "*.app" -type d 2>/dev/null | grep -i "iphoneos" | head -1)
+          fi
 
-          if [ -f "$IPA_NAME.ipa" ]; then
-            echo "✅ Development IPA created: $IPA_NAME.ipa"
-            ln -sf "$IPA_NAME.ipa" "latest-dev.ipa"
-          else
-            echo "❌ Failed to create Development IPA"
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "❌ Error: Could not locate built .app bundle! Compilation failed."
             exit 1
           fi
 
+          echo "📱 Found app bundle at: $APP_PATH"
+          APP_BUNDLE=$(basename "$APP_PATH")
+
+          rm -rf "build/Payload"
+          mkdir -p "build/Payload"
+          cp -R "$APP_PATH" "build/Payload/"
+
+          if [ ! -d "build/Payload/$APP_BUNDLE" ]; then
+            echo "❌ Error: Failed to copy app bundle into build/Payload!"
+            exit 1
+          fi
+
+          IPA_NAME="${APP_NAME}_Dev_v${APP_VERSION}"
+          echo "📦 Packaging IPA: $IPA_NAME.ipa"
+
+          cd build
+          rm -f "$IPA_NAME.ipa"
+          zip -r -y "$IPA_NAME.ipa" Payload/
+
+          if [ ! -f "$IPA_NAME.ipa" ]; then
+            echo "❌ Error: Failed to create $IPA_NAME.ipa"
+            exit 1
+          fi
+
+          IPA_SIZE=$(wc -c < "$IPA_NAME.ipa" | tr -d ' ')
+          echo "📊 IPA size: $(ls -lh "$IPA_NAME.ipa" | awk '{print $5}') ($IPA_SIZE bytes)"
+
+          if [ "$IPA_SIZE" -lt 1000000 ]; then
+            echo "❌ Error: Resulting IPA is suspiciously small ($IPA_SIZE bytes). Build failed."
+            exit 1
+          fi
+
+          ln -sf "$IPA_NAME.ipa" "latest-dev.ipa"
+          echo "✅ Development IPA created successfully: $IPA_NAME.ipa"
+    
     artifacts:
       - ios/build/*.ipa
 
@@ -218,7 +347,7 @@ workflows:
   tmv-android-build:
     name: TMV Android Build
     environment:
-      node: 18
+      node: 20
       java: latest
       groups:
         - EXPO
@@ -239,11 +368,13 @@ workflows:
           else
             echo "⚠️  app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=Tmv" >> $CM_ENV
+            echo "APP_NAME=VStreamOnline" >> $CM_ENV
           fi
 
       - name: Clean and generate Android project
         script: |
+          set -e
+          set -o pipefail
           rm -rf ios android
           npm install -g @expo/cli@latest --force
           npx expo prebuild --platform android
@@ -260,6 +391,9 @@ workflows:
 
       - name: Build Android release
         script: |
+          set -e
+          set -o pipefail
+
           cd android
           if [ "$UNSIGNED_BUILD" = "true" ]; then
             echo "📦 Building unsigned release APK"
@@ -277,10 +411,25 @@ workflows:
             BUILD_OUTPUT="app/build/outputs/apk/release"
           fi
 
+          APK_FILE=""
           if [ -f "$BUILD_OUTPUT/app-release.apk" ]; then
+            APK_FILE="$BUILD_OUTPUT/app-release.apk"
+          elif [ -f "$BUILD_OUTPUT/app-release-unsigned.apk" ]; then
+            APK_FILE="$BUILD_OUTPUT/app-release-unsigned.apk"
+          else
+            APK_FILE=$(find "$BUILD_OUTPUT" -name "*.apk" 2>/dev/null | head -1)
+          fi
+
+          if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
             APK_NAME="${APP_NAME}_v${APP_VERSION}_release.apk"
-            cp "$BUILD_OUTPUT/app-release.apk" "../$APK_NAME"
+            cp "$APK_FILE" "../$APK_NAME"
             echo "✅ Release APK created: $APK_NAME"
+            APK_SIZE=$(wc -c < "../$APK_NAME" | tr -d ' ')
+            echo "📊 APK size: $(ls -lh "../$APK_NAME" | awk '{print $5}') ($APK_SIZE bytes)"
+            if [ "$APK_SIZE" -lt 5000000 ]; then
+              echo "❌ Error: APK size is suspiciously small ($APK_SIZE bytes)"
+              exit 1
+            fi
             ln -sf "$APK_NAME" "../latest-release.apk"
           else
             echo "❌ Failed to create release APK"
@@ -289,6 +438,9 @@ workflows:
 
       - name: Build Android App Bundle
         script: |
+          set -e
+          set -o pipefail
+
           cd android
           if [ "$UNSIGNED_BUILD" = "true" ]; then
             ./gradlew bundleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true
@@ -320,7 +472,7 @@ workflows:
   tmv-android-dev:
     name: TMV Android Development Build
     environment:
-      node: 18
+      node: 20
       java: latest
       groups:
         - EXPO
@@ -340,17 +492,22 @@ workflows:
           else
             echo "⚠️  app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=Tmv" >> $CM_ENV
+            echo "APP_NAME=VStreamOnline" >> $CM_ENV
           fi
 
       - name: Clean and generate Android project
         script: |
+          set -e
+          set -o pipefail
           rm -rf ios android
           npm install -g @expo/cli@latest --force
           npx expo prebuild --platform android
 
       - name: Build Android debug APK
         script: |
+          set -e
+          set -o pipefail
+
           cd android
           ./gradlew assembleDebug -x configureCMakeDebug -Pandroid.overridePathCheck=true
 
@@ -360,6 +517,12 @@ workflows:
             APK_NAME="${APP_NAME}_Dev_v${APP_VERSION}_debug.apk"
             cp "$BUILD_OUTPUT/app-debug.apk" "../$APK_NAME"
             echo "✅ Debug APK created: $APK_NAME"
+            APK_SIZE=$(wc -c < "../$APK_NAME" | tr -d ' ')
+            echo "📊 APK size: $(ls -lh "../$APK_NAME" | awk '{print $5}') ($APK_SIZE bytes)"
+            if [ "$APK_SIZE" -lt 5000000 ]; then
+              echo "❌ Error: APK size is suspiciously small ($APK_SIZE bytes)"
+              exit 1
+            fi
             ln -sf "$APK_NAME" "../latest-debug.apk"
           else
             echo "❌ Failed to create debug APK"

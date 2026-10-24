@@ -58,11 +58,11 @@ const withKSPlayerPod = (config) => {
 
       // ── post_install: merge RN static linkage fix into existing block ─────────
       const ksplayerPostInstallCode = `
-  # [withKSPlayer] Allow non-modular includes — needed for KSPlayer Swift/ObjC interop
-  # when use_frameworks! :linkage => :static is active
+  # [withKSPlayer] Allow non-modular includes and prevent generic archive failure
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      config.build_settings['SKIP_INSTALL'] = 'YES'
     end
   end
 `;

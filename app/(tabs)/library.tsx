@@ -20,6 +20,7 @@ import { confirmAction } from '@/utils/platform';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { myListService, MyListItem } from '@/services/MyListService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
+import { tmdbService } from '@/services/TmdbService';
 
 // ── Watch history shape — must match what MediaPlayerScreen writes ────────────
 interface WatchHistoryItem {
@@ -72,6 +73,21 @@ const LibraryScreen: React.FC = () => {
             unsubMyList();
         };
     }, []);
+
+    // Automatically resolve missing posters for downloads in background via TMDB
+    useEffect(() => {
+        downloads.forEach((item) => {
+            if (!item.poster || !item.poster.trim()) {
+                tmdbService.getMovieFullInfo(item.title)
+                    .then((info) => {
+                        if (info?.posterUrl) {
+                            downloadService.updateItemPoster(item.infoHash, info.posterUrl);
+                        }
+                    })
+                    .catch(() => {});
+            }
+        });
+    }, [downloads]);
 
     // ── Data ──────────────────────────────────────────────────────────────────────
 
@@ -335,7 +351,13 @@ const LibraryScreen: React.FC = () => {
 
                         return (
                             <View key={item.id} style={styles.activeDownloadCard}>
-                                <Image source={{ uri: item.poster }} style={styles.activePoster} resizeMode="cover" />
+                                {item.poster && item.poster.trim() ? (
+                                    <Image source={{ uri: item.poster }} style={styles.activePoster} resizeMode="cover" />
+                                ) : (
+                                    <View style={[styles.activePoster, styles.posterFallback]}>
+                                        <Ionicons name="film-outline" size={24} color="#8E8E93" />
+                                    </View>
+                                )}
 
                                 <View style={styles.activeInfo}>
                                     <Text style={styles.activeTitle} numberOfLines={1}>
@@ -740,11 +762,17 @@ const LibraryScreen: React.FC = () => {
                                 onPress={() => handleMyListItemDetails(item)}
                                 activeOpacity={0.8}
                             >
-                                <Image
-                                    source={{ uri: item.poster }}
-                                    style={styles.posterImage}
-                                    resizeMode="cover"
-                                />
+                                {item.poster && item.poster.trim() ? (
+                                    <Image
+                                        source={{ uri: item.poster }}
+                                        style={styles.posterImage}
+                                        resizeMode="cover"
+                                    />
+                                ) : (
+                                    <View style={[styles.posterImage, styles.posterFallback]}>
+                                        <Ionicons name="film-outline" size={32} color="#8E8E93" />
+                                    </View>
+                                )}
 
                                 {/* 1-Tap Play Overlay */}
                                 <TouchableOpacity
@@ -1017,6 +1045,11 @@ const styles = StyleSheet.create({
         height: 90,
         borderRadius: 8,
         backgroundColor: '#101010',
+    },
+    posterFallback: {
+        backgroundColor: '#1c1c1e',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     activeInfo: {
         flex: 1,
