@@ -29,7 +29,14 @@
           "NSAllowsLocalNetworking": true
         },
         "UIFileSharingEnabled": true,
-        "LSSupportsOpeningDocumentsInPlace": true
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "LSApplicationQueriesSchemes": [
+          "vlc",
+          "vlc-x-callback",
+          "infuse",
+          "outplayer",
+          "open-vidhub"
+        ]
       }
     },
     "android": {

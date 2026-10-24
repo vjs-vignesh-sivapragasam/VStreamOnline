@@ -19,7 +19,13 @@ const SettingsScreen = () => {
   ];
 
   const integrationList: { title: string, route: string, icon: keyof typeof Ionicons.glyphMap }[] = [
+    { title: 'TMDB (Movies & Trailers)', route: '/settings/tmdb', icon: 'film-outline' },
     { title: 'Stremio', route: '/settings/stremioserver', icon: 'magnet-outline' },
+    { title: 'OpenSubtitles', route: '/settings/opensubtitles', icon: 'chatbox-ellipses-outline' },
+  ];
+
+  const generalList: { title: string, route: string, icon: keyof typeof Ionicons.glyphMap }[] = [
+    { title: 'About Us', route: '/settings/about', icon: 'information-circle-outline' },
   ];
 
   const SettingItem = ({
@@ -132,6 +138,27 @@ const SettingsScreen = () => {
                   onPress={() => onSettingsItemPress(item)}
                   isFirst={index === 0}
                   isLast={index === integrationList.length - 1}
+                />
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* General / About Section */}
+        {generalList.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionHeader}>
+              ABOUT & INFO
+            </Text>
+            <View style={styles.settingsGroup}>
+              {generalList.map((item, index) => (
+                <SettingItem
+                  key={index}
+                  title={item.title}
+                  icon={item.icon}
+                  onPress={() => onSettingsItemPress(item)}
+                  isFirst={index === 0}
+                  isLast={index === generalList.length - 1}
                 />
               ))}
             </View>

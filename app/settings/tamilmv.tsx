@@ -24,15 +24,19 @@ import {
   setTamilMVBaseUrl,
   resetTamilMVBaseUrl,
   autoDiscoverWorkingDomain,
+  autoDetectTamilMVDomain,
   pingTamilMV,
   PingResult,
 } from '@/hooks/useTamilMv';
 
 const PRESET_DOMAINS = [
-  'https://www.1tamilmv.com',
+  'https://www.1tamilmv.solar',
+  'https://www.1tamilmv.cards',
+  'https://www.1tamilmv.pizza',
+  'https://www.1tamilmv.fi',
+  'https://www.1tamilmv.live',
   'https://www.1tamilmv.pm',
   'https://www.1tamilmv.yt',
-  'https://www.1tamilmv.tf',
   'https://www.1tamilmv.mx',
 ];
 
@@ -41,6 +45,8 @@ const TamilMvSettingsScreen: React.FC = () => {
   const [urlInput, setUrlInput] = useState<string>(DEFAULT_TAMILMV_BASE_URL);
   const [isPinging, setIsPinging] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isAutoDetecting, setIsAutoDetecting] = useState<boolean>(false);
+  const [detectProgressText, setDetectProgressText] = useState<string>('');
   const [pingResult, setPingResult] = useState<PingResult | null>(null);
   const [lastPingedUrl, setLastPingedUrl] = useState<string | null>(null);
 
@@ -90,23 +96,34 @@ const TamilMvSettingsScreen: React.FC = () => {
     await runPing(candidate);
   };
 
-  const handleAutoDetect = async () => {
-    await triggerHaptic();
-    setIsPinging(true);
+  const handleAutoDetectDomain = async () => {
+    await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    setIsAutoDetecting(true);
+    setDetectProgressText('Searching Google in background for TamilMV...');
     try {
-      const working = await autoDiscoverWorkingDomain();
+      const working = await autoDetectTamilMVDomain((status) => {
+        setDetectProgressText(status);
+      });
+
       if (working) {
         setActiveUrl(working);
         setUrlInput(working);
-        showAlert('Working Mirror Found', `Discovered and saved active mirror to AsyncStorage:\n${working}`);
+        showAlert(
+          'Domain Auto-Configured',
+          `Successfully detected active TamilMV domain via Google search:\n\n${working}\n\nConfigured and saved to AsyncStorage.`
+        );
         await runPing(working);
       } else {
-        showAlert('Auto-Detect Failed', 'None of the known TamilMV mirrors responded. Please check your internet connection or enter a custom mirror URL.');
+        showAlert(
+          'Auto-Detect Failed',
+          'Could not find an active domain from Google search or online resolvers. Please check your internet connection or select a preset mirror below.'
+        );
       }
     } catch (e: any) {
-      showAlert('Error', e?.message || 'Failed to auto-detect working mirror');
+      showAlert('Auto-Detect Error', e?.message || 'Failed to auto-detect working domain');
     } finally {
-      setIsPinging(false);
+      setIsAutoDetecting(false);
+      setDetectProgressText('');
     }
   };
 
@@ -301,6 +318,52 @@ const TamilMvSettingsScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
 
+          {/* Auto-Detect Working Domain Card */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardSectionTitle}>AUTO-DETECT DOMAIN</Text>
+              <View style={styles.autoDetectBadge}>
+                <Ionicons name="sparkles" size={12} color="#535aff" style={{ marginRight: 4 }} />
+                <Text style={styles.autoDetectBadgeText}>Google Search</Text>
+              </View>
+            </View>
+
+            <Text style={styles.cardDescription}>
+              If TamilMV changes its domain or your current base URL is blocked, tap below. The app will search Google in the background, identify the live working domain, verify its availability, and automatically configure it.
+            </Text>
+
+            {isAutoDetecting && (
+              <View style={styles.detectingProgressBox}>
+                <ActivityIndicator size="small" color="#535aff" style={{ marginRight: 10 }} />
+                <Text style={styles.detectingProgressText} numberOfLines={2}>
+                  {detectProgressText || 'Detecting working domain...'}
+                </Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.autoDetectPrimaryBtn,
+                (isAutoDetecting || isPinging) && styles.buttonDisabled,
+              ]}
+              onPress={handleAutoDetectDomain}
+              disabled={isAutoDetecting || isPinging}
+              activeOpacity={0.8}
+            >
+              {isAutoDetecting ? (
+                <>
+                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                  <Text style={styles.autoDetectPrimaryBtnText}>Detecting Working Domain...</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="search" size={18} color="#ffffff" style={{ marginRight: 8 }} />
+                  <Text style={styles.autoDetectPrimaryBtnText}>Auto-Detect Domain</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+
           {/* Configuration Card */}
           <View style={styles.card}>
             <Text style={styles.cardSectionTitle}>BASE URL SETTINGS</Text>
@@ -313,7 +376,7 @@ const TamilMvSettingsScreen: React.FC = () => {
                   style={styles.textInput}
                   value={urlInput}
                   onChangeText={setUrlInput}
-                  placeholder="https://www.1tamilmv.com"
+                  placeholder="https://www.1tamilmv.solar"
                   placeholderTextColor="#666666"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -354,16 +417,6 @@ const TamilMvSettingsScreen: React.FC = () => {
 
             {/* Action Buttons */}
             <View style={styles.actionsContainer}>
-              <TouchableOpacity
-                style={[styles.autoDetectButton, isPinging && styles.buttonDisabled]}
-                onPress={handleAutoDetect}
-                disabled={isPinging}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="flash-outline" size={18} color="#ffd60a" style={{ marginRight: 6 }} />
-                <Text style={styles.autoDetectButtonText}>Auto-Find Working Mirror</Text>
-              </TouchableOpacity>
-
               <TouchableOpacity
                 style={[styles.saveButton, isSaving && styles.buttonDisabled]}
                 onPress={handleSave}
@@ -456,6 +509,61 @@ const styles = StyleSheet.create({
     borderColor: '#242424',
     padding: 16,
     marginBottom: 16,
+  },
+  cardDescription: {
+    fontSize: 13,
+    color: '#8E8E93',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  autoDetectBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(83, 90, 255, 0.12)',
+    borderColor: 'rgba(83, 90, 255, 0.3)',
+    borderWidth: 1,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  autoDetectBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#7b82ff',
+  },
+  autoDetectPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#535aff',
+    paddingVertical: 13,
+    borderRadius: 10,
+    shadowColor: '#535aff',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  autoDetectPrimaryBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  detectingProgressBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#181818',
+    borderWidth: 1,
+    borderColor: 'rgba(83, 90, 255, 0.3)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
+  },
+  detectingProgressText: {
+    fontSize: 13,
+    color: '#ffffff',
+    fontWeight: '500',
+    flex: 1,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -617,21 +725,6 @@ const styles = StyleSheet.create({
   actionsContainer: {
     gap: 10,
     marginTop: 4,
-  },
-  autoDetectButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 214, 10, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 214, 10, 0.35)',
-    paddingVertical: 12,
-    borderRadius: 10,
-  },
-  autoDetectButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffd60a',
   },
   saveButton: {
     flexDirection: 'row',

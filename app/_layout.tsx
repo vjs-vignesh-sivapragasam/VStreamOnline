@@ -9,6 +9,7 @@ import { View, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
+import { PlayerSelectionModal } from '@/components/PlayerSelectionModal';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -190,6 +191,7 @@ function RootLayoutNav() {
               }}
             />
           </Stack>
+          <PlayerSelectionModal />
         </ThemeProvider>
       </ActionSheetProvider>
     </View>

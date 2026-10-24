@@ -1,9 +1,10 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   FlatList,
   Image,
   StyleSheet,
   Pressable,
+  TouchableOpacity,
   useWindowDimensions,
   View as RNView,
 } from 'react-native';
@@ -15,6 +16,7 @@ import { isHapticsSupported } from '@/utils/platform';
 import { DefaultPosterImgXml } from '@/utils/Svg';
 import { Ionicons } from '@expo/vector-icons';
 import { TorrentItem, GroupedItem, Language, Category } from '@/hooks/useTamilMv';
+import { myListService } from '@/services/MyListService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +67,34 @@ const PosterItem = ({
 }) => {
   const [imgError, setImgError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
+  const [inList, setInList] = useState(() => myListService.isInMyList(item.name));
+
+  useEffect(() => {
+    setInList(myListService.isInMyList(item.name));
+    return myListService.subscribe(() => {
+      setInList(myListService.isInMyList(item.name));
+    });
+  }, [item.name]);
+
+  const handleToggleMyList = async (e: any) => {
+    e.stopPropagation?.();
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    const added = await myListService.toggleMyList({
+      id: item.name,
+      title: item.name,
+      poster: item.poster ?? '',
+      publishDate: item.publishDate,
+      type: item.type,
+      guid: item.guid,
+      groupid: item.groupid,
+      infoHash: item.infoHash,
+      magnetUrl: item.magnetUrl,
+      allItems: item.allItems,
+    });
+    setInList(added);
+  };
 
   const handlePress = async () => {
     if (await isHapticsSupported()) {
@@ -97,23 +127,38 @@ const PosterItem = ({
         isPressed && styles.posterPressed,
       ]}
     >
-      {item.poster && !imgError ? (
-        <Image
-          source={{ uri: item.poster }}
-          onError={() => setImgError(true)}
-          style={[styles.posterImage, { width: posterWidth, height: posterHeight }]}
-          resizeMode="cover"
-        />
-      ) : (
-        <View
-          style={[
-            styles.posterImage,
-            { width: posterWidth, height: posterHeight, justifyContent: 'center', alignItems: 'center' },
-          ]}
+      <View style={{ position: 'relative' }}>
+        {item.poster && !imgError ? (
+          <Image
+            source={{ uri: item.poster }}
+            onError={() => setImgError(true)}
+            style={[styles.posterImage, { width: posterWidth, height: posterHeight }]}
+            resizeMode="cover"
+          />
+        ) : (
+          <View
+            style={[
+              styles.posterImage,
+              { width: posterWidth, height: posterHeight, justifyContent: 'center', alignItems: 'center' },
+            ]}
+          >
+            <SvgXml xml={DefaultPosterImgXml} />
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={[styles.bookmarkBadge, inList && styles.bookmarkBadgeActive]}
+          onPress={handleToggleMyList}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          activeOpacity={0.7}
         >
-          <SvgXml xml={DefaultPosterImgXml} />
-        </View>
-      )}
+          <Ionicons
+            name={inList ? 'bookmark' : 'bookmark-outline'}
+            size={13}
+            color={inList ? '#ffffff' : 'rgba(255,255,255,0.7)'}
+          />
+        </TouchableOpacity>
+      </View>
       <Text numberOfLines={2} style={[styles.posterTitle, { width: posterWidth }]}>
         {item.name}
       </Text>
@@ -318,6 +363,21 @@ const styles = StyleSheet.create({
     height: 14,
     backgroundColor: '#101010',
     borderRadius: 6,
+  },
+  bookmarkBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderRadius: 14,
+    padding: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    zIndex: 10,
+  },
+  bookmarkBadgeActive: {
+    backgroundColor: 'rgba(83, 90, 255, 0.85)',
+    borderColor: '#535aff',
   },
 });
 

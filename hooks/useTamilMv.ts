@@ -7,13 +7,18 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Base URL & Constants ─────────────────────────────────────────────────────
 
-export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.com';
+export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.solar';
 
 export const KNOWN_TAMILMV_MIRRORS = [
+  'https://www.1tamilmv.solar',
+  'https://www.1tamilmv.cards',
+  'https://www.1tamilmv.pizza',
+  'https://www.1tamilmv.fi',
+  'https://www.1tamilmv.live',
   'https://www.1tamilmv.pm',
   'https://www.1tamilmv.yt',
-  'https://www.1tamilmv.tf',
   'https://www.1tamilmv.mx',
+  'https://www.1tamilmv.tf',
   'https://www.1tamilmv.com',
 ];
 
@@ -43,8 +48,10 @@ let cachedTamilMVBaseUrl: string = DEFAULT_TAMILMV_BASE_URL;
 // 1. Initial attempt from synchronous storage (if available)
 try {
   const customUrl = storageService.getItem(StorageKeys.TAMILMV_BASE_URL_KEY);
-  if (customUrl && customUrl.trim()) {
+  if (customUrl && customUrl.trim() && customUrl.trim() !== 'https://www.1tamilmv.com') {
     cachedTamilMVBaseUrl = customUrl.trim().replace(/\/+$/, '');
+  } else {
+    cachedTamilMVBaseUrl = DEFAULT_TAMILMV_BASE_URL;
   }
 } catch (e) {
   console.warn('Failed to read TamilMV base URL from storageService', e);
@@ -53,7 +60,7 @@ try {
 // 2. Hydrate from AsyncStorage immediately so domain persists across app reloads/restarts
 AsyncStorage.getItem(StorageKeys.TAMILMV_BASE_URL_KEY)
   .then(storedUrl => {
-    if (storedUrl && storedUrl.trim()) {
+    if (storedUrl && storedUrl.trim() && storedUrl.trim() !== 'https://www.1tamilmv.com') {
       const sanitized = storedUrl.trim().replace(/\/+$/, '');
       if (sanitized !== cachedTamilMVBaseUrl) {
         cachedTamilMVBaseUrl = sanitized;
@@ -62,6 +69,13 @@ AsyncStorage.getItem(StorageKeys.TAMILMV_BASE_URL_KEY)
         } catch {}
         notifyBaseUrlChanged(sanitized);
       }
+    } else {
+      cachedTamilMVBaseUrl = DEFAULT_TAMILMV_BASE_URL;
+      try {
+        storageService.setItem(StorageKeys.TAMILMV_BASE_URL_KEY, DEFAULT_TAMILMV_BASE_URL);
+      } catch {}
+      AsyncStorage.setItem(StorageKeys.TAMILMV_BASE_URL_KEY, DEFAULT_TAMILMV_BASE_URL).catch(() => {});
+      notifyBaseUrlChanged(DEFAULT_TAMILMV_BASE_URL);
     }
   })
   .catch(err => {
@@ -305,30 +319,246 @@ async function pingFallbackRoot(baseUrl: string, elapsedMs: number, feedStatus?:
 let isAutoDiscovering = false;
 
 /**
- * Pings known TamilMV mirrors and automatically selects & saves the first working mirror to AsyncStorage.
+ * Searches Google, Bing, DuckDuckGo in the background to harvest live TamilMV domains.
+ */
+export async function searchGoogleForTamilMVDomains(): Promise<string[]> {
+  const found = new Set<string>();
+
+  const searchUrls = [
+    'https://www.google.com/search?q=TamilMV&hl=en',
+    'https://www.google.com/search?q=1TamilMV+official+proxy&hl=en',
+    'https://www.bing.com/search?q=1TamilMV+proxy+domain&setlang=en',
+    'https://html.duckduckgo.com/html/?q=1TamilMV',
+  ];
+
+  await Promise.allSettled(
+    searchUrls.map(async (url) => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 7000);
+        const res = await fetch(url, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const html = await res.text();
+
+        // 1. Extract from redirect params (e.g. google url?q= or duckduckgo uddg=)
+        const paramMatches = html.match(/(?:url\?q=|uddg=)(https?%3A%2F%2F[^&"'\s<>]+)/gi) || [];
+        for (const m of paramMatches) {
+          try {
+            const raw = m.replace(/^(?:url\?q=|uddg=)/i, '');
+            const decoded = decodeURIComponent(raw);
+            const u = new URL(decoded);
+            if (/tamilmv/i.test(u.hostname)) {
+              let host = u.hostname.toLowerCase();
+              if (!host.startsWith('www.') && !host.startsWith('1tamilmv.')) {
+                host = `www.${host}`;
+              }
+              found.add(`https://${host}`);
+            }
+          } catch {}
+        }
+
+        // 2. Direct domains in href or text
+        const domainMatches = html.match(/https?:\/\/(?:www\.)?(?:[a-zA-Z0-9-]+\.)?1?tamilmv\.[a-z]{2,10}/gi) || [];
+        for (const m of domainMatches) {
+          try {
+            const u = new URL(m);
+            let host = u.hostname.toLowerCase();
+            if (!host.startsWith('www.') && !host.startsWith('1tamilmv.')) {
+              host = `www.${host}`;
+            }
+            found.add(`https://${host}`);
+          } catch {}
+        }
+
+        // 3. Naked domains mentioned in text
+        const nakedMatches = html.match(/\b(?:www\.)?1?tamilmv\.[a-z]{2,10}\b/gi) || [];
+        for (const m of nakedMatches) {
+          const lower = m.toLowerCase();
+          const host = lower.startsWith('www.') ? lower : `www.${lower}`;
+          found.add(`https://${host}`);
+        }
+      } catch {
+        // Silently continue to next search engine
+      }
+    })
+  );
+
+  return Array.from(found);
+}
+
+/**
+ * Probes official proxy redirectors to capture dynamic 301/302 redirects to current domain.
+ */
+export async function probeRedirectTargets(): Promise<string[]> {
+  const probes = [
+    'https://www.1tamilmv.solar',
+    'https://www.1tamilmv.cards',
+    'https://www.1tamilmv.pizza',
+    'https://www.1tamilmv.fi',
+    'https://www.1tamilmv.live',
+    'https://www.1tamilmv.art',
+    'https://www.1tamilmv.cloud',
+    'https://www.1tamilmv.me',
+  ];
+
+  const targets = new Set<string>();
+  await Promise.allSettled(
+    probes.map(async (url) => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Connection': 'close',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (res.url) {
+          try {
+            const parsed = new URL(res.url);
+            if (/tamilmv/i.test(parsed.hostname)) {
+              let host = parsed.hostname.toLowerCase();
+              if (!host.startsWith('www.') && !host.startsWith('1tamilmv.')) {
+                host = `www.${host}`;
+              }
+              targets.add(`https://${host}`);
+            }
+          } catch {}
+        }
+      } catch {}
+    })
+  );
+
+  return Array.from(targets);
+}
+
+/**
+ * Verifies that a domain is live, reachable, and contains real TamilMV forum/RSS content (not parked).
+ */
+export async function verifyTamilMVDomain(domainUrl: string): Promise<boolean> {
+  const normalized = domainUrl.trim().replace(/\/+$/, '');
+
+  // 1. Quick ping check
+  try {
+    const ping = await pingTamilMV(normalized);
+    if (ping.success && ping.rssWorking) {
+      return true;
+    }
+  } catch {}
+
+  // 2. Direct forum page probe
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const testUrl = `${normalized}/index.php?/discover/`;
+
+    const res = await fetch(testUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Connection': 'close',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const html = await res.text();
+      const isRealTamilMV =
+        (html.includes('TamilMV') || html.includes('1TamilMV')) &&
+        (html.includes('ipsLayout') || html.includes('forum') || html.includes('topic'));
+      const isParked =
+        html.includes('/lander') ||
+        html.includes('domain is for sale') ||
+        html.includes('GoDaddy') ||
+        html.includes('parking');
+
+      if (isRealTamilMV && !isParked) {
+        return true;
+      }
+    }
+  } catch {}
+
+  return false;
+}
+
+/**
+ * Searches Google in the background, checks dynamic redirect targets, verifies availability,
+ * and automatically updates & persists the base URL configuration.
+ */
+export async function autoDetectTamilMVDomain(
+  onProgress?: (status: string) => void
+): Promise<string | null> {
+  onProgress?.('Searching Google & online sources for TamilMV domain...');
+
+  // Step 1: Search online via Google, Bing, DuckDuckGo
+  const googleCandidates = await searchGoogleForTamilMVDomains();
+
+  onProgress?.('Checking dynamic mirror resolvers...');
+  // Step 2: Probe dynamic redirect resolvers
+  const redirectCandidates = await probeRedirectTargets();
+
+  // Step 3: Combine discovered candidates + known mirrors (prioritizing detected candidates)
+  const candidatePool = Array.from(
+    new Set([
+      ...googleCandidates,
+      ...redirectCandidates,
+      ...KNOWN_TAMILMV_MIRRORS,
+      'https://www.1tamilmv.solar',
+      'https://www.1tamilmv.fi',
+      'https://www.1tamilmv.cards',
+      'https://www.1tamilmv.pizza',
+      'https://www.1tamilmv.live',
+      'https://www.1tamilmv.pm',
+      'https://www.1tamilmv.yt',
+      'https://www.1tamilmv.mx',
+    ])
+  );
+
+  onProgress?.(`Verifying ${candidatePool.length} domain candidates...`);
+
+  // Step 4: Verify candidates sequentially
+  for (const candidate of candidatePool) {
+    onProgress?.(`Verifying domain: ${candidate}...`);
+    const isValid = await verifyTamilMVDomain(candidate);
+    if (isValid) {
+      onProgress?.(`Configuring base URL with: ${candidate}`);
+      console.log(`[TamilMV] Auto-detected active working domain: ${candidate}. Updating configuration.`);
+      await setTamilMVBaseUrl(candidate);
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Automatically discovers a working domain and updates the base URL configuration.
+ * Called automatically when base URL requests fail or during background checks.
  */
 export async function autoDiscoverWorkingDomain(): Promise<string | null> {
   if (isAutoDiscovering) return null;
   isAutoDiscovering = true;
   try {
-    for (const mirror of KNOWN_TAMILMV_MIRRORS) {
-      try {
-        const res = await pingTamilMV(mirror);
-        if (res.success && res.rssWorking) {
-          console.log(`[TamilMV] Active mirror found: ${mirror} (${res.latencyMs}ms). Persisting to AsyncStorage.`);
-          await setTamilMVBaseUrl(mirror);
-          return mirror;
-        }
-      } catch (err) {
-        // Continue testing other mirrors
-      }
-    }
+    return await autoDetectTamilMVDomain();
   } catch (e) {
     console.warn('[TamilMV] Error during domain auto-discovery:', e);
+    return null;
   } finally {
     isAutoDiscovering = false;
   }
-  return null;
 }
 
 export type Language = 'tamil' | 'english' | 'hindi' | 'telugu' | 'malayalam' | 'kannada';
@@ -337,8 +567,8 @@ export type Category = 'webhd' | 'hdrip' | 'hdtv' | 'series' | 'multiaudio';
 const FORUM_IDS: Record<Language, Partial<Record<Category, string>>> = {
   tamil: {
     webhd: '11-web-hd-itunes-hd-bluray',
-    series: '19-web-series-tv-shows',
     multiaudio: '17-hollywood-movies-in-multi-audios',
+    series: '19-web-series-tv-shows',
     hdrip: '12-hd-rips-dvd-rips-br-rips',
     hdtv: '14-hdtv-sdtv-hdtv-rips',
   },
@@ -366,10 +596,10 @@ const FORUM_IDS: Record<Language, Partial<Record<Category, string>>> = {
 
 const CATEGORY_LABELS: Record<Category, string> = {
   webhd: 'Web HD',
+  multiaudio: 'Hollywood Movies in Multi Audios',
+  series: 'Web Series & TV Shows',
   hdrip: 'HD Rip',
   hdtv: 'HD TV',
-  multiaudio: 'Multi Audios',
-  series: 'Web Series & TV Shows',
 };
 
 const CATEGORY_TYPE: Record<Category, 'movie' | 'series'> = {
@@ -731,3 +961,308 @@ export function useTamilMVCatalog(language: Language): UseTamilMVCatalogResult {
 // ─── Re-export helpers for consumers ─────────────────────────────────────────
 
 export { FORUM_IDS, CATEGORY_LABELS, CATEGORY_TYPE };
+
+// ─── Website Search & Topic Magnets Scraper ──────────────────────────────────
+
+const FORUM_LANGUAGES: Record<string, Language> = {
+  '11': 'tamil', '12': 'tamil', '14': 'tamil', '17': 'tamil', '19': 'tamil',
+  '49': 'english', '50': 'english',
+  '58': 'hindi', '59': 'hindi',
+  '24': 'telugu', '25': 'telugu',
+  '36': 'malayalam', '37': 'malayalam',
+  '69': 'kannada', '70': 'kannada',
+};
+
+export function detectLanguageFromTitle(title: string, forumId?: string | null): Language {
+  if (forumId && FORUM_LANGUAGES[forumId]) {
+    return FORUM_LANGUAGES[forumId];
+  }
+  const lower = title.toLowerCase();
+  if (lower.includes('tamil') || lower.includes('தமிழ்')) return 'tamil';
+  if (lower.includes('telugu') || lower.includes('తెలుగు')) return 'telugu';
+  if (lower.includes('hindi') || lower.includes('हिन्दी')) return 'hindi';
+  if (lower.includes('malayalam') || lower.includes('മലയാളം')) return 'malayalam';
+  if (lower.includes('kannada') || lower.includes('ಕನ್ನಡ')) return 'kannada';
+  if (lower.includes('english') || lower.includes('eng')) return 'english';
+  return 'tamil';
+}
+
+export function cleanTopicTitle(title: string): { name: string; year: string | null } {
+  let cleaned = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx)\s*[-_:]\s*/i, '');
+  cleaned = cleaned.replace(/^[\s\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]+/u, '').trim();
+
+  const match = cleaned.match(/^([^(]+?)\s*\((\d{4})\)/);
+  if (match) {
+    return { name: match[1].trim(), year: match[2] };
+  }
+  const beforeRes = cleaned.split(/\s*[-–]\s*(?:4K|2160p|1080p|720p|TRUE|WEB|HDRip|DVDRip|DVD|HDTV)/i)[0];
+  return { name: beforeRes.trim(), year: null };
+}
+
+export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ poster: string | null; items: TorrentItem[] }> {
+  const currentBase = getTamilMVBaseUrl();
+  let urlToFetch = topicUrl;
+
+  try {
+    const parsed = new URL(topicUrl);
+    const activeParsed = new URL(currentBase);
+    if (parsed.host !== activeParsed.host) {
+      urlToFetch = `${activeParsed.origin}${parsed.pathname}${parsed.search}`;
+    }
+  } catch {}
+
+  const mirrorsToTry = [urlToFetch];
+  KNOWN_TAMILMV_MIRRORS.forEach(m => {
+    try {
+      const p = new URL(topicUrl);
+      mirrorsToTry.push(`${m}${p.pathname}${p.search}`);
+    } catch {}
+  });
+
+  let lastError: any = null;
+
+  for (const targetUrl of mirrorsToTry) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
+    try {
+      const res = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Connection': 'close',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) continue;
+
+      const html = await res.text();
+      const rawMagnets = html.match(/magnet:\?[^\s"'<>]+/gi) || [];
+      const magnets = rawMagnets.map(m => m.replace(/&amp;/g, '&'));
+
+      let poster: string | null = null;
+      const ipsImgs = [...html.matchAll(/<img[^>]*class=['"][^'"]*ipsImage[^'"]*['"][^>]*src=['"]([^'"]+)['"]/gi)];
+      if (ipsImgs.length > 0) {
+        poster = ipsImgs[0][1];
+      } else {
+        const allImgs = [...html.matchAll(/<img[^>]*src=['"]([^'"]+)['"]/gi)].map(m => m[1]);
+        const candidate = allImgs.find(s =>
+          !s.includes('avatar') &&
+          !s.includes('theme') &&
+          !s.includes('emoticons') &&
+          !s.includes('reactions') &&
+          !s.includes('svg')
+        );
+        if (candidate) poster = candidate;
+      }
+
+      const items: TorrentItem[] = magnets.map((magnetUrl, i) => {
+        const dnMatch = magnetUrl.match(/dn=([^&]+)/);
+        let displayName = `Variant ${i + 1}`;
+        if (dnMatch) {
+          try {
+            displayName = decodeURIComponent(dnMatch[1].replace(/\+/g, ' '));
+          } catch {
+            displayName = dnMatch[1].replace(/\+/g, ' ');
+          }
+        }
+
+        const xtMatch = magnetUrl.match(/urn:btih:([a-zA-Z0-9]+)/i);
+        const infoHash = xtMatch ? xtMatch[1] : '';
+
+        return {
+          guid: `${topicUrl}-magnet-${i}-${infoHash}`,
+          groupid: topicUrl,
+          name: displayName,
+          title: displayName,
+          year: null,
+          language: 'tamil',
+          poster,
+          magnetUrl,
+          infoHash,
+          publishDate: new Date().toISOString(),
+        };
+      });
+
+      return { poster, items };
+    } catch (err) {
+      clearTimeout(timeout);
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Failed to fetch topic magnets from all mirrors');
+}
+
+async function fetchSearchHtml(searchQuery: string, baseUrl: string): Promise<{ html: string; successfulBase: string }> {
+  const searchPath = `/index.php?/search/&q=${encodeURIComponent(searchQuery)}&type=forums_topic&search_and_or=or&sortby=relevancy`;
+  const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter(m => m !== baseUrl)];
+
+  for (const mirror of mirrorsToTry) {
+    const targetUrl = `${mirror}${searchPath}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
+    try {
+      const res = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Connection': 'close',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const text = await res.text();
+        return { html: text, successfulBase: mirror };
+      }
+    } catch {
+      clearTimeout(timeout);
+    }
+  }
+
+  return { html: '', successfulBase: baseUrl };
+}
+
+function parseTamilMVSearchHtml(html: string, successfulBase: string, language: Language | 'all'): GroupedItem[] {
+  const streamItemRegex = /<li[^>]*class=['"][^'"]*ipsStreamItem[^'"]*['"][\s\S]*?<\/li>/gi;
+  const items = [...html.matchAll(streamItemRegex)];
+  const grouped: Record<string, GroupedItem> = {};
+
+  for (const item of items) {
+    const str = item[0];
+
+    const topicMatch = str.match(/<span[^>]*class=['"][^'"]*ipsType_break[^'"]*['"][^>]*>\s*<a\s+[^>]*href=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/i)
+      || str.match(/<a\s+[^>]*href=['"]([^'"]*\/forums\/topic\/(\d+)-[^'"]*)['"][^>]*>([\s\S]*?)<\/a>/i);
+    if (!topicMatch) continue;
+
+    const rawTitle = (topicMatch[2] || topicMatch[3] || '').replace(/<[^>]+>/g, '').trim();
+    let topicUrl = (topicMatch[1] || '').replace(/&amp;/g, '&');
+    if (topicUrl.startsWith('//')) topicUrl = 'https:' + topicUrl;
+    else if (topicUrl.startsWith('/')) topicUrl = `${successfulBase}${topicUrl}`;
+
+    const forumMatch = str.match(/\/forums\/forum\/(\d+)-/i);
+    const forumId = forumMatch ? forumMatch[1] : null;
+
+    const itemLang = detectLanguageFromTitle(rawTitle, forumId);
+
+    // Filter by language if a specific language is requested
+    if (language !== 'all' && itemLang !== language) {
+      if (!rawTitle.toLowerCase().includes(language.toLowerCase())) {
+        continue;
+      }
+    }
+
+    const isSeries = /series|season|episode|s\d{2}|e\d{2}/i.test(rawTitle) || forumId === '19';
+    const type: 'movie' | 'series' = isSeries ? 'series' : 'movie';
+
+    const dateMatch = str.match(/<time[^>]*datetime=['"]([^'"]+)['"]/i);
+    const date = dateMatch ? dateMatch[1] : new Date().toISOString();
+
+    let poster: string | null = null;
+    const imgMatches = [...str.matchAll(/<img[^>]*src=['"]([^'"]+)['"]/gi)].map(m => m[1]);
+    const candidate = imgMatches.find(s =>
+      !s.includes('avatar') &&
+      !s.includes('emoticons') &&
+      !s.includes('reactions') &&
+      !s.includes('theme') &&
+      !s.includes('svg')
+    );
+    if (candidate) poster = candidate;
+
+    const { name, year } = cleanTopicTitle(rawTitle);
+    const key = `${name.toLowerCase()}|||${year || ''}`;
+
+    const torrentItem: TorrentItem = {
+      guid: topicUrl,
+      groupid: topicUrl,
+      name,
+      year,
+      language: itemLang,
+      poster,
+      title: rawTitle,
+      magnetUrl: '', // fetched on-demand
+      infoHash: '',
+      publishDate: date,
+    };
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        name,
+        year,
+        items: [torrentItem],
+      };
+      (grouped[key] as any).type = type;
+    } else {
+      grouped[key].items.push(torrentItem);
+      if (!grouped[key].items[0].poster && poster) {
+        grouped[key].items[0].poster = poster;
+      }
+    }
+  }
+
+  return Object.values(grouped);
+}
+
+export async function searchTamilMV(
+  query: string,
+  language: Language | 'all' = 'all',
+  customBaseUrl?: string
+): Promise<GroupedItem[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const baseUrl = customBaseUrl || getTamilMVBaseUrl();
+
+  // Strip generic filler words like "movie", "movies", "film", "padam"
+  const cleanQ = trimmed.replace(/\b(movies?|films?|padam|cinema)\b/gi, '').trim() || trimmed;
+
+  // 1. Primary search
+  const { html, successfulBase } = await fetchSearchHtml(trimmed, baseUrl);
+  let results = parseTamilMVSearchHtml(html, successfulBase, language);
+
+  // 2. If no results and cleanQ is different from trimmed, try cleanQ
+  if (results.length === 0 && cleanQ !== trimmed) {
+    const { html: fallbackHtml, successfulBase: fallbackBase } = await fetchSearchHtml(cleanQ, baseUrl);
+    results = parseTamilMVSearchHtml(fallbackHtml, fallbackBase, language);
+  }
+
+  // 3. If short query (<= 3 chars) returns 0 results, try with wildcard *
+  if (results.length === 0 && cleanQ.length <= 3 && !cleanQ.includes('*')) {
+    const { html: wcHtml, successfulBase: wcBase } = await fetchSearchHtml(`${cleanQ}*`, baseUrl);
+    results = parseTamilMVSearchHtml(wcHtml, wcBase, language);
+  }
+
+  // 4. If still no results, use TMDB to find matching Indian movie titles (e.g. "Hi" -> "Hi Nanna")
+  if (results.length === 0) {
+    try {
+      const tmdbKey = 'a07e22bc18f5cb106bfe4cc1f83ad8ed';
+      const tmdbRes = await fetch(
+        `https://api.themoviedb.org/3/search/movie?api_key=${tmdbKey}&query=${encodeURIComponent(cleanQ)}&include_adult=false`
+      );
+      if (tmdbRes.ok) {
+        const tmdbData = await tmdbRes.json();
+        const suggestions = (tmdbData.results || [])
+          .filter((m: any) => ['te', 'ta', 'hi', 'ml', 'kn', 'en'].includes(m.original_language))
+          .slice(0, 3)
+          .map((m: any) => m.title);
+
+        for (const sugTitle of suggestions) {
+          if (sugTitle.toLowerCase() !== cleanQ.toLowerCase()) {
+            const { html: sugHtml, successfulBase: sugBase } = await fetchSearchHtml(sugTitle, baseUrl);
+            const sugResults = parseTamilMVSearchHtml(sugHtml, sugBase, language);
+            if (sugResults.length > 0) {
+              return sugResults;
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  return results;
+}
