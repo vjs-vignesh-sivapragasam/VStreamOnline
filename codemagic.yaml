@@ -357,7 +357,6 @@ workflows:
       java: latest
       groups:
         - EXPO
-        - ANDROID_KEYSTORE
     scripts:
       - name: Install dependencies
         script: |
@@ -390,10 +389,26 @@ workflows:
       - name: Setup Android keystore
         script: |
           if [ -z "$KEYSTORE_FILE" ]; then
-            echo "⚠️  No keystore provided, building unsigned APK"
-            echo "UNSIGNED_BUILD=true" >> $CM_ENV
+            echo "⚠️  No keystore provided, generating self-signed keystore for installable APK"
+            KEYSTORE_DIR="$HOME/keystores"
+            mkdir -p "$KEYSTORE_DIR"
+            AUTO_KEYSTORE="$KEYSTORE_DIR/release.keystore"
+            keytool -genkeypair -v \
+              -keystore "$AUTO_KEYSTORE" \
+              -alias releasekey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=NetFlix,OU=Mobile,O=App,L=City,S=State,C=US"
+            echo "KEYSTORE_FILE=$AUTO_KEYSTORE" >> $CM_ENV
+            echo "KEYSTORE_PASSWORD=android" >> $CM_ENV
+            echo "KEYSTORE_ALIAS=releasekey" >> $CM_ENV
+            echo "KEYSTORE_KEY_PASSWORD=android" >> $CM_ENV
+            echo "UNSIGNED_BUILD=false" >> $CM_ENV
           else
-            echo "🔐 Keystore file detected"
+            echo "🔐 Keystore file detected: $KEYSTORE_FILE"
             echo "UNSIGNED_BUILD=false" >> $CM_ENV
           fi
 
