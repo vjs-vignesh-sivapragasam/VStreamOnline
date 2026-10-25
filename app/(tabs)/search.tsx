@@ -16,7 +16,7 @@ import BottomSpacing from '@/components/BottomSpacing';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
 import {
-  fetchAllTamilMVMovies,
+  fetchTamilMVRecentlyAdded,
   searchTamilMV,
   GroupedItem,
   TorrentItem,
@@ -132,10 +132,9 @@ const SearchMovieCard = ({
 const SearchScreen = () => {
   const params = useLocalSearchParams<{ query?: string }>();
   const [query, setQuery]                           = useState(params.query || '');
-  const [allMoviesList, setAllMoviesList]           = useState<GroupedItem[]>([]);
+  const [moviesList, setMoviesList]                 = useState<GroupedItem[]>([]);
   const [liveSearchResults, setLiveSearchResults]   = useState<GroupedItem[]>([]);
   const [isSearchingLive, setIsSearchingLive]       = useState(false);
-  const [isCleared, setIsCleared]                   = useState(false);
   const [isLoading, setIsLoading]                   = useState(false);
   const [error, setError]                           = useState<string | null>(null);
 
@@ -148,35 +147,38 @@ const SearchScreen = () => {
   const cardWidth = (width - totalHorizontalPadding - (numColumns - 1) * cardSpacing) / numColumns;
   const posterHeight = cardWidth * 1.5;
 
-  const loadAllMovies = useCallback(async (forceRefresh = false) => {
+  // Load recently added movies on demand
+  const loadRecentlyAdded = useCallback(async (forceRefresh = false) => {
     setIsLoading(true);
     setError(null);
     try {
-      const items = await fetchAllTamilMVMovies(forceRefresh);
-      setAllMoviesList(items);
-      setIsCleared(false);
+      const items = await fetchTamilMVRecentlyAdded(forceRefresh);
+      setMoviesList(items);
     } catch (err: any) {
-      setError(err?.message || 'Failed to load movies');
+      setError(err?.message || 'Failed to load recently added movies');
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadAllMovies(false);
-  }, [loadAllMovies]);
+  const handleRecentlyAddedPress = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    loadRecentlyAdded(moviesList.length > 0);
+  }, [loadRecentlyAdded, moviesList.length]);
 
+  // If a query parameter was passed on mount, handle it
   useEffect(() => {
     if (params.query && params.query !== query) {
       setQuery(params.query);
-      setIsCleared(false);
     }
   }, [params.query]);
 
   // Live web search when user types query
   useEffect(() => {
     const q = query.trim();
-    if (!q || q.length < 2 || isCleared) {
+    if (!q || q.length < 2) {
       setLiveSearchResults([]);
       setIsSearchingLive(false);
       return;
@@ -203,13 +205,13 @@ const SearchScreen = () => {
         clearTimeout(searchTimerRef.current);
       }
     };
-  }, [query, isCleared]);
+  }, [query]);
 
   const handleClearList = useCallback(async () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    setIsCleared(true);
+    setMoviesList([]);
     setQuery('');
     setLiveSearchResults([]);
   }, []);
@@ -255,11 +257,12 @@ const SearchScreen = () => {
 
   // Filter movies by query
   const filteredMovies = useMemo(() => {
-    if (isCleared) return [];
     const q = query.trim().toLowerCase();
-    if (!q) return allMoviesList;
 
-    const inMemory = allMoviesList.filter((group) => {
+    // If no query typed, show the loaded list (e.g. from Recently Added)
+    if (!q) return moviesList;
+
+    const inMemory = moviesList.filter((group) => {
       const nameMatch = group.name?.toLowerCase().includes(q);
       const yearMatch = group.year ? group.year.toString().includes(q) : false;
       const titleMatch = group.items.some((i) => i.title.toLowerCase().includes(q));
@@ -283,7 +286,7 @@ const SearchScreen = () => {
     });
 
     return Array.from(movieMap.values());
-  }, [query, allMoviesList, liveSearchResults, isCleared]);
+  }, [query, moviesList, liveSearchResults]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -315,13 +318,10 @@ const SearchScreen = () => {
           </View>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search all movies..."
+            placeholder="Search movie title..."
             placeholderTextColor="#6E6E73"
             value={query}
-            onChangeText={(text) => {
-              setQuery(text);
-              if (isCleared) setIsCleared(false);
-            }}
+            onChangeText={setQuery}
             returnKeyType="search"
             submitBehavior="blurAndSubmit"
             autoCorrect={false}
@@ -341,44 +341,53 @@ const SearchScreen = () => {
       {/* Action / Filter Row */}
       <View style={styles.filtersContainer}>
         <View style={styles.filterRow}>
-          {/* All Movies Button */}
+          {/* Recently Added Shortcut */}
           <TouchableOpacity
-            style={[styles.filterButton, !isCleared && styles.filterButtonActive]}
-            onPress={() => {
-              setIsCleared(false);
-              loadAllMovies(false);
-            }}
+            style={[styles.filterButton, moviesList.length > 0 && styles.filterButtonActive]}
+            onPress={handleRecentlyAddedPress}
             activeOpacity={0.7}
           >
             <Ionicons
-              name="film-outline"
+              name="time-outline"
               size={15}
-              color={!isCleared ? '#000000' : '#8E8E93'}
+              color={moviesList.length > 0 ? '#000000' : '#8E8E93'}
               style={styles.filterIcon}
             />
-            <Text style={[styles.filterButtonText, !isCleared && styles.filterButtonTextActive]}>
-              All Movies
+            <Text style={[styles.filterButtonText, moviesList.length > 0 && styles.filterButtonTextActive]}>
+              Recently added
             </Text>
-            {allMoviesList.length > 0 && !isCleared && (
+            {moviesList.length > 0 && (
               <View style={styles.countBadge}>
-                <Text style={styles.countBadgeText}>{allMoviesList.length}</Text>
+                <Text style={styles.countBadgeText}>{moviesList.length}</Text>
               </View>
             )}
           </TouchableOpacity>
 
-          {/* Clear List Button */}
+          {/* Clear Button */}
           <TouchableOpacity
-            style={[styles.filterButton, styles.clearListButton]}
+            style={[
+              styles.filterButton,
+              styles.clearListButton,
+              moviesList.length === 0 && !query && styles.clearListButtonDisabled,
+            ]}
             onPress={handleClearList}
+            disabled={moviesList.length === 0 && !query}
             activeOpacity={0.7}
           >
             <Ionicons
               name="trash-outline"
               size={14}
-              color="#ff453a"
+              color={moviesList.length > 0 || query ? '#ff453a' : '#555555'}
               style={styles.filterIcon}
             />
-            <Text style={styles.clearListButtonText}>Clear</Text>
+            <Text
+              style={[
+                styles.clearListButtonText,
+                moviesList.length === 0 && !query && { color: '#555555' },
+              ]}
+            >
+              Clear
+            </Text>
           </TouchableOpacity>
 
           {/* Web view Filter Button */}
@@ -405,70 +414,71 @@ const SearchScreen = () => {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         refreshControl={
-          <RefreshControl
-            refreshing={isLoading}
-            onRefresh={() => loadAllMovies(true)}
-            tintColor="#535aff"
-            colors={['#535aff']}
-          />
+          moviesList.length > 0 ? (
+            <RefreshControl
+              refreshing={isLoading}
+              onRefresh={() => loadRecentlyAdded(true)}
+              tintColor="#535aff"
+              colors={['#535aff']}
+            />
+          ) : undefined
         }
       >
-        {/* Loading state on first load */}
-        {isLoading && allMoviesList.length === 0 && !isCleared && (
+        {/* Loading indicator */}
+        {isLoading && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#535aff" />
-            <Text style={styles.loadingText}>Loading all movies…</Text>
+            <Text style={styles.loadingText}>Loading recently added movies…</Text>
           </View>
         )}
 
         {/* Error state */}
-        {!isLoading && error && allMoviesList.length === 0 && !isCleared && (
+        {!isLoading && error && moviesList.length === 0 && (
           <View style={styles.emptyStateContainer}>
             <View style={styles.emptyStateIconContainer}>
               <Ionicons name="alert-circle-outline" color="#ff5252" size={48} />
             </View>
             <Text style={styles.emptyStateTitle}>Failed to load movies</Text>
             <Text style={styles.emptyStateSubtitle}>{error}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={() => loadAllMovies(true)}>
+            <TouchableOpacity style={styles.retryButton} onPress={() => loadRecentlyAdded(true)}>
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Cleared State */}
-        {isCleared && (
+        {/* Initial / Idle State (no movies loaded yet and no query) */}
+        {!isLoading && moviesList.length === 0 && query.trim() === '' && (
           <View style={styles.emptyStateContainer}>
             <View style={styles.emptyStateIconContainer}>
               <Ionicons name="film-outline" color="#535aff" size={48} />
             </View>
-            <Text style={styles.emptyStateTitle}>Movie List Cleared</Text>
+            <Text style={styles.emptyStateTitle}>Discover Movies</Text>
             <Text style={styles.emptyStateSubtitle}>
-              Tap below or search to reload movies.
+              Search for any movie above, or tap "Recently added" to browse the latest releases.
             </Text>
             <TouchableOpacity
-              style={styles.retryButton}
-              onPress={() => {
-                setIsCleared(false);
-                loadAllMovies(false);
-              }}
+              style={styles.loadRecentBtn}
+              onPress={handleRecentlyAddedPress}
+              activeOpacity={0.8}
             >
-              <Text style={styles.retryButtonText}>Load All Movies</Text>
+              <Ionicons name="time-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+              <Text style={styles.loadRecentBtnText}>Load Recently Added</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {/* Results Grid */}
-        {!isCleared && filteredMovies.length > 0 && (
+        {filteredMovies.length > 0 && (
           <View style={styles.resultsGridSection}>
             <View style={styles.resultsHeaderRow}>
               <Text style={styles.resultsCountText}>
                 {query.trim()
                   ? `${filteredMovies.length} ${filteredMovies.length === 1 ? 'Movie' : 'Movies'} found`
-                  : `${allMoviesList.length} ${allMoviesList.length === 1 ? 'Movie' : 'Movies'} • All Releases`}
+                  : `${moviesList.length} ${moviesList.length === 1 ? 'Movie' : 'Movies'} • Recently Added`}
               </Text>
               <TouchableOpacity
                 style={styles.liveBadge}
-                onPress={() => loadAllMovies(true)}
+                onPress={() => loadRecentlyAdded(true)}
                 activeOpacity={0.7}
               >
                 <Ionicons name="refresh" size={11} color="#00e676" style={{ marginRight: 4 }} />
@@ -491,7 +501,7 @@ const SearchScreen = () => {
         )}
 
         {/* No Search Matches Found */}
-        {!isCleared && !isLoading && allMoviesList.length > 0 && filteredMovies.length === 0 && query.trim() !== '' && (
+        {!isLoading && (moviesList.length > 0 || liveSearchResults.length > 0) && filteredMovies.length === 0 && query.trim() !== '' && (
           <View style={styles.emptyStateContainer}>
             <View style={styles.emptyStateIconContainer}>
               <Ionicons name="search-outline" color="#535aff" size={48} />
@@ -618,6 +628,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 69, 58, 0.08)',
     borderColor: 'rgba(255, 69, 58, 0.28)',
   },
+  clearListButtonDisabled: {
+    opacity: 0.45,
+    borderColor: '#26262a',
+    backgroundColor: '#18181a',
+  },
   clearListButtonText: {
     fontSize: 13,
     color: '#ff453a',
@@ -702,6 +717,20 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     maxWidth: 320,
     marginBottom: 16,
+  },
+  loadRecentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#535aff',
+    paddingVertical: 11,
+    paddingHorizontal: 22,
+    borderRadius: 22,
+    marginTop: 8,
+  },
+  loadRecentBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
   },
   resultsGridSection: {
     paddingTop: 8,
