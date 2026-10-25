@@ -527,18 +527,14 @@ const TorrentDetails = () => {
           >
             <Ionicons name="chevron-back" size={24} color="#ffffff" />
           </TouchableOpacity>
-        </View>
 
-        {/* ── Movie Title (Centered & Bold) ── */}
-        <View style={styles.titleSection}>
-          <Text style={styles.movieTitleMain}>{getMovieSearchTitle(tmdbData?.title || title)}</Text>
-        </View>
-
-        {/* ── Action Row (Bookmark, Watch Now, Download, Trailer) ── */}
-        <View style={styles.actionRowContainer}>
-          {/* Circular My List Button */}
+          {/* Circular My List Button (top right in front of poster image) */}
           <TouchableOpacity
-            style={[styles.circularActionBtn, inMyList && styles.circularActionBtnActive]}
+            style={[
+              styles.bookmarkButton,
+              inMyList && styles.bookmarkButtonActive,
+              { top: Math.max(insets.top + 6, 20) },
+            ]}
             onPress={handleToggleMyList}
             activeOpacity={0.7}
           >
@@ -548,8 +544,25 @@ const TorrentDetails = () => {
               color={inMyList ? '#535aff' : '#ffffff'}
             />
           </TouchableOpacity>
+        </View>
 
-          {/* Watch Now Pill Button */}
+        {/* ── Movie Title (Centered & Bold) ── */}
+        <View style={styles.titleSection}>
+          <Text style={styles.movieTitleMain}>{getMovieSearchTitle(tmdbData?.title || title)}</Text>
+        </View>
+
+        {/* ── Action Row (Trailer on Left, Centered Watch Now, Download on Right) ── */}
+        <View style={styles.actionRowContainer}>
+          {/* Left: Circular Trailer Button */}
+          <TouchableOpacity
+            style={styles.circularActionBtn}
+            onPress={handleTrailerPress}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="film-outline" size={22} color="#ffffff" />
+          </TouchableOpacity>
+
+          {/* Center: Watch Now Pill Button */}
           <TouchableOpacity
             style={styles.watchNowBtn}
             onPress={handleWatchNow}
@@ -566,7 +579,7 @@ const TorrentDetails = () => {
             </Text>
           </TouchableOpacity>
 
-          {/* Circular Download Button */}
+          {/* Right: Circular Download Button */}
           <TouchableOpacity
             style={[
               styles.circularActionBtn,
@@ -584,15 +597,6 @@ const TorrentDetails = () => {
             ) : (
               <Ionicons name="download-outline" size={22} color="#ffffff" />
             )}
-          </TouchableOpacity>
-
-          {/* Circular Trailer Button (Opens YouTube directly) */}
-          <TouchableOpacity
-            style={styles.circularActionBtn}
-            onPress={handleTrailerPress}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="film-outline" size={22} color="#ffffff" />
           </TouchableOpacity>
         </View>
 
@@ -1165,6 +1169,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
+  bookmarkButton: {
+    position: 'absolute',
+    right: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  bookmarkButtonActive: {
+    backgroundColor: 'rgba(83, 90, 255, 0.35)',
+    borderWidth: 1,
+    borderColor: '#535aff',
+  },
 
   /* Title */
   titleSection: {
@@ -1183,19 +1203,19 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  /* Action Row (Bookmark, Watch Now, Download, Trailer) */
+  /* Action Row (Trailer on Left, Watch Now in Center, Download on Right) */
   actionRowContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
+    gap: 16,
+    paddingHorizontal: 20,
     marginBottom: 20,
   },
   circularActionBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1215,9 +1235,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
-    paddingHorizontal: 20,
-    height: 48,
-    borderRadius: 24,
+    paddingHorizontal: 28,
+    height: 50,
+    borderRadius: 25,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -1225,7 +1245,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   watchNowBtnText: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
     color: '#000000',
     letterSpacing: 0.2,
