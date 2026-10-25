@@ -96,6 +96,15 @@ const TorrentList = () => {
     category: Category;
   }>();
 
+  React.useEffect(() => {
+    if (category === 'series') {
+      router.replace({
+        pathname: '/torrent/series',
+        params: { title: title || 'Web Series & TV Shows', language, category },
+      });
+    }
+  }, [category, title, language]);
+
   const { groups, loading, error, refresh } = useTamilMV(
     language ?? 'tamil',
     category ?? 'webhd',

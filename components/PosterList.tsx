@@ -232,6 +232,13 @@ const PosterList = ({ groups, title, type, language, category, loading = false, 
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    if (category === 'series') {
+      router.push({
+        pathname: '/torrent/series',
+        params: { title: title || 'Web Series & TV Shows', language, category },
+      });
+      return;
+    }
     router.push({
       pathname: '/torrent/list',
       params: { title, language, category },

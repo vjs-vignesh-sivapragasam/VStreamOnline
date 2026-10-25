@@ -148,6 +148,21 @@ function RootLayoutNav() {
               }}
             />
             <Stack.Screen
+              name="torrent/series"
+              options={{
+                headerShown: true,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
+                headerTitle: '',
+                headerTintColor: '#ffffff',
+                headerBackTitle: '',
+                headerShadowVisible: false,
+                headerStyle: {
+                  backgroundColor: 'transparent',
+                }
+              }}
+            />
+            <Stack.Screen
               name="stream/player"
               options={{
                 headerShown: false,

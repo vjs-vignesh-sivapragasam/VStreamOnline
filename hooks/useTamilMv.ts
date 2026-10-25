@@ -10,6 +10,7 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.solar';
 
 export const KNOWN_TAMILMV_MIRRORS = [
+  'https://www.1tamilmv.style',
   'https://www.1tamilmv.solar',
   'https://www.1tamilmv.cards',
   'https://www.1tamilmv.pizza',
@@ -1010,7 +1011,7 @@ export function detectLanguageFromTitle(title: string, forumId?: string | null):
 }
 
 export function cleanTopicTitle(title: string): { name: string; year: string | null } {
-  let cleaned = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|cards|pizza|fi|live)\s*[-_:]\s*/i, '');
+  let cleaned = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|cards|pizza|fi|live|style)\s*[-_:]\s*/i, '');
   cleaned = cleaned.replace(/^(?:https?:\/\/)?(?:www\.)?(?:1tamilmv|tamilmv)[\w\.-]*\s*[-_:]\s*/i, '');
   cleaned = cleaned.replace(/^\[?\b(?:1tamilmv|tamilmv)\b\]?\s*[-_:]?\s*/i, '');
   cleaned = cleaned.replace(/^[\s\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]+/u, '').trim();
@@ -1494,3 +1495,333 @@ export async function fetchAllTamilMVMovies(
 
   return Array.from(movieMap.values());
 }
+
+// ─── Utility: Clean Movie/Series Title ───────────────────────────────────────
+
+export function cleanMovieTitle(title: string): string {
+  if (!title) return '';
+  return title
+    .replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|cards|pizza|fi|live|style)\s*[-_:]\s*/gi, '')
+    .replace(/^(?:https?:\/\/)?(?:www\.)?(?:1tamilmv|tamilmv)[\w\.-]*\s*[-_:]\s*/gi, '')
+    .replace(/^\[?\b(?:1tamilmv|tamilmv)\b\]?\s*[-_:]?\s*/gi, '')
+    .replace(/\b(?:1tamilmv|tamilmv)\b/gi, '')
+    .replace(/^[\s\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\-_–]+/u, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// ─── Web Series Dynamic Pagination ──────────────────────────────────────────
+
+export interface WebSeriesPageResult {
+  items: GroupedItem[];
+  totalPages: number;
+  currentPage: number;
+}
+
+export function parseWebSeriesPageHtml(html: string, baseUrl: string): { items: GroupedItem[]; totalPages: number } {
+  let totalPages = 1;
+  const pageMatch = html.match(/data-pages=["'](\d+)["']/i) ||
+                    html.match(/data-ipsPagination-pages=["'](\d+)["']/i) ||
+                    html.match(/Page\s+\d+\s+of\s+(\d+)/i) ||
+                    html.match(/rel=["']last["'][^>]*data-page=["'](\d+)["']/i);
+  if (pageMatch) {
+    totalPages = parseInt(pageMatch[1], 10);
+  }
+
+  const rowRegex = /<li[^>]*class=["'][^"']*ipsDataItem[^"']*["'][^>]*data-rowID=["'](\d+)["'][\s\S]*?<\/li>/gi;
+  const rows = [...html.matchAll(rowRegex)];
+  const grouped: Record<string, GroupedItem> = {};
+
+  for (const row of rows) {
+    const rowHtml = row[0];
+    const linkMatch = rowHtml.match(/<h4[^>]*class=["'][^"']*ipsDataItem_title[^"']*["'][\s\S]*?<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (!linkMatch) continue;
+
+    let topicUrl = linkMatch[1].replace(/&amp;/g, '&').trim();
+    if (topicUrl.startsWith('//')) topicUrl = 'https:' + topicUrl;
+    else if (topicUrl.startsWith('/')) topicUrl = `${baseUrl}${topicUrl}`;
+
+    const rawTitle = linkMatch[2].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+    if (!rawTitle || rawTitle.length < 4) continue;
+
+    const { name, year } = cleanTopicTitle(rawTitle);
+    const lang = detectLanguageFromTitle(rawTitle, '19');
+    const key = `${name.toLowerCase()}|||${year || ''}`;
+
+    const torrentItem: TorrentItem = {
+      guid: topicUrl,
+      groupid: topicUrl,
+      name,
+      year,
+      language: lang,
+      poster: null,
+      title: rawTitle,
+      magnetUrl: '',
+      infoHash: '',
+      publishDate: new Date().toISOString(),
+    };
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        name,
+        year,
+        items: [torrentItem],
+      };
+      (grouped[key] as any).type = 'series';
+    } else {
+      if (!grouped[key].items.some((i) => i.guid === topicUrl)) {
+        grouped[key].items.push(torrentItem);
+      }
+    }
+  }
+
+  return {
+    items: Object.values(grouped),
+    totalPages,
+  };
+}
+
+export async function fetchWebSeriesPage(
+  page: number = 1,
+  forceRefresh: boolean = false,
+  customBaseUrl?: string
+): Promise<WebSeriesPageResult> {
+  const baseUrl = customBaseUrl || getTamilMVBaseUrl();
+  const cacheKey = `tamilmv:webseries:page:${page}`;
+
+  if (!forceRefresh) {
+    try {
+      const raw = storageService.getItem(cacheKey);
+      if (raw) {
+        const entry = JSON.parse(raw);
+        if (Date.now() - entry.timestamp < 10 * 60 * 1000) {
+          return entry.data;
+        }
+      }
+    } catch {}
+  }
+
+  const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter((m) => m !== baseUrl)];
+
+  for (const mirror of mirrorsToTry) {
+    try {
+      if (page === 1) {
+        // Page 1: Load XML feed & detect total pages from HTML
+        const xmlUrl = `${mirror}/index.php?/forums/forum/19-web-series-tv-shows/all.xml`;
+        const htmlUrl = `${mirror}/index.php?/forums/forum/19-web-series-tv-shows/`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 16000);
+
+        const [xmlRes, htmlRes] = await Promise.all([
+          fetch(xmlUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+            },
+            signal: controller.signal,
+          }).catch(() => null),
+          fetch(htmlUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            signal: controller.signal,
+          }).catch(() => null),
+        ]);
+
+        clearTimeout(timeout);
+
+        let totalPages = 1;
+        if (htmlRes && htmlRes.ok) {
+          const html = await htmlRes.text();
+          const pageMatch = html.match(/data-pages=["'](\d+)["']/i) ||
+                            html.match(/data-ipsPagination-pages=["'](\d+)["']/i) ||
+                            html.match(/Page\s+\d+\s+of\s+(\d+)/i) ||
+                            html.match(/rel=["']last["'][^>]*data-page=["'](\d+)["']/i);
+          if (pageMatch) totalPages = parseInt(pageMatch[1], 10);
+        }
+
+        // If totalPages is still 1, retry fetching html from another mirror if needed
+        if (totalPages <= 1) {
+          for (const m2 of mirrorsToTry.slice(0, 3)) {
+            if (m2 === mirror) continue;
+            try {
+              const r2 = await fetch(`${m2}/index.php?/forums/forum/19-web-series-tv-shows/`, {
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+              });
+              if (r2.ok) {
+                const h2 = await r2.text();
+                const pm2 = h2.match(/data-pages=["'](\d+)["']/i) ||
+                            h2.match(/data-ipsPagination-pages=["'](\d+)["']/i) ||
+                            h2.match(/Page\s+\d+\s+of\s+(\d+)/i) ||
+                            h2.match(/rel=["']last["'][^>]*data-page=["'](\d+)["']/i);
+                if (pm2) {
+                  totalPages = parseInt(pm2[1], 10);
+                  break;
+                }
+              }
+            } catch {}
+          }
+        }
+
+        if (xmlRes && xmlRes.ok) {
+          const xml = await xmlRes.text();
+          let items = parseRSSFeed(xml, 'tamil', 'series');
+
+          // If XML returned 0 items, fallback to parsing HTML
+          if (items.length === 0 && htmlRes && htmlRes.ok) {
+            const html = await htmlRes.text();
+            items = parseWebSeriesPageHtml(html, mirror).items;
+          }
+
+          if (items.length > 0) {
+            const result: WebSeriesPageResult = {
+              items,
+              totalPages: Math.max(totalPages, 1),
+              currentPage: 1,
+            };
+
+            try {
+              storageService.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
+            } catch {}
+
+            return result;
+          }
+        }
+      } else {
+        // Page > 1 from forum pagination HTML
+        const htmlUrl = `${mirror}/index.php?/forums/forum/19-web-series-tv-shows/page/${page}/`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 16000);
+
+        const res = await fetch(htmlUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+
+        if (res.ok) {
+          const html = await res.text();
+          const { items, totalPages } = parseWebSeriesPageHtml(html, mirror);
+
+          if (items.length > 0) {
+            const result: WebSeriesPageResult = {
+              items,
+              totalPages: Math.max(totalPages, 1),
+              currentPage: page,
+            };
+
+            try {
+              storageService.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
+            } catch {}
+
+            return result;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // Fallback to cache if available
+  try {
+    const raw = storageService.getItem(cacheKey);
+    if (raw) return JSON.parse(raw).data;
+  } catch {}
+
+  throw new Error(`Failed to load Web Series page ${page}. Please check your connection or mirror.`);
+}
+
+export interface UseWebSeriesPaginatedResult {
+  items: GroupedItem[];
+  currentPage: number;
+  totalPages: number;
+  loading: boolean;
+  error: string | null;
+  goToPage: (page: number) => void;
+  refresh: () => void;
+}
+
+export function useWebSeriesPaginated(initialPage: number = 1): UseWebSeriesPaginatedResult {
+  const [currentPage, setCurrentPage] = useState<number>(initialPage);
+  const [items, setItems] = useState<GroupedItem[]>([]);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadPage = useCallback(async (page: number, forceRefresh = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchWebSeriesPage(page, forceRefresh);
+      setItems(res.items);
+      setTotalPages((prev) => (res.totalPages > 1 ? res.totalPages : prev));
+      setCurrentPage(res.currentPage);
+    } catch (err: any) {
+      setError(err?.message || `Failed to load page ${page}`);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPage(currentPage, false);
+  }, [currentPage, loadPage]);
+
+  const goToPage = useCallback((page: number) => {
+    setCurrentPage(page);
+  }, []);
+
+  const refresh = useCallback(() => {
+    loadPage(currentPage, true);
+  }, [currentPage, loadPage]);
+
+  return {
+    items,
+    currentPage,
+    totalPages,
+    loading,
+    error,
+    goToPage,
+    refresh,
+  };
+}
+
+export function getPaginationItems(currentPage: number, totalPages: number): (number | '...')[] {
+  if (totalPages <= 1) return [1];
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, '...', totalPages];
+  }
+
+  if (currentPage >= totalPages - 3) {
+    return [
+      1,
+      '...',
+      totalPages - 4,
+      totalPages - 3,
+      totalPages - 2,
+      totalPages - 1,
+      totalPages,
+    ];
+  }
+
+  return [
+    1,
+    '...',
+    currentPage - 1,
+    currentPage,
+    currentPage + 1,
+    '...',
+    totalPages,
+  ];
+}
+
