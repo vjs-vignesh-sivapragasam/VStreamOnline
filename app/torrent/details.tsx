@@ -129,7 +129,6 @@ const TorrentDetails = () => {
   const isPortrait = height > width;
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView | null>(null);
-  const qualitySectionY = useRef<number>(0);
 
   // ── TMDB State ──
   const [tmdbData, setTmdbData] = useState<TmdbDetails | null>(null);
@@ -143,7 +142,9 @@ const TorrentDetails = () => {
   const [pickerFiles, setPickerFiles] = useState<TorrentFile[]>([]);
   const [pendingItem, setPendingItem] = useState<TorrentItem | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
+  const [pickerMode, setPickerMode] = useState<'stream' | 'download'>('stream');
   const [qualityModalVisible, setQualityModalVisible] = useState(false);
+  const [qualityModalMode, setQualityModalMode] = useState<'watch' | 'download'>('watch');
 
   // Fetch TMDB data for Cast, Crew, Trailer, Recommendations, Information
   useEffect(() => {
@@ -323,25 +324,53 @@ const TorrentDetails = () => {
   };
 
   // ── Watch Now Handler ──
-  const handleWatchNow = () => {
+  const handleWatchNow = async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
     if (isLoadingVariants) {
       showAlert('Loading Streams', 'Fetching available streaming qualities. Please wait a moment...');
       return;
     }
 
     if (allItems.length > 0) {
+      setQualityModalMode('watch');
       setQualityModalVisible(true);
     } else {
-      if (qualitySectionY.current > 0 && scrollRef.current) {
-        scrollRef.current.scrollTo({ y: qualitySectionY.current - 40, animated: true });
-      } else {
-        router.push({
-          pathname: '/(tabs)/search',
-          params: { query: getMovieSearchTitle(title) },
-        } as any);
-      }
+      showAlert(
+        'No Streams Found',
+        'No direct torrent streams were found for this title on TamilMV. You can search manually in the Search tab or open Web View.'
+      );
     }
   };
+
+  // ── Download Button Handler ──
+  const handleDownloadPress = async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (isLoadingVariants) {
+      showAlert('Loading Downloads', 'Fetching available download qualities. Please wait a moment...');
+      return;
+    }
+
+    if (allItems.length > 0) {
+      setQualityModalMode('download');
+      setQualityModalVisible(true);
+    } else {
+      showAlert(
+        'No Downloads Found',
+        'No direct torrent files were found for this title on TamilMV. You can search manually in the Search tab or open Web View.'
+      );
+    }
+  };
+
+  const hasActiveDownload = allItems.some(
+    (i) => activeDownloadsMap[i.infoHash]?.status === 'downloading'
+  );
+  const hasCompletedDownload = allItems.some(
+    (i) => activeDownloadsMap[i.infoHash]?.status === 'completed'
+  );
 
   const formattedDate = publishDate
     ? new Date(publishDate).toLocaleDateString('en-US', {
@@ -383,6 +412,7 @@ const TorrentDetails = () => {
       } else {
         setPendingItem(item);
         setPickerFiles(files);
+        setPickerMode('stream');
         setPickerVisible(true);
       }
     } catch (e) {
@@ -424,41 +454,38 @@ const TorrentDetails = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
-    const clean = cleanTitle(item.title);
-    const client = getActiveStreamingClient();
-    const streamUrl = await client.getStreamingURL(item.infoHash, 0);
+    setDownloadingGuid(item.guid);
+    try {
+      const clean = cleanTitle(item.title);
+      const client = getActiveStreamingClient();
+      const files = await client.getTorrentFiles(item.infoHash, 3000).catch(() => []);
 
-    downloadService.startDownload({
-      infoHash: item.infoHash,
-      fileIdx: 0,
-      title: clean,
-      poster: poster ?? tmdbData?.posterUrl ?? '',
-      fileName: `${clean}.mp4`,
-      streamUrl,
-    });
-
-    client.getTorrentFiles(item.infoHash, 3000)
-      .then((files) => {
-        if (files && files.length > 1) {
-          setPendingItem(item);
-          setPickerFiles(files);
-          setPickerVisible(true);
-        } else if (files && files.length === 1 && files[0]) {
-          downloadService.updateItemMetadata(
-            item.infoHash,
-            files[0].id ?? 0,
-            files[0].name,
-            files[0].length
-          );
-        }
-      })
-      .catch(() => {});
+      if (files && files.length > 1) {
+        setPendingItem(item);
+        setPickerFiles(files);
+        setPickerMode('download');
+        setPickerVisible(true);
+      } else {
+        const fileIdx = files && files.length === 1 ? files[0].id : 0;
+        const fileName = files && files.length === 1 ? files[0].name : `${clean}.mp4`;
+        const fileLength = files && files.length === 1 ? files[0].length : undefined;
+        await executeDownload(item, fileIdx, fileName, fileLength);
+      }
+    } catch {
+      await executeDownload(item, 0);
+    } finally {
+      setDownloadingGuid(null);
+    }
   };
 
   const handleFilePick = (file: TorrentFile) => {
     setPickerVisible(false);
     if (!pendingItem) return;
-    navigateToPlayer(pendingItem, file.id);
+    if (pickerMode === 'download') {
+      executeDownload(pendingItem, file.id, file.name, file.length);
+    } else {
+      navigateToPlayer(pendingItem, file.id);
+    }
   };
 
   // Movie backdrop image or poster fallback
@@ -507,7 +534,7 @@ const TorrentDetails = () => {
           <Text style={styles.movieTitleMain}>{getMovieSearchTitle(tmdbData?.title || title)}</Text>
         </View>
 
-        {/* ── Action Row (Bookmark, Watch Now, Trailer) ── */}
+        {/* ── Action Row (Bookmark, Watch Now, Download, Trailer) ── */}
         <View style={styles.actionRowContainer}>
           {/* Circular My List Button */}
           <TouchableOpacity
@@ -537,6 +564,26 @@ const TorrentDetails = () => {
             <Text style={styles.watchNowBtnText}>
               {isLoadingVariants ? 'Loading...' : 'Watch Now'}
             </Text>
+          </TouchableOpacity>
+
+          {/* Circular Download Button */}
+          <TouchableOpacity
+            style={[
+              styles.circularActionBtn,
+              hasActiveDownload && styles.circularActionBtnActive,
+              hasCompletedDownload && styles.circularActionBtnCompleted,
+            ]}
+            onPress={handleDownloadPress}
+            activeOpacity={0.7}
+            disabled={isLoadingVariants}
+          >
+            {hasActiveDownload ? (
+              <Ionicons name="arrow-down" size={22} color="#535aff" />
+            ) : hasCompletedDownload ? (
+              <Ionicons name="checkmark-circle" size={22} color="#00e676" />
+            ) : (
+              <Ionicons name="download-outline" size={22} color="#ffffff" />
+            )}
           </TouchableOpacity>
 
           {/* Circular Trailer Button (Opens YouTube directly) */}
@@ -571,209 +618,6 @@ const TorrentDetails = () => {
             )}
           </View>
         ) : null}
-
-        {/* ── Section: Choose Quality (Torrents & Downloads) ── */}
-        <View
-          style={styles.section}
-          onLayout={(e) => {
-            qualitySectionY.current = e.nativeEvent.layout.y;
-          }}
-        >
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Choose Quality</Text>
-            {allItems.length > 0 && (
-              <View style={styles.variantBadge}>
-                <Text style={styles.variantBadgeText}>{allItems.length} variants</Text>
-              </View>
-            )}
-          </View>
-
-          {isLoadingVariants ? (
-            <View style={{ paddingVertical: 32, alignItems: 'center', gap: 10 }}>
-              <ActivityIndicator size="small" color="#535aff" />
-              <Text style={{ fontSize: 14, color: '#8E8E93', fontWeight: '500' }}>
-                Fetching download sources from 1TamilMV...
-              </Text>
-            </View>
-          ) : allItems.length > 0 ? (
-            <View style={styles.torrentList}>
-              {allItems.map((item, index) => {
-                const clean = cleanTorrentTitle(item.title);
-                const qualityTag = extractQualityTag(clean);
-                const isLast = index === allItems.length - 1;
-                const isLoading = loadingItem === item.guid;
-                const isStartingDownload = downloadingGuid === item.guid;
-
-                const downloadInfo = activeDownloadsMap[item.infoHash];
-                const isItemDownloading = downloadInfo?.status === 'downloading';
-                const isItemCompleted = downloadInfo?.status === 'completed';
-                const isItemPaused = downloadInfo?.status === 'paused';
-
-                return (
-                  <Pressable
-                    key={item.guid}
-                    style={({ pressed }) => [
-                      styles.torrentRow,
-                      isLast && styles.torrentRowLast,
-                      pressed && styles.torrentRowPressed,
-                      isLoading && styles.torrentRowLoading,
-                    ]}
-                    onPress={() => handleStream(item)}
-                    disabled={loadingItem !== null}
-                  >
-                    <View style={styles.torrentIconWrap}>
-                      {isLoading ? (
-                        <ActivityIndicator size="small" color="#535aff" />
-                      ) : (
-                        <Ionicons name="play-circle-outline" size={36} color="#ffffff" />
-                      )}
-                    </View>
-
-                    <View style={styles.torrentBody}>
-                      <Text style={styles.torrentTitle}>{clean}</Text>
-
-                      <View style={styles.torrentMetaRow}>
-                        {qualityTag ? (
-                          <View style={styles.qualityBadge}>
-                            <Text style={styles.qualityBadgeText}>{qualityTag}</Text>
-                          </View>
-                        ) : null}
-
-                        {isItemDownloading && (
-                          <View style={styles.rowSpeedBadge}>
-                            <Ionicons name="flash" size={10} color="#00e676" />
-                            <Text style={styles.rowSpeedText}>
-                              {downloadInfo.speedFormatted || '0 KB/s'}
-                            </Text>
-                          </View>
-                        )}
-
-                        {downloadInfo && downloadInfo.peers !== undefined && downloadInfo.peers > 0 && (
-                          <View style={styles.rowPeersBadge}>
-                            <Ionicons name="people" size={10} color="#7b82ff" />
-                            <Text style={styles.rowPeersText}>
-                              {downloadInfo.peers} {downloadInfo.peers === 1 ? 'peer' : 'peers'}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-
-                      {(isItemDownloading || isItemPaused || downloadInfo?.status === 'error') && (
-                        <View style={styles.rowProgressContainer}>
-                          {downloadInfo.status !== 'error' ? (
-                            <View style={styles.rowProgressTrack}>
-                              <View
-                                style={[
-                                  styles.rowProgressFill,
-                                  {
-                                    width: `${Math.min(downloadInfo.progress, 100)}%`,
-                                    backgroundColor: isItemPaused ? '#ff9800' : '#535aff',
-                                  },
-                                ]}
-                              />
-                            </View>
-                          ) : null}
-                          <Text
-                            style={[
-                              styles.rowProgressStatsText,
-                              downloadInfo.status === 'error' && { color: '#ff453a', fontWeight: '500' },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {downloadInfo.status === 'error'
-                              ? `⚠️ ${downloadInfo.statusDetail || downloadInfo.errorMessage || 'Server unreachable'}`
-                              : `${downloadInfo.progress}% • ${downloadService.formatBytes(downloadInfo.downloadedBytes)} / ${downloadService.formatBytes(downloadInfo.totalBytes)}${downloadInfo.statusDetail ? ` • ${downloadInfo.statusDetail}` : ''}`}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.downloadBtn,
-                        isItemCompleted && styles.downloadBtnCompleted,
-                        isItemDownloading && styles.downloadBtnActive,
-                      ]}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        if (isItemCompleted) {
-                          externalPlayerService.promptPlayerSelection({
-                            fileUri: downloadInfo.fileUri,
-                            title: clean,
-                            poster: poster ?? tmdbData?.posterUrl ?? '',
-                            fileLength: downloadInfo.totalBytes,
-                            onPlayInternal: () => {
-                              router.push({
-                                pathname: '/stream/player' as any,
-                                params: { videoUrl: downloadInfo.fileUri, title: clean, poster: poster ?? tmdbData?.posterUrl ?? '' },
-                              });
-                            },
-                          });
-                        } else if (isItemDownloading) {
-                          downloadService.pauseDownload(downloadInfo.id);
-                        } else if (isItemPaused) {
-                          downloadService.resumeDownload(downloadInfo.id);
-                        } else {
-                          handleDownload(item);
-                        }
-                      }}
-                      disabled={isStartingDownload}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      {isStartingDownload ? (
-                        <ActivityIndicator size="small" color="#535aff" />
-                      ) : isItemCompleted ? (
-                        <Ionicons name="checkmark-circle" size={24} color="#00e676" />
-                      ) : isItemDownloading ? (
-                        <Ionicons name="pause-circle" size={24} color="#ff9800" />
-                      ) : isItemPaused ? (
-                        <Ionicons name="play-circle" size={24} color="#535aff" />
-                      ) : (
-                        <Ionicons name="arrow-down-circle-outline" size={24} color="#535aff" />
-                      )}
-                    </TouchableOpacity>
-
-                    <Ionicons name="chevron-forward" size={18} color="#3a3a3c" />
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : (
-            <View style={styles.noStreamsContainer}>
-              <Ionicons name="film-outline" size={32} color="#636366" style={{ marginBottom: 8 }} />
-              <Text style={styles.noStreamsText}>No torrent streams directly found on TamilMV</Text>
-              <Text style={styles.noStreamsSubtext}>
-                You can search with alternate keywords or browse TamilMV in the in-app browser
-              </Text>
-              <View style={styles.noStreamsBtnRow}>
-                <TouchableOpacity
-                  style={styles.searchSourcesBtn}
-                  onPress={() => {
-                    router.push({
-                      pathname: '/(tabs)/search',
-                      params: { query: getMovieSearchTitle(title) },
-                    } as any);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="search" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-                  <Text style={styles.searchSourcesBtnText}>Search Tab</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.searchSourcesBtn, styles.browserSourcesBtn]}
-                  onPress={() => {
-                    router.push('/browser' as any);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="globe-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-                  <Text style={styles.searchSourcesBtnText}>Web View</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
 
         {/* ── Section: Cast & Crew ── */}
         {tmdbData?.cast && tmdbData.cast.length > 0 && (
@@ -995,7 +839,7 @@ const TorrentDetails = () => {
         <BottomSpacing space={60} />
       </ScrollView>
 
-      {/* ── Choose Quality Modal (Watch Now) ── */}
+      {/* ── Choose Quality Modal (Watch Now / Download) ── */}
       <Modal
         visible={qualityModalVisible}
         animationType="slide"
@@ -1011,9 +855,12 @@ const TorrentDetails = () => {
               <View style={styles.modalHandle} />
               <View style={styles.qualityModalHeaderRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.modalTitle}>Choose Quality</Text>
+                  <Text style={styles.modalTitle}>
+                    {qualityModalMode === 'watch' ? 'Choose Quality to Watch' : 'Choose Quality to Download'}
+                  </Text>
                   <Text style={styles.modalSubtitle}>
-                    {allItems.length} {allItems.length === 1 ? 'quality' : 'qualities'} available • Tap to watch
+                    {allItems.length} {allItems.length === 1 ? 'quality' : 'qualities'} available •{' '}
+                    {qualityModalMode === 'watch' ? 'Tap to start streaming' : 'Tap to start download'}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -1036,9 +883,13 @@ const TorrentDetails = () => {
                 const qualityTag = extractQualityTag(clean);
                 const meta = parseQualityMeta(clean);
                 const isLast = index === allItems.length - 1;
-                const isLoading = loadingItem === item.guid;
+                const isLoadingStream = loadingItem === item.guid;
+                const isStartingDownload = downloadingGuid === item.guid;
                 const downloadInfo = activeDownloadsMap[item.infoHash];
                 const isItemCompleted = downloadInfo?.status === 'completed';
+                const isItemDownloading = downloadInfo?.status === 'downloading';
+                const isItemPaused = downloadInfo?.status === 'paused';
+                const isWatchMode = qualityModalMode === 'watch';
 
                 return (
                   <TouchableOpacity
@@ -1049,18 +900,48 @@ const TorrentDetails = () => {
                       isItemCompleted && styles.qualityOptionCardCompleted,
                     ]}
                     onPress={() => {
-                      setQualityModalVisible(false);
-                      if (isItemCompleted && downloadInfo?.fileUri) {
-                        router.push({
-                          pathname: '/stream/player' as any,
-                          params: {
-                            videoUrl: downloadInfo.fileUri,
+                      if (isWatchMode) {
+                        setQualityModalVisible(false);
+                        if (isItemCompleted && downloadInfo?.fileUri) {
+                          router.push({
+                            pathname: '/stream/player' as any,
+                            params: {
+                              videoUrl: downloadInfo.fileUri,
+                              title: clean,
+                              poster: poster ?? tmdbData?.posterUrl ?? '',
+                            },
+                          });
+                        } else {
+                          handleStream(item);
+                        }
+                      } else {
+                        // Download Mode
+                        if (isItemCompleted) {
+                          setQualityModalVisible(false);
+                          externalPlayerService.promptPlayerSelection({
+                            fileUri: downloadInfo.fileUri,
                             title: clean,
                             poster: poster ?? tmdbData?.posterUrl ?? '',
-                          },
-                        });
-                      } else {
-                        handleStream(item);
+                            fileLength: downloadInfo.totalBytes,
+                            onPlayInternal: () => {
+                              router.push({
+                                pathname: '/stream/player' as any,
+                                params: {
+                                  videoUrl: downloadInfo.fileUri,
+                                  title: clean,
+                                  poster: poster ?? tmdbData?.posterUrl ?? '',
+                                },
+                              });
+                            },
+                          });
+                        } else if (isItemDownloading) {
+                          downloadService.pauseDownload(downloadInfo.id);
+                        } else if (isItemPaused) {
+                          downloadService.resumeDownload(downloadInfo.id);
+                        } else {
+                          setQualityModalVisible(false);
+                          handleDownload(item);
+                        }
                       }
                     }}
                     activeOpacity={0.7}
@@ -1117,17 +998,57 @@ const TorrentDetails = () => {
                             <Text style={styles.qualityDownloadedText}>Downloaded</Text>
                           </View>
                         )}
+
+                        {isItemDownloading && (
+                          <View style={styles.qualityDownloadingBadge}>
+                            <Ionicons name="arrow-down" size={10} color="#00e676" />
+                            <Text style={styles.qualityDownloadingText}>
+                              {downloadInfo.progress}% • {downloadInfo.speedFormatted || '0 KB/s'}
+                            </Text>
+                          </View>
+                        )}
                       </View>
                     </View>
 
                     <View style={styles.qualityPlayActionWrap}>
-                      {isLoading ? (
-                        <ActivityIndicator size="small" color="#535aff" />
+                      {isWatchMode ? (
+                        isLoadingStream ? (
+                          <ActivityIndicator size="small" color="#535aff" />
+                        ) : isItemCompleted ? (
+                          <View style={[styles.qualityPlayBtn, styles.qualityPlayBtnOffline]}>
+                            <Ionicons name="play" size={12} color="#00e676" />
+                            <Text style={[styles.qualityPlayBtnText, { color: '#00e676' }]}>Play</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.qualityPlayBtn}>
+                            <Ionicons name="play" size={12} color="#ffffff" />
+                            <Text style={styles.qualityPlayBtnText}>Watch</Text>
+                          </View>
+                        )
                       ) : (
-                        <View style={styles.qualityPlayBtn}>
-                          <Ionicons name="play" size={12} color="#ffffff" />
-                          <Text style={styles.qualityPlayBtnText}>Play</Text>
-                        </View>
+                        isStartingDownload ? (
+                          <ActivityIndicator size="small" color="#535aff" />
+                        ) : isItemCompleted ? (
+                          <View style={[styles.qualityPlayBtn, styles.qualityDownloadBtnCompleted]}>
+                            <Ionicons name="checkmark-circle" size={13} color="#00e676" />
+                            <Text style={[styles.qualityPlayBtnText, { color: '#00e676' }]}>Done</Text>
+                          </View>
+                        ) : isItemDownloading ? (
+                          <View style={[styles.qualityPlayBtn, styles.qualityDownloadBtnActive]}>
+                            <Ionicons name="pause" size={12} color="#ff9800" />
+                            <Text style={[styles.qualityPlayBtnText, { color: '#ff9800' }]}>Pause</Text>
+                          </View>
+                        ) : isItemPaused ? (
+                          <View style={[styles.qualityPlayBtn, styles.qualityDownloadBtnPaused]}>
+                            <Ionicons name="play" size={12} color="#7b82ff" />
+                            <Text style={[styles.qualityPlayBtnText, { color: '#7b82ff' }]}>Resume</Text>
+                          </View>
+                        ) : (
+                          <View style={[styles.qualityPlayBtn, styles.qualityDownloadBtn]}>
+                            <Ionicons name="download-outline" size={13} color="#ffffff" />
+                            <Text style={styles.qualityPlayBtnText}>Download</Text>
+                          </View>
+                        )
                       )}
                     </View>
                   </TouchableOpacity>
@@ -1149,9 +1070,11 @@ const TorrentDetails = () => {
           <Pressable style={styles.modalSheet} onPress={() => {}}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHandle} />
-              <Text style={styles.modalTitle}>Select File</Text>
+              <Text style={styles.modalTitle}>
+                {pickerMode === 'download' ? 'Select File to Download' : 'Select File to Watch'}
+              </Text>
               <Text style={styles.modalSubtitle}>
-                {pickerFiles.length} files found • Tap to play or download
+                {pickerFiles.length} files found • Tap to {pickerMode === 'download' ? 'download' : 'play'}
               </Text>
             </View>
 
@@ -1260,19 +1183,19 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  /* Action Row (Bookmark, Watch Now, Trailer) */
+  /* Action Row (Bookmark, Watch Now, Download, Trailer) */
   actionRowContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 16,
-    paddingHorizontal: 20,
+    gap: 12,
+    paddingHorizontal: 16,
     marginBottom: 20,
   },
   circularActionBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1283,14 +1206,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(83, 90, 255, 0.2)',
     borderColor: '#535aff',
   },
+  circularActionBtnCompleted: {
+    backgroundColor: 'rgba(0, 230, 118, 0.15)',
+    borderColor: '#00e676',
+  },
   watchNowBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
-    paddingHorizontal: 28,
-    height: 52,
-    borderRadius: 26,
+    paddingHorizontal: 20,
+    height: 48,
+    borderRadius: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -1298,7 +1225,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   watchNowBtnText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#000000',
     letterSpacing: 0.2,
@@ -1810,6 +1737,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  qualityPlayBtnOffline: {
+    backgroundColor: 'rgba(0, 230, 118, 0.15)',
+    borderWidth: 1,
+    borderColor: '#00e676',
+  },
+  qualityDownloadBtn: {
+    backgroundColor: '#535aff',
+  },
+  qualityDownloadBtnCompleted: {
+    backgroundColor: 'rgba(0, 230, 118, 0.15)',
+    borderWidth: 1,
+    borderColor: '#00e676',
+  },
+  qualityDownloadBtnActive: {
+    backgroundColor: 'rgba(255, 152, 0, 0.15)',
+    borderWidth: 1,
+    borderColor: '#ff9800',
+  },
+  qualityDownloadBtnPaused: {
+    backgroundColor: 'rgba(123, 130, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: '#7b82ff',
+  },
+  qualityDownloadingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0, 230, 118, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  qualityDownloadingText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#00e676',
   },
 });
 
