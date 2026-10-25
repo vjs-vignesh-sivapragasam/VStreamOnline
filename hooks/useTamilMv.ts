@@ -563,7 +563,7 @@ export async function autoDiscoverWorkingDomain(): Promise<string | null> {
 }
 
 export type Language = 'tamil' | 'english' | 'hindi' | 'telugu' | 'malayalam' | 'kannada';
-export type Category = 'predvd' | 'webhd' | 'hdrip' | 'hdtv' | 'series' | 'multiaudio';
+export type Category = 'predvd' | 'webhd' | 'hdrip' | 'dvd' | 'hdtv' | 'series' | 'multiaudio';
 
 const FORUM_IDS: Record<Language, Partial<Record<Category, string>>> = {
   tamil: {
@@ -572,6 +572,7 @@ const FORUM_IDS: Record<Language, Partial<Record<Category, string>>> = {
     multiaudio: '17-hollywood-movies-in-multi-audios',
     series: '19-web-series-tv-shows',
     hdrip: '12-hd-rips-dvd-rips-br-rips',
+    dvd: '13-dvd9-dvd5',
     hdtv: '14-hdtv-sdtv-hdtv-rips',
   },
   english: {
@@ -583,21 +584,25 @@ const FORUM_IDS: Record<Language, Partial<Record<Category, string>>> = {
     predvd: '57-predvd-dvdscr-cam-tc',
     webhd: '58-web-hd-itunes-hd-bluray',
     hdrip: '59-hd-rips-dvd-rips-br-rips',
+    dvd: '60-dvd9-dvd5',
   },
   telugu: {
     predvd: '23-predvd-dvdscr-cam-tc',
     webhd: '24-web-hd-itunes-hd-bluray',
     hdrip: '25-hd-rips-dvd-rips-br-rips',
+    dvd: '26-dvd9-dvd5',
   },
   malayalam: {
     predvd: '35-predvd-dvdscr-cam-tc',
     webhd: '36-web-hd-itunes-hd-bluray',
     hdrip: '37-hd-rips-dvd-rips-br-rips',
+    dvd: '38-dvd9-dvd5',
   },
   kannada: {
     predvd: '68-predvd-dvdscr-cam-tc',
     webhd: '69-web-hd-itunes-hd-bluray',
     hdrip: '70-hd-rips-dvd-rips-br-rips',
+    dvd: '71-dvd9-dvd5',
   },
 };
 
@@ -607,6 +612,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
   multiaudio: 'Hollywood Movies in Multi Audios',
   series: 'Web Series & TV Shows',
   hdrip: 'HD Rip',
+  dvd: 'DVD9 / DVD5',
   hdtv: 'HD TV',
 };
 
@@ -614,6 +620,7 @@ const CATEGORY_TYPE: Record<Category, 'movie' | 'series'> = {
   predvd: 'movie',
   webhd: 'movie',
   hdrip: 'movie',
+  dvd: 'movie',
   hdtv: 'movie',
   multiaudio: 'movie',
   series: 'series',
@@ -695,6 +702,11 @@ function isValidQuality(displayName: string, category: Category): boolean {
     const INVALID = /\s(cam|unknown|telesync|hdts|camrip)\s/i;
     const LOW_RES = /(360p|240p)/i;
     return !INVALID.test(displayName) && !LOW_RES.test(displayName);
+  }
+  if (category === 'dvd' || category === 'hdtv') {
+    // In DVD and HDTV categories: allow DVD9, DVD5, Untouched, Remux, ISO, 480p/576p SDTV/HDTV
+    const INVALID = /\s(cam|unknown|telesync|hdts|camrip)\s/i;
+    return !INVALID.test(displayName);
   }
   return !INVALID_RELEASE_REGEX.test(displayName) && !LOW_QUALITY_REGEX.test(displayName);
 }
@@ -988,12 +1000,12 @@ export { FORUM_IDS, CATEGORY_LABELS, CATEGORY_TYPE };
 // ─── Website Search & Topic Magnets Scraper ──────────────────────────────────
 
 const FORUM_LANGUAGES: Record<string, Language> = {
-  '10': 'tamil', '11': 'tamil', '12': 'tamil', '14': 'tamil', '17': 'tamil', '19': 'tamil',
+  '10': 'tamil', '11': 'tamil', '12': 'tamil', '13': 'tamil', '14': 'tamil', '17': 'tamil', '19': 'tamil',
   '46': 'english', '49': 'english', '50': 'english',
-  '57': 'hindi', '58': 'hindi', '59': 'hindi',
-  '23': 'telugu', '24': 'telugu', '25': 'telugu',
-  '35': 'malayalam', '36': 'malayalam', '37': 'malayalam',
-  '68': 'kannada', '69': 'kannada', '70': 'kannada',
+  '57': 'hindi', '58': 'hindi', '59': 'hindi', '60': 'hindi',
+  '23': 'telugu', '24': 'telugu', '25': 'telugu', '26': 'telugu',
+  '35': 'malayalam', '36': 'malayalam', '37': 'malayalam', '38': 'malayalam',
+  '68': 'kannada', '69': 'kannada', '70': 'kannada', '71': 'kannada',
 };
 
 export function detectLanguageFromTitle(title: string, forumId?: string | null): Language {
@@ -1020,7 +1032,7 @@ export function cleanTopicTitle(title: string): { name: string; year: string | n
   if (match) {
     return { name: match[1].trim(), year: match[2] };
   }
-  const beforeRes = cleaned.split(/\s*[-–]\s*(?:4K|2160p|1080p|720p|TRUE|WEB|HDRip|DVDRip|DVD|HDTV|PreDVD)/i)[0];
+  const beforeRes = cleaned.split(/\s*[-–]\s*(?:4K|2160p|1080p|720p|TRUE|WEB|HDRip|DVDRip|DVD9|DVD5|DVD|HDTV|PreDVD)/i)[0];
   return { name: beforeRes.trim(), year: null };
 }
 
@@ -1367,7 +1379,7 @@ export async function fetchTamilMVRecentlyAdded(
   const posterLookup = new Map<string, string>();
   try {
     const langs: Language[] = ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'];
-    const cats: Category[] = ['predvd', 'webhd', 'multiaudio', 'hdrip', 'series'];
+    const cats: Category[] = ['predvd', 'webhd', 'multiaudio', 'hdrip', 'dvd', 'hdtv', 'series'];
     for (const l of langs) {
       for (const c of cats) {
         const raw = storageService.getItem(getCacheKey(l, c));

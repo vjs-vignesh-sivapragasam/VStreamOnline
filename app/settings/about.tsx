@@ -118,7 +118,7 @@ const AboutUsScreen: React.FC = () => {
             </View>
             <View style={styles.contactTextWrap}>
               <Text style={styles.contactLabel}>Name</Text>
-              <Text style={styles.contactValue}>vignesh</Text>
+              <Text style={styles.contactValue}>S Vignesh</Text>
             </View>
           </View>
 
@@ -228,7 +228,7 @@ const AboutUsScreen: React.FC = () => {
 
           <View style={styles.specRow}>
             <Text style={styles.specLabel}>Developer</Text>
-            <Text style={styles.specValue}>vignesh</Text>
+            <Text style={styles.specValue}>S Vignesh</Text>
           </View>
 
           <View style={styles.specRow}>
