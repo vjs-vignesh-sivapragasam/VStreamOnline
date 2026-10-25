@@ -385,6 +385,7 @@ workflows:
           rm -rf ios android
           npm install -g @expo/cli@latest --force
           npx expo prebuild --platform android
+          node scripts/patch-nodejs-mobile.js
 
       - name: Setup Android keystore
         script: |
@@ -421,12 +422,13 @@ workflows:
           export GRADLE_OPTS="-Dorg.gradle.jvmargs=\"-Xmx4096m -XX:MaxMetaspaceSize=1024m\""
           if [ "$UNSIGNED_BUILD" = "true" ]; then
             echo "📦 Building unsigned release APK"
-            ./gradlew assembleRelease -Pandroid.overridePathCheck=true
+            ./gradlew assembleRelease -Pandroid.overridePathCheck=true -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
             BUILD_OUTPUT="app/build/outputs/apk/release"
           else
             echo "📦 Building signed release APK"
             ./gradlew assembleRelease \
               -Pandroid.overridePathCheck=true \
+              -PreactNativeArchitectures=arm64-v8a,armeabi-v7a \
               -Pandroid.injected.signing.store.file=$KEYSTORE_FILE \
               -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
               -Pandroid.injected.signing.key.alias=$KEYSTORE_ALIAS \
@@ -467,10 +469,11 @@ workflows:
           cd android
           export GRADLE_OPTS="-Dorg.gradle.jvmargs=\"-Xmx4096m -XX:MaxMetaspaceSize=1024m\""
           if [ "$UNSIGNED_BUILD" = "true" ]; then
-            ./gradlew bundleRelease -Pandroid.overridePathCheck=true
+            ./gradlew bundleRelease -Pandroid.overridePathCheck=true -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
           else
             ./gradlew bundleRelease \
               -Pandroid.overridePathCheck=true \
+              -PreactNativeArchitectures=arm64-v8a,armeabi-v7a \
               -Pandroid.injected.signing.store.file=$KEYSTORE_FILE \
               -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
               -Pandroid.injected.signing.key.alias=$KEYSTORE_ALIAS \
@@ -527,6 +530,7 @@ workflows:
           rm -rf ios android
           npm install -g @expo/cli@latest --force
           npx expo prebuild --platform android
+          node scripts/patch-nodejs-mobile.js
 
       - name: Build Android debug APK
         script: |
@@ -535,7 +539,7 @@ workflows:
 
           cd android
           export GRADLE_OPTS="-Dorg.gradle.jvmargs=\"-Xmx4096m -XX:MaxMetaspaceSize=1024m\""
-          ./gradlew assembleDebug -Pandroid.overridePathCheck=true
+          ./gradlew assembleDebug -Pandroid.overridePathCheck=true -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
 
           BUILD_OUTPUT="app/build/outputs/apk/debug"
 

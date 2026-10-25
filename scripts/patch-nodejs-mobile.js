@@ -37,13 +37,55 @@ const androidGradlePath = path.join(
 
 if (fs.existsSync(androidGradlePath)) {
   let content = fs.readFileSync(androidGradlePath, 'utf8');
+  let changed = false;
+
   if (content.includes('!= "${_nodeVersionRequired}"')) {
     content = content.replace(
       '!= "${_nodeVersionRequired}"',
       '< "${_nodeVersionRequired}"'
     );
+    changed = true;
+  }
+
+  // Ensure ABI filters in nodejs-mobile restrict CMake to supported ABIs only (arm64-v8a, armeabi-v7a)
+  // because nodejs-mobile does not provide 32-bit x86 binaries (libnode.so)
+  if (!content.includes('abiFilters "arm64-v8a", "armeabi-v7a"')) {
+    content = content.replace(
+      /(defaultConfig\s*\{[\s\S]*?externalNativeBuild\s*\{\s*cmake\s*\{)/m,
+      '$1\n                abiFilters "arm64-v8a", "armeabi-v7a"'
+    );
+    content = content.replace(
+      /abiFilters\s*=\s*project\(":app"\)\.android\.defaultConfig\.ndk\.abiFilters\s*\?:[^\n]+/g,
+      'abiFilters "arm64-v8a", "armeabi-v7a"'
+    );
+    changed = true;
+  }
+
+  if (changed) {
     fs.writeFileSync(androidGradlePath, content, 'utf8');
     console.log('✅ Patched nodejs-mobile-react-native android build.gradle');
+  }
+}
+
+// ── 2b. Patch Android CMakeLists.txt to skip x86 ──────────────────────────────
+const cmakeListsPath = path.join(
+  rootDir,
+  'node_modules',
+  'nodejs-mobile-react-native',
+  'android',
+  'CMakeLists.txt'
+);
+
+if (fs.existsSync(cmakeListsPath)) {
+  let content = fs.readFileSync(cmakeListsPath, 'utf8');
+  if (!content.includes('ANDROID_ABI STREQUAL "x86"')) {
+    const skipX86Block = `\nif(ANDROID_ABI STREQUAL "x86")\n    message(STATUS "Skipping x86 for nodejs-mobile-react-native as libnode.so does not support 32-bit x86")\n    return()\nendif()\n`;
+    content = content.replace(
+      /cmake_minimum_required\([^\)]+\)/i,
+      `$&${skipX86Block}`
+    );
+    fs.writeFileSync(cmakeListsPath, content, 'utf8');
+    console.log('✅ Patched nodejs-mobile-react-native CMakeLists.txt to skip unsupported x86 ABI');
   }
 }
 
