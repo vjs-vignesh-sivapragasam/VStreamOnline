@@ -1230,7 +1230,7 @@ export default function BrowserScreen() {
               triggerHaptic();
               showAlert(
                 'Ad & Popup Shield Active',
-                `VStreamOnline built-in shield has prevented ${blockedAdCount} unwanted advertising popups, click-jackers, and tracker scripts during this session.`
+                `NetFlix built-in shield has prevented ${blockedAdCount} unwanted advertising popups, click-jackers, and tracker scripts during this session.`
               );
             }}
             activeOpacity={0.8}

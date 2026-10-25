@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 import { PlayerSelectionModal } from '@/components/PlayerSelectionModal';
+import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -38,6 +39,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded) {
       SplashScreen.hideAsync();
+      startEmbeddedNodeServer();
     }
   }, [loaded]);
 

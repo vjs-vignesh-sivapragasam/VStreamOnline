@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, Switch, TextInput, Pressable, ScrollView, Animated, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { StyleSheet, Switch, TextInput, Pressable, ScrollView, Animated, ActivityIndicator, AppState, AppStateStatus } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { View, Text } from '@/components/Themed';
 import { confirmAction, showAlert } from '@/utils/platform';
 import { MaterialIcons } from '@expo/vector-icons';
 import { StorageKeys, storageService } from '@/utils/StorageService';
+import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
 
 interface ServerConfigProps {
   serverName: string;
@@ -48,6 +50,13 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
   const [inlineEditValue, setInlineEditValue] = useState<string>('');
   const [animatedValues, setAnimatedValues] = useState<{ [key: string]: { rotation: Animated.Value, height: Animated.Value } }>({});
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({});
+
+  const serverConfigsRef = useRef<ServerConfig[]>(serverConfigs);
+  const isCheckingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    serverConfigsRef.current = serverConfigs;
+  }, [serverConfigs]);
 
   useEffect(() => {
     ensureDefaultServerExists();
@@ -119,13 +128,13 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
     }
   };
 
-  const checkServerConnection = async (server: ServerConfig): Promise<'connected' | 'disconnected' | 'error'> => {
+  const probeServer = async (targetUrl: string, timeoutMs: number = 2000): Promise<boolean> => {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      const response = await fetch(server.serverUrl, {
-        method: 'HEAD',
+      const response = await fetch(targetUrl, {
+        method: 'GET',
         signal: controller.signal,
         headers: {
           'Accept': '*/*',
@@ -133,45 +142,78 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
       });
 
       clearTimeout(timeoutId);
-      
-      if (response.ok || response.status < 500) {
-        return 'connected';
-      } else {
-        return 'disconnected';
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        return 'disconnected';
-      }
-      return 'error';
+      return response.ok || response.status < 500;
+    } catch {
+      return false;
     }
   };
 
-  const checkAllConnections = async () => {
-    const newStatus: ConnectionStatus = {};
-    
-    serverConfigs.forEach(server => {
-      newStatus[server.serverId] = 'checking';
-    });
-    setConnectionStatus(newStatus);
+  const checkServerConnection = async (server: ServerConfig): Promise<'connected' | 'disconnected' | 'error'> => {
+    const isLocal =
+      isDefaultServer(server.serverId) ||
+      server.serverUrl.includes('127.0.0.1') ||
+      server.serverUrl.includes('localhost');
 
-    const promises = serverConfigs.map(async (server) => {
-      const status = await checkServerConnection(server);
-      return { serverId: server.serverId, status };
-    });
+    if (isLocal) {
+      startEmbeddedNodeServer();
+    }
 
-    const results = await Promise.all(promises);
-    
-    const finalStatus: ConnectionStatus = {};
-    results.forEach(({ serverId, status }) => {
-      finalStatus[serverId] = status;
-    });
-    
-    setConnectionStatus(finalStatus);
+    const cleanUrl = server.serverUrl.replace(/\/+$/, '');
+    const endpoints = [`${cleanUrl}/stats.json`, `${cleanUrl}/`];
+
+    // Retry with brief delay (up to 3 attempts) to accommodate socket/OS resume lag
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      for (const ep of endpoints) {
+        const ok = await probeServer(ep, 2000);
+        if (ok) {
+          return 'connected';
+        }
+      }
+
+      if (attempt < maxRetries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+
+    return 'error';
   };
 
+  const checkAllConnections = useCallback(async () => {
+    const currentList = serverConfigsRef.current;
+    if (currentList.length === 0 || isCheckingRef.current) return;
+    isCheckingRef.current = true;
+
+    setConnectionStatus(prev => {
+      const next = { ...prev };
+      currentList.forEach(server => {
+        next[server.serverId] = 'checking';
+      });
+      return next;
+    });
+
+    try {
+      const promises = currentList.map(async (server) => {
+        const status = await checkServerConnection(server);
+        return { serverId: server.serverId, status };
+      });
+
+      const results = await Promise.all(promises);
+
+      setConnectionStatus(prev => {
+        const finalStatus = { ...prev };
+        results.forEach(({ serverId, status }) => {
+          finalStatus[serverId] = status;
+        });
+        return finalStatus;
+      });
+    } finally {
+      isCheckingRef.current = false;
+    }
+  }, []);
+
   const refreshConnection = async (serverId: string) => {
-    const server = serverConfigs.find(s => s.serverId === serverId);
+    const server = serverConfigsRef.current.find(s => s.serverId === serverId);
     if (!server) return;
 
     setConnectionStatus(prev => ({ ...prev, [serverId]: 'checking' }));
@@ -179,11 +221,71 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
     setConnectionStatus(prev => ({ ...prev, [serverId]: status }));
   };
 
-  const renderConnectionIndicator = (serverId: string) => {
-    const status = connectionStatus[serverId];
-    
+  // Re-check connections on AppState resume (unlock / return from background)
+  useEffect(() => {
+    let isMounted = true;
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        if (resumeTimer) clearTimeout(resumeTimer);
+        // Wait 300ms for network stack / thread to wake
+        resumeTimer = setTimeout(() => {
+          if (isMounted && serverConfigsRef.current.length > 0) {
+            checkAllConnections();
+          }
+        }, 300);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      if (resumeTimer) clearTimeout(resumeTimer);
+      subscription.remove();
+    };
+  }, [checkAllConnections]);
+
+  // Re-check on screen focus
+  useFocusEffect(
+    useCallback(() => {
+      if (serverConfigsRef.current.length > 0) {
+        checkAllConnections();
+      }
+    }, [checkAllConnections])
+  );
+
+  // Periodic health check while app is active
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (AppState.currentState === 'active' && serverConfigsRef.current.length > 0) {
+        checkAllConnections();
+      }
+    }, 15000);
+
+    return () => clearInterval(intervalId);
+  }, [checkAllConnections]);
+
+  const getStatusText = (status?: 'checking' | 'connected' | 'disconnected' | 'error') => {
     switch (status) {
       case 'checking':
+        return 'Checking connection';
+      case 'connected':
+        return 'Connected';
+      case 'disconnected':
+        return 'Disconnected';
+      case 'error':
+        return 'Connection error';
+      default:
+        return 'Checking connection';
+    }
+  };
+
+  const renderConnectionIndicator = (serverId: string) => {
+    const status = connectionStatus[serverId];
+
+    switch (status) {
+      case 'checking':
+      case undefined:
         return <ActivityIndicator size="small" color="#666666" />;
       case 'connected':
         return <View style={[styles.dot, styles.dotConnected]} />;
@@ -563,9 +665,7 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
                               )}
                             </View>
                             <Text style={styles.serverStatus}>
-                              {connectionStatus[item.serverId] === 'checking' ? 'Checking connection' :
-                               connectionStatus[item.serverId] === 'connected' ? 'Connected' :
-                               connectionStatus[item.serverId] === 'disconnected' ? 'Disconnected' : 'Connection error'}
+                              {getStatusText(connectionStatus[item.serverId])}
                             </Text>
                           </View>
                         </View>

@@ -562,10 +562,11 @@ export async function autoDiscoverWorkingDomain(): Promise<string | null> {
 }
 
 export type Language = 'tamil' | 'english' | 'hindi' | 'telugu' | 'malayalam' | 'kannada';
-export type Category = 'webhd' | 'hdrip' | 'hdtv' | 'series' | 'multiaudio';
+export type Category = 'predvd' | 'webhd' | 'hdrip' | 'hdtv' | 'series' | 'multiaudio';
 
 const FORUM_IDS: Record<Language, Partial<Record<Category, string>>> = {
   tamil: {
+    predvd: '10-predvd-dvdscr-cam-tc',
     webhd: '11-web-hd-itunes-hd-bluray',
     multiaudio: '17-hollywood-movies-in-multi-audios',
     series: '19-web-series-tv-shows',
@@ -573,28 +574,34 @@ const FORUM_IDS: Record<Language, Partial<Record<Category, string>>> = {
     hdtv: '14-hdtv-sdtv-hdtv-rips',
   },
   english: {
+    predvd: '46-predvd-dvdscr-cam-tc',
     webhd: '49-web-hd-itunes-hd-bluray',
-    hdrip: '50-hd-rips-dvd-rips-br-rips'
+    hdrip: '50-hd-rips-dvd-rips-br-rips',
   },
   hindi: {
+    predvd: '57-predvd-dvdscr-cam-tc',
     webhd: '58-web-hd-itunes-hd-bluray',
-    hdrip: '59-hd-rips-dvd-rips-br-rips'
+    hdrip: '59-hd-rips-dvd-rips-br-rips',
   },
   telugu: {
+    predvd: '23-predvd-dvdscr-cam-tc',
     webhd: '24-web-hd-itunes-hd-bluray',
-    hdrip: '25-hd-rips-dvd-rips-br-rips'
+    hdrip: '25-hd-rips-dvd-rips-br-rips',
   },
   malayalam: {
+    predvd: '35-predvd-dvdscr-cam-tc',
     webhd: '36-web-hd-itunes-hd-bluray',
-    hdrip: '37-hd-rips-dvd-rips-br-rips'
+    hdrip: '37-hd-rips-dvd-rips-br-rips',
   },
   kannada: {
+    predvd: '68-predvd-dvdscr-cam-tc',
     webhd: '69-web-hd-itunes-hd-bluray',
-    hdrip: '70-hd-rips-dvd-rips-br-rips'
+    hdrip: '70-hd-rips-dvd-rips-br-rips',
   },
 };
 
 const CATEGORY_LABELS: Record<Category, string> = {
+  predvd: 'HQ PreDVD (HQ Clean)',
   webhd: 'Web HD',
   multiaudio: 'Hollywood Movies in Multi Audios',
   series: 'Web Series & TV Shows',
@@ -603,11 +610,12 @@ const CATEGORY_LABELS: Record<Category, string> = {
 };
 
 const CATEGORY_TYPE: Record<Category, 'movie' | 'series'> = {
+  predvd: 'movie',
   webhd: 'movie',
   hdrip: 'movie',
   hdtv: 'movie',
   multiaudio: 'movie',
-  series: 'series'
+  series: 'series',
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -681,13 +689,27 @@ const LOW_QUALITY_REGEX = /(480p|720p|360p|240p)/i;
 const TITLE_YEAR_REGEX = /^([^(]+)\s*\((\d{4})\)/;
 
 function isValidQuality(displayName: string, category: Category): boolean {
+  if (category === 'predvd') {
+    // In PreDVD category: allow PreDVD, HQ Clean, 1080p, 720p, etc. Filter out blurry CAM / telesync / hdts
+    const INVALID = /\s(cam|unknown|telesync|hdts|camrip)\s/i;
+    const LOW_RES = /(360p|240p)/i;
+    return !INVALID.test(displayName) && !LOW_RES.test(displayName);
+  }
   return !INVALID_RELEASE_REGEX.test(displayName) && !LOW_QUALITY_REGEX.test(displayName);
 }
 
 function extractTitleYear(title: string): { name: string | null; year: string | null } {
-  const cleaned = title.replace(/^[^-]+-\s*/, '');
+  // Strip domain prefix e.g. "www.1TamilMV.solar - " or "1TamilMV.capital - "
+  const cleaned = title
+    .replace(/^(?:https?:\/\/)?(?:www\.)?[^\s-]+\.[a-z]{2,10}\s*[-_:]\s*/i, '')
+    .replace(/^www\.[^-]+-\s*/i, '');
   const match = cleaned.match(TITLE_YEAR_REGEX);
-  return match ? { name: match[1].trim(), year: match[2] } : { name: null, year: null };
+  if (match) {
+    return { name: match[1].trim(), year: match[2] };
+  }
+  const fallbackCleaned = title.replace(/^[^-]+-\s*/, '');
+  const fallbackMatch = fallbackCleaned.match(TITLE_YEAR_REGEX);
+  return fallbackMatch ? { name: fallbackMatch[1].trim(), year: fallbackMatch[2] } : { name: null, year: null };
 }
 
 function parseRSSFeed(xmlString: string, language: Language, category: Category): GroupedItem[] {
@@ -965,12 +987,12 @@ export { FORUM_IDS, CATEGORY_LABELS, CATEGORY_TYPE };
 // ─── Website Search & Topic Magnets Scraper ──────────────────────────────────
 
 const FORUM_LANGUAGES: Record<string, Language> = {
-  '11': 'tamil', '12': 'tamil', '14': 'tamil', '17': 'tamil', '19': 'tamil',
-  '49': 'english', '50': 'english',
-  '58': 'hindi', '59': 'hindi',
-  '24': 'telugu', '25': 'telugu',
-  '36': 'malayalam', '37': 'malayalam',
-  '69': 'kannada', '70': 'kannada',
+  '10': 'tamil', '11': 'tamil', '12': 'tamil', '14': 'tamil', '17': 'tamil', '19': 'tamil',
+  '46': 'english', '49': 'english', '50': 'english',
+  '57': 'hindi', '58': 'hindi', '59': 'hindi',
+  '23': 'telugu', '24': 'telugu', '25': 'telugu',
+  '35': 'malayalam', '36': 'malayalam', '37': 'malayalam',
+  '68': 'kannada', '69': 'kannada', '70': 'kannada',
 };
 
 export function detectLanguageFromTitle(title: string, forumId?: string | null): Language {
@@ -988,14 +1010,14 @@ export function detectLanguageFromTitle(title: string, forumId?: string | null):
 }
 
 export function cleanTopicTitle(title: string): { name: string; year: string | null } {
-  let cleaned = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx)\s*[-_:]\s*/i, '');
+  let cleaned = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|cards|pizza|fi|live)\s*[-_:]\s*/i, '');
   cleaned = cleaned.replace(/^[\s\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]+/u, '').trim();
 
   const match = cleaned.match(/^([^(]+?)\s*\((\d{4})\)/);
   if (match) {
     return { name: match[1].trim(), year: match[2] };
   }
-  const beforeRes = cleaned.split(/\s*[-–]\s*(?:4K|2160p|1080p|720p|TRUE|WEB|HDRip|DVDRip|DVD|HDTV)/i)[0];
+  const beforeRes = cleaned.split(/\s*[-–]\s*(?:4K|2160p|1080p|720p|TRUE|WEB|HDRip|DVDRip|DVD|HDTV|PreDVD)/i)[0];
   return { name: beforeRes.trim(), year: null };
 }
 
@@ -1263,6 +1285,161 @@ export async function searchTamilMV(
       }
     } catch {}
   }
+
+  return results;
+}
+
+// ─── 1TamilMV Homepage "Recently Added" & "Top Releases" Scraper ─────────────
+
+export async function fetchTamilMVRecentlyAdded(
+  forceRefresh: boolean = false,
+  customBaseUrl?: string
+): Promise<GroupedItem[]> {
+  const baseUrl = customBaseUrl || getTamilMVBaseUrl();
+  const cacheKey = 'tamilmv:recently_added';
+
+  if (!forceRefresh) {
+    try {
+      const raw = storageService.getItem(cacheKey);
+      if (raw) {
+        const entry: { data: GroupedItem[]; timestamp: number } = JSON.parse(raw);
+        if (Date.now() - entry.timestamp < 10 * 60 * 1000) {
+          return entry.data;
+        }
+      }
+    } catch {}
+  }
+
+  const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter(m => m !== baseUrl)];
+  let html = '';
+  let successfulBase = baseUrl;
+
+  for (const mirror of mirrorsToTry) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const res = await fetch(mirror, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Connection': 'close',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.ok) {
+        html = await res.text();
+        successfulBase = mirror;
+        break;
+      }
+    } catch {
+      clearTimeout(timeout);
+    }
+  }
+
+  if (!html) {
+    try {
+      const raw = storageService.getItem(cacheKey);
+      if (raw) return JSON.parse(raw).data;
+    } catch {}
+    return [];
+  }
+
+  const recIdx = html.indexOf('RECENTLY ADDED');
+  if (recIdx === -1) return [];
+
+  const topIdx = html.indexOf('TOP RELEASES THIS WEEK');
+  const startIdx = topIdx !== -1 && topIdx < recIdx ? topIdx : recIdx;
+
+  const endIdx = html.indexOf('id="elForumRow_', startIdx) !== -1
+    ? html.indexOf('id="elForumRow_', startIdx)
+    : html.indexOf('ipsLayout_sidebar', startIdx) !== -1
+      ? html.indexOf('ipsLayout_sidebar', startIdx)
+      : startIdx + 80000;
+
+  const sectionHtml = html.substring(startIdx, endIdx);
+  const rawLines = sectionHtml.split(/<br\s*\/?>/i);
+
+  // Build local poster lookup from cached RSS
+  const posterLookup = new Map<string, string>();
+  try {
+    const langs: Language[] = ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'];
+    const cats: Category[] = ['predvd', 'webhd', 'multiaudio', 'hdrip', 'series'];
+    for (const l of langs) {
+      for (const c of cats) {
+        const raw = storageService.getItem(getCacheKey(l, c));
+        if (raw) {
+          const entry: CacheEntry = JSON.parse(raw);
+          (entry.data || []).forEach(g => {
+            if (g.name) {
+              const p = g.items.find(i => i.poster)?.poster;
+              if (p) posterLookup.set(g.name.toLowerCase().trim(), p);
+            }
+          });
+        }
+      }
+    }
+  } catch {}
+
+  const grouped: Record<string, GroupedItem> = {};
+
+  for (const line of rawLines) {
+    const linkMatch = line.match(/href="([^"]*\/forums\/topic\/(\d+)-[^"]*)"/i);
+    if (!linkMatch) continue;
+
+    let topicUrl = linkMatch[1].replace(/&amp;/g, '&');
+    if (topicUrl.startsWith('//')) topicUrl = 'https:' + topicUrl;
+    else if (topicUrl.startsWith('/')) topicUrl = `${successfulBase}${topicUrl}`;
+
+    const cleanText = line
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/\b(TOP RELEASES THIS WEEK|RECENTLY ADDED)\b/gi, '')
+      .replace(/\[\s*W\s*\]/gi, '')
+      .trim();
+
+    if (!cleanText || cleanText.length < 5) continue;
+
+    const { name, year } = cleanTopicTitle(cleanText);
+    const lang = detectLanguageFromTitle(cleanText);
+    const isSeries = /series|season|episode|s\d{2}|e\d{2}|ep\s*\(/i.test(cleanText);
+
+    const key = `${name.toLowerCase()}|||${year || ''}`;
+    const poster = posterLookup.get(name.toLowerCase().trim()) || null;
+
+    const torrentItem: TorrentItem = {
+      guid: topicUrl,
+      groupid: topicUrl,
+      name,
+      year,
+      language: lang,
+      poster,
+      title: cleanText,
+      magnetUrl: '',
+      infoHash: '',
+      publishDate: new Date().toISOString(),
+    };
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        name,
+        year,
+        items: [torrentItem],
+      };
+      (grouped[key] as any).type = isSeries ? 'series' : 'movie';
+    } else {
+      if (!grouped[key].items.some(i => i.guid === topicUrl)) {
+        grouped[key].items.push(torrentItem);
+      }
+    }
+  }
+
+  const results = Object.values(grouped);
+  try {
+    storageService.setItem(cacheKey, JSON.stringify({ data: results, timestamp: Date.now() }));
+  } catch {}
 
   return results;
 }

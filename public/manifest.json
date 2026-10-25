@@ -1,6 +1,6 @@
-﻿{
-    "short_name":  "VStreamOnline",
-    "name":  "VStreamOnline",
+{
+    "short_name":  "NetFlix",
+    "name":  "NetFlix",
     "icons":  [
                   {
                       "src":  "favicon.ico",

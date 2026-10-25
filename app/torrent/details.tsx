@@ -43,7 +43,7 @@ function getActiveStreamingClient(): StreamingServerClient {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function extractQualityTag(title: string): string | null {
-  const match = title.match(/\b(2160p|1080p|720p|4K)[^)]*?(WEB-?DL|BluRay|WEBRip|HDTV|x265|x264|HEVC|AVC)?/i);
+  const match = title.match(/\b(2160p|1080p|720p|4K)[^)]*?(WEB-?DL|BluRay|WEBRip|HDTV|PreDVD|x265|x264|HEVC|AVC)?/i);
   if (!match) return null;
   return [match[1], match[2]].filter(Boolean).join(' ');
 }
@@ -51,7 +51,7 @@ function extractQualityTag(title: string): string | null {
 function cleanTorrentTitle(title: string): string {
   if (!title) return '';
   return title
-    .replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|pm|tv|info|xyz|app|live)\s*[-_:]\s*/i, '')
+    .replace(/^(?:https?:\/\/)?(?:www\.)?[^\s-]+\.[a-z]{2,10}\s*[-_:]\s*/i, '')
     .replace(/^[a-z0-9\.-]+\.[a-z]{2,6}\s*[-_:]\s*/i, '')
     .trim();
 }

@@ -66,7 +66,7 @@ export function cleanMovieQuery(raw: string): { query: string; year?: string } {
   } else {
     // If no year, check for tech keywords (quality, rip, codecs, languages)
     const specIdx = clean.search(
-      /\b(WEB-?DL|BluRay|WEBRip|HDTV|HDRip|DVDRip|x265|x264|HEVC|AVC|1080p|720p|2160p|4K|ESub|True|PreDVDRip|HQ|Tamil|Telugu|Hindi|Malayalam|Kannada|English)\b/i
+      /\b(WEB-?DL|BluRay|WEBRip|HDTV|HDRip|DVDRip|x265|x264|HEVC|AVC|1080p|720p|2160p|4K|ESub|True|PreDVDRip|PreDVD|HQ|Tamil|Telugu|Hindi|Malayalam|Kannada|English)\b/i
     );
     if (specIdx > 0) {
       clean = clean.slice(0, specIdx);

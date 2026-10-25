@@ -32,7 +32,7 @@ workflows:
           else
             echo "⚠️  app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=VStreamOnline" >> $CM_ENV
+            echo "APP_NAME=NetFlix" >> $CM_ENV
           fi
       
       - name: Fix expo-updates
@@ -207,7 +207,7 @@ workflows:
           else
             echo "⚠️  app.json not found, using defaults"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=VStreamOnline" >> $CM_ENV
+            echo "APP_NAME=NetFlix" >> $CM_ENV
           fi
 
       - name: Fix expo-updates
@@ -376,7 +376,7 @@ workflows:
           else
             echo "⚠️  app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=VStreamOnline" >> $CM_ENV
+            echo "APP_NAME=NetFlix" >> $CM_ENV
           fi
 
       - name: Clean and generate Android project
@@ -502,7 +502,7 @@ workflows:
           else
             echo "⚠️  app.json not found, using default values"
             echo "APP_VERSION=1.0.0" >> $CM_ENV
-            echo "APP_NAME=VStreamOnline" >> $CM_ENV
+            echo "APP_NAME=NetFlix" >> $CM_ENV
           fi
 
       - name: Clean and generate Android project

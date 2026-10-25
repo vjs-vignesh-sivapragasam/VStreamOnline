@@ -56,18 +56,28 @@ export class StreamingServerClient {
   }
 
   async isServerOnline(timeoutMs: number = 2000): Promise<boolean> {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const response = await fetch(`${this.baseURL}/stats.json`, { signal: controller.signal });
-        return response.ok || response.status === 200 || response.status === 404;
-      } finally {
-        clearTimeout(timer);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const response = await fetch(`${this.baseURL}/stats.json`, {
+            signal: controller.signal,
+            headers: { Accept: '*/*' },
+          });
+          if (response.ok || response.status === 200 || response.status === 404) {
+            return true;
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
       }
-    } catch {
-      return false;
     }
+    return false;
   }
 
   async getTorrentStats(infoHash: string, fileIdx?: number): Promise<TorrentStats | null> {

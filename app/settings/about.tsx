@@ -25,7 +25,7 @@ const AboutUsScreen: React.FC = () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    await Clipboard.setStringAsync(`VStreamOnline v${appVersion}`);
+    await Clipboard.setStringAsync(`NetFlix v${appVersion}`);
     showAlert('Copied', `App version v${appVersion} copied to clipboard.`);
   };
 
@@ -86,7 +86,7 @@ const AboutUsScreen: React.FC = () => {
               resizeMode="cover"
             />
           </View>
-          <Text style={styles.appName}>VStreamOnline</Text>
+          <Text style={styles.appName}>NetFlix</Text>
           <TouchableOpacity
             style={styles.versionBadge}
             onPress={copyVersion}
@@ -101,9 +101,9 @@ const AboutUsScreen: React.FC = () => {
 
         {/* Mission / Overview Card */}
         <View style={styles.card}>
-          <Text style={styles.cardHeading}>About VStreamOnline</Text>
+          <Text style={styles.cardHeading}>About NetFlix</Text>
           <Text style={styles.cardBody}>
-            VStreamOnline is a modern, high-performance media hub crafted for seamless discovery and playback. Stream movies, TV series, and multi-audio releases in crisp 4K, 1080p, and 720p resolutions, or save them directly to internal storage for offline viewing without data connection.
+            NetFlix is a modern, high-performance media hub crafted for seamless discovery and playback. Stream movies, TV series, and multi-audio releases in crisp 4K, 1080p, and 720p resolutions, or save them directly to internal storage for offline viewing without data connection.
           </Text>
         </View>
 
@@ -233,7 +233,7 @@ const AboutUsScreen: React.FC = () => {
 
           <View style={styles.specRow}>
             <Text style={styles.specLabel}>Application</Text>
-            <Text style={styles.specValue}>VStreamOnline</Text>
+            <Text style={styles.specValue}>NetFlix</Text>
           </View>
 
           <View style={styles.specRow}>
@@ -266,7 +266,7 @@ const AboutUsScreen: React.FC = () => {
             <Text style={styles.disclaimerTitle}>Disclaimer</Text>
           </View>
           <Text style={styles.disclaimerText}>
-            VStreamOnline is a media indexing tool and media player. It does not host, upload, or own any video files on its servers. All metadata and media streams are resolved from publicly accessible feeds and user-configured torrent streaming engines.
+            NetFlix is a media indexing tool and media player. It does not host, upload, or own any video files on its servers. All metadata and media streams are resolved from publicly accessible feeds and user-configured torrent streaming engines.
           </Text>
         </View>
 

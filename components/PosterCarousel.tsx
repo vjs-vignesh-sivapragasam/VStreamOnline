@@ -78,12 +78,18 @@ export default function PosterCarousel({
 
     const hasSeriesCategory = !NO_SERIES_LANGUAGES.includes(filter);
 
+    const { groups: preDvdGroups } = useTamilMV(filter, 'predvd');
+
     const { groups: movieGroups, loading: moviesLoading } = useTamilMV(filter, 'webhd');
     const { groups: seriesGroups, loading: seriesLoading } = useTamilMV(filter, hasSeriesCategory ? 'series' : 'webhd');
 
     const loading = moviesLoading || (hasSeriesCategory && seriesLoading);
 
     const data: CarouselItem[] = React.useMemo(() => {
+        const preDvd = (preDvdGroups || [])
+            .slice(0, 2)
+            .map((g: any) => pickItemFromGroup(g, 'movie'))
+            .filter((i: any): i is CarouselItem => i !== null);
         const movies = movieGroups
             .slice(0, 4)
             .map((g: any) => pickItemFromGroup(g, 'movie'))
@@ -95,13 +101,14 @@ export default function PosterCarousel({
             .filter((i: any): i is CarouselItem => i !== null);
 
         const interleaved: CarouselItem[] = [];
-        const maxLen = Math.max(movies.length, series.length);
+        const maxLen = Math.max(preDvd.length, movies.length, series.length);
         for (let i = 0; i < maxLen; i++) {
+            if (preDvd[i]) interleaved.push(preDvd[i]);
             if (movies[i]) interleaved.push(movies[i]);
             if (series[i]) interleaved.push(series[i]);
         }
-        return interleaved.slice(0, 6);
-    }, [movieGroups, seriesGroups, hasSeriesCategory]);
+        return interleaved.slice(0, 7);
+    }, [preDvdGroups, movieGroups, seriesGroups, hasSeriesCategory]);
 
     useEffect(() => {
         setActiveIndex(0);
