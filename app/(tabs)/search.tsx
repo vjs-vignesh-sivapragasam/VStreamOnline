@@ -332,78 +332,9 @@ const SearchScreen = () => {
           )}
           {query.length > 0 && (
             <Pressable onPress={handleClearQuery} style={styles.clearButton} hitSlop={8}>
-              <Ionicons name="close-circle" size={20} color="#6E6E73" />
+              <Ionicons name="close-circle" size={20} color="#ff453a" />
             </Pressable>
           )}
-        </View>
-      </View>
-
-      {/* Action / Filter Row */}
-      <View style={styles.filtersContainer}>
-        <View style={styles.filterRow}>
-          {/* Recently Added Shortcut */}
-          <TouchableOpacity
-            style={[styles.filterButton, moviesList.length > 0 && styles.filterButtonActive]}
-            onPress={handleRecentlyAddedPress}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="time-outline"
-              size={15}
-              color={moviesList.length > 0 ? '#000000' : '#8E8E93'}
-              style={styles.filterIcon}
-            />
-            <Text style={[styles.filterButtonText, moviesList.length > 0 && styles.filterButtonTextActive]}>
-              Recently added
-            </Text>
-            {moviesList.length > 0 && (
-              <View style={styles.countBadge}>
-                <Text style={styles.countBadgeText}>{moviesList.length}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          {/* Clear Button */}
-          <TouchableOpacity
-            style={[
-              styles.filterButton,
-              styles.clearListButton,
-              moviesList.length === 0 && !query && styles.clearListButtonDisabled,
-            ]}
-            onPress={handleClearList}
-            disabled={moviesList.length === 0 && !query}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="trash-outline"
-              size={14}
-              color={moviesList.length > 0 || query ? '#ff453a' : '#555555'}
-              style={styles.filterIcon}
-            />
-            <Text
-              style={[
-                styles.clearListButtonText,
-                moviesList.length === 0 && !query && { color: '#555555' },
-              ]}
-            >
-              Clear
-            </Text>
-          </TouchableOpacity>
-
-          {/* Web view Filter Button */}
-          <TouchableOpacity
-            style={[styles.filterButton, styles.webViewFilterButton]}
-            onPress={handleOpenWebView}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="globe-outline"
-              size={14}
-              color="#535aff"
-              style={styles.filterIcon}
-            />
-            <Text style={styles.webViewFilterButtonText}>Web view</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -462,7 +393,7 @@ const SearchScreen = () => {
               activeOpacity={0.8}
             >
               <Ionicons name="time-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-              <Text style={styles.loadRecentBtnText}>Load Recently Added</Text>
+              <Text style={styles.loadRecentBtnText}>Recently added</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -476,14 +407,27 @@ const SearchScreen = () => {
                   ? `${filteredMovies.length} ${filteredMovies.length === 1 ? 'Movie' : 'Movies'} found`
                   : `${moviesList.length} ${moviesList.length === 1 ? 'Movie' : 'Movies'} • Recently Added`}
               </Text>
-              <TouchableOpacity
-                style={styles.liveBadge}
-                onPress={() => loadRecentlyAdded(true)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="refresh" size={11} color="#00e676" style={{ marginRight: 4 }} />
-                <Text style={styles.liveBadgeText}>Live</Text>
-              </TouchableOpacity>
+              <View style={styles.resultsActionsRow}>
+                {/* Clear icon with red color shown when data is loaded */}
+                <TouchableOpacity
+                  style={styles.clearIconButton}
+                  onPress={handleClearList}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="trash-outline" size={15} color="#ff453a" />
+                  <Text style={styles.clearIconText}>Clear</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.liveBadge}
+                  onPress={() => loadRecentlyAdded(true)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="refresh" size={11} color="#00e676" style={{ marginRight: 4 }} />
+                  <Text style={styles.liveBadgeText}>Live</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.gridWrap}>
@@ -599,80 +543,26 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     padding: 2,
   },
-  filtersContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    marginBottom: 6,
-  },
-  filterRow: {
+  resultsActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  filterButton: {
+  clearIconButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    height: 36,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    backgroundColor: '#18181a',
+    backgroundColor: 'rgba(255, 69, 58, 0.1)',
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#26262a',
-  },
-  filterButtonActive: {
-    backgroundColor: '#ffffff',
-    borderColor: '#ffffff',
-  },
-  clearListButton: {
-    backgroundColor: 'rgba(255, 69, 58, 0.08)',
     borderColor: 'rgba(255, 69, 58, 0.28)',
   },
-  clearListButtonDisabled: {
-    opacity: 0.45,
-    borderColor: '#26262a',
-    backgroundColor: '#18181a',
-  },
-  clearListButtonText: {
-    fontSize: 13,
-    color: '#ff453a',
-    fontWeight: '600',
-    letterSpacing: -0.1,
-  },
-  webViewFilterButton: {
-    backgroundColor: 'rgba(83, 90, 255, 0.1)',
-    borderColor: 'rgba(83, 90, 255, 0.3)',
-  },
-  webViewFilterButtonText: {
-    fontSize: 13,
-    color: '#535aff',
-    fontWeight: '600',
-    letterSpacing: -0.1,
-  },
-  filterIcon: {
-    marginRight: 6,
-  },
-  filterButtonText: {
-    fontSize: 13,
-    color: '#8E8E93',
-    fontWeight: '600',
-    letterSpacing: -0.1,
-  },
-  filterButtonTextActive: {
-    color: '#000000',
-    fontWeight: '700',
-  },
-  countBadge: {
-    backgroundColor: 'rgba(0, 0, 0, 0.12)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginLeft: 6,
-  },
-  countBadgeText: {
+  clearIconText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#000000',
+    color: '#ff453a',
+    marginLeft: 3,
   },
   contentContainer: {
     flex: 1,
