@@ -1510,15 +1510,20 @@ export function cleanMovieTitle(title: string): string {
     .trim();
 }
 
-// ─── Web Series Dynamic Pagination ──────────────────────────────────────────
+// ─── Dynamic Pagination for All Categories ───────────────────────────────────
 
-export interface WebSeriesPageResult {
+export interface CategoryPageResult {
   items: GroupedItem[];
   totalPages: number;
   currentPage: number;
 }
 
-export function parseWebSeriesPageHtml(html: string, baseUrl: string): { items: GroupedItem[]; totalPages: number } {
+export function parseCategoryPageHtml(
+  html: string,
+  baseUrl: string,
+  language: Language = 'tamil',
+  category: Category = 'webhd'
+): { items: GroupedItem[]; totalPages: number } {
   let totalPages = 1;
   const pageMatch = html.match(/data-pages=["'](\d+)["']/i) ||
                     html.match(/data-ipsPagination-pages=["'](\d+)["']/i) ||
@@ -1531,6 +1536,9 @@ export function parseWebSeriesPageHtml(html: string, baseUrl: string): { items: 
   const rowRegex = /<li[^>]*class=["'][^"']*ipsDataItem[^"']*["'][^>]*data-rowID=["'](\d+)["'][\s\S]*?<\/li>/gi;
   const rows = [...html.matchAll(rowRegex)];
   const grouped: Record<string, GroupedItem> = {};
+  const forumSlug = FORUM_IDS[language]?.[category] || '';
+  const forumId = forumSlug.split('-')[0] || '';
+  const itemType = CATEGORY_TYPE[category] || 'movie';
 
   for (const row of rows) {
     const rowHtml = row[0];
@@ -1545,7 +1553,7 @@ export function parseWebSeriesPageHtml(html: string, baseUrl: string): { items: 
     if (!rawTitle || rawTitle.length < 4) continue;
 
     const { name, year } = cleanTopicTitle(rawTitle);
-    const lang = detectLanguageFromTitle(rawTitle, '19');
+    const lang = detectLanguageFromTitle(rawTitle, forumId) || language;
     const key = `${name.toLowerCase()}|||${year || ''}`;
 
     const torrentItem: TorrentItem = {
@@ -1567,7 +1575,7 @@ export function parseWebSeriesPageHtml(html: string, baseUrl: string): { items: 
         year,
         items: [torrentItem],
       };
-      (grouped[key] as any).type = 'series';
+      (grouped[key] as any).type = itemType;
     } else {
       if (!grouped[key].items.some((i) => i.guid === topicUrl)) {
         grouped[key].items.push(torrentItem);
@@ -1581,13 +1589,20 @@ export function parseWebSeriesPageHtml(html: string, baseUrl: string): { items: 
   };
 }
 
-export async function fetchWebSeriesPage(
+export async function fetchTamilMVCategoryPage(
+  language: Language = 'tamil',
+  category: Category = 'webhd',
   page: number = 1,
   forceRefresh: boolean = false,
   customBaseUrl?: string
-): Promise<WebSeriesPageResult> {
+): Promise<CategoryPageResult> {
+  const forumSlug = FORUM_IDS[language]?.[category];
+  if (!forumSlug) {
+    throw new Error(`Category "${category}" is not configured for language "${language}"`);
+  }
+
   const baseUrl = customBaseUrl || getTamilMVBaseUrl();
-  const cacheKey = `tamilmv:webseries:page:${page}`;
+  const cacheKey = `tamilmv:${language}:${category}:page:${page}`;
 
   if (!forceRefresh) {
     try {
@@ -1607,8 +1622,8 @@ export async function fetchWebSeriesPage(
     try {
       if (page === 1) {
         // Page 1: Load XML feed & detect total pages from HTML
-        const xmlUrl = `${mirror}/index.php?/forums/forum/19-web-series-tv-shows/all.xml`;
-        const htmlUrl = `${mirror}/index.php?/forums/forum/19-web-series-tv-shows/`;
+        const xmlUrl = `${mirror}/index.php?/forums/forum/${forumSlug}/all.xml`;
+        const htmlUrl = `${mirror}/index.php?/forums/forum/${forumSlug}/`;
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 16000);
@@ -1642,12 +1657,12 @@ export async function fetchWebSeriesPage(
           if (pageMatch) totalPages = parseInt(pageMatch[1], 10);
         }
 
-        // If totalPages is still 1, retry fetching html from another mirror if needed
+        // If totalPages is still 1, retry fetching html from another mirror
         if (totalPages <= 1) {
           for (const m2 of mirrorsToTry.slice(0, 3)) {
             if (m2 === mirror) continue;
             try {
-              const r2 = await fetch(`${m2}/index.php?/forums/forum/19-web-series-tv-shows/`, {
+              const r2 = await fetch(`${m2}/index.php?/forums/forum/${forumSlug}/`, {
                 headers: { 'User-Agent': 'Mozilla/5.0' },
               });
               if (r2.ok) {
@@ -1665,33 +1680,36 @@ export async function fetchWebSeriesPage(
           }
         }
 
+        let items: GroupedItem[] = [];
         if (xmlRes && xmlRes.ok) {
           const xml = await xmlRes.text();
-          let items = parseRSSFeed(xml, 'tamil', 'series');
+          items = parseRSSFeed(xml, language, category);
+        }
 
-          // If XML returned 0 items, fallback to parsing HTML
-          if (items.length === 0 && htmlRes && htmlRes.ok) {
-            const html = await htmlRes.text();
-            items = parseWebSeriesPageHtml(html, mirror).items;
-          }
+        // If XML returned 0 items, fallback to parsing HTML
+        if (items.length === 0 && htmlRes && htmlRes.ok) {
+          const html = await htmlRes.text();
+          const parsed = parseCategoryPageHtml(html, mirror, language, category);
+          items = parsed.items;
+          if (parsed.totalPages > 1) totalPages = parsed.totalPages;
+        }
 
-          if (items.length > 0) {
-            const result: WebSeriesPageResult = {
-              items,
-              totalPages: Math.max(totalPages, 1),
-              currentPage: 1,
-            };
+        if (items.length > 0) {
+          const result: CategoryPageResult = {
+            items,
+            totalPages: Math.max(totalPages, 1),
+            currentPage: 1,
+          };
 
-            try {
-              storageService.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
-            } catch {}
+          try {
+            storageService.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
+          } catch {}
 
-            return result;
-          }
+          return result;
         }
       } else {
         // Page > 1 from forum pagination HTML
-        const htmlUrl = `${mirror}/index.php?/forums/forum/19-web-series-tv-shows/page/${page}/`;
+        const htmlUrl = `${mirror}/index.php?/forums/forum/${forumSlug}/page/${page}/`;
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 16000);
@@ -1708,10 +1726,20 @@ export async function fetchWebSeriesPage(
 
         if (res.ok) {
           const html = await res.text();
-          const { items, totalPages } = parseWebSeriesPageHtml(html, mirror);
+          let { items, totalPages } = parseCategoryPageHtml(html, mirror, language, category);
+
+          if (totalPages <= 1) {
+            try {
+              const rawP1 = storageService.getItem(`tamilmv:${language}:${category}:page:1`);
+              if (rawP1) {
+                const p1 = JSON.parse(rawP1);
+                if (p1?.data?.totalPages > 1) totalPages = p1.data.totalPages;
+              }
+            } catch {}
+          }
 
           if (items.length > 0) {
-            const result: WebSeriesPageResult = {
+            const result: CategoryPageResult = {
               items,
               totalPages: Math.max(totalPages, 1),
               currentPage: page,
@@ -1734,10 +1762,10 @@ export async function fetchWebSeriesPage(
     if (raw) return JSON.parse(raw).data;
   } catch {}
 
-  throw new Error(`Failed to load Web Series page ${page}. Please check your connection or mirror.`);
+  throw new Error(`Failed to load ${category} page ${page}. Please check your connection or mirror.`);
 }
 
-export interface UseWebSeriesPaginatedResult {
+export interface UseTamilMVPaginatedResult {
   items: GroupedItem[];
   currentPage: number;
   totalPages: number;
@@ -1747,27 +1775,34 @@ export interface UseWebSeriesPaginatedResult {
   refresh: () => void;
 }
 
-export function useWebSeriesPaginated(initialPage: number = 1): UseWebSeriesPaginatedResult {
+export function useTamilMVPaginated(
+  language: Language = 'tamil',
+  category: Category = 'webhd',
+  initialPage: number = 1
+): UseTamilMVPaginatedResult {
   const [currentPage, setCurrentPage] = useState<number>(initialPage);
   const [items, setItems] = useState<GroupedItem[]>([]);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadPage = useCallback(async (page: number, forceRefresh = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchWebSeriesPage(page, forceRefresh);
-      setItems(res.items);
-      setTotalPages((prev) => (res.totalPages > 1 ? res.totalPages : prev));
-      setCurrentPage(res.currentPage);
-    } catch (err: any) {
-      setError(err?.message || `Failed to load page ${page}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadPage = useCallback(
+    async (page: number, forceRefresh = false) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetchTamilMVCategoryPage(language, category, page, forceRefresh);
+        setItems(res.items);
+        setTotalPages((prev) => (res.totalPages > 1 ? res.totalPages : prev));
+        setCurrentPage(res.currentPage);
+      } catch (err: any) {
+        setError(err?.message || `Failed to load page ${page}`);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [language, category]
+  );
 
   useEffect(() => {
     loadPage(currentPage, false);
@@ -1791,6 +1826,23 @@ export function useWebSeriesPaginated(initialPage: number = 1): UseWebSeriesPagi
     refresh,
   };
 }
+
+// ─── Backward-compatible wrappers for Web Series ───────────────────────────
+
+export type WebSeriesPageResult = CategoryPageResult;
+export type UseWebSeriesPaginatedResult = UseTamilMVPaginatedResult;
+
+export const parseWebSeriesPageHtml = (html: string, baseUrl: string) =>
+  parseCategoryPageHtml(html, baseUrl, 'tamil', 'series');
+
+export const fetchWebSeriesPage = (
+  page: number = 1,
+  forceRefresh: boolean = false,
+  customBaseUrl?: string
+) => fetchTamilMVCategoryPage('tamil', 'series', page, forceRefresh, customBaseUrl);
+
+export const useWebSeriesPaginated = (initialPage: number = 1) =>
+  useTamilMVPaginated('tamil', 'series', initialPage);
 
 export function getPaginationItems(currentPage: number, totalPages: number): (number | '...')[] {
   if (totalPages <= 1) return [1];

@@ -195,9 +195,19 @@ interface PosterListProps {
   category: Category;
   loading?: boolean;
   hideSeeAll?: boolean;
+  onSeeAll?: (category: Category, title: string, language: Language) => void;
 }
 
-const PosterList = ({ groups, title, type, language, category, loading = false, hideSeeAll = false }: PosterListProps) => {
+const PosterList = ({
+  groups,
+  title,
+  type,
+  language,
+  category,
+  loading = false,
+  hideSeeAll = false,
+  onSeeAll,
+}: PosterListProps) => {
   const { width, height } = useWindowDimensions();
   const shortSide = Math.min(width, height);
   const isPortrait = height >= width;
@@ -232,6 +242,10 @@ const PosterList = ({ groups, title, type, language, category, loading = false, 
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    if (onSeeAll) {
+      onSeeAll(category, title || 'Browse', language);
+      return;
+    }
     if (category === 'series') {
       router.push({
         pathname: '/torrent/series',
@@ -243,7 +257,7 @@ const PosterList = ({ groups, title, type, language, category, loading = false, 
       pathname: '/torrent/list',
       params: { title, language, category },
     });
-  }, [title, language, category]);
+  }, [title, language, category, onSeeAll]);
 
   if (loading) {
     return (

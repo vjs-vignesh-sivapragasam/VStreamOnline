@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState, useCallback, useEffect } from 'react';
 import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
 import {
@@ -18,7 +18,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
-import { useTamilMVCatalog, Language, CatalogSection } from '@/hooks/useTamilMv';
+import {
+  useTamilMVCatalog,
+  Language,
+  CatalogSection,
+  Category,
+  CATEGORY_LABELS,
+} from '@/hooks/useTamilMv';
+import PaginatedCategoryView from '@/components/PaginatedCategoryView';
 
 interface FilterItem {
   key: Language;
@@ -43,10 +50,12 @@ const LazySection = ({
   section,
   index,
   language,
+  onSeeAll,
 }: {
   section: CatalogSection;
   index: number;
   language: Language;
+  onSeeAll: (category: Category, title: string, language: Language) => void;
 }) => {
   const [shouldLoad, setShouldLoad] = useState(index < 2);
 
@@ -59,6 +68,7 @@ const LazySection = ({
           type={section.type}
           language={language}
           category={section.category}
+          onSeeAll={onSeeAll}
         />
       ) : (
         <View style={{ height: 280, marginBottom: 20 }} />
@@ -71,6 +81,27 @@ const LazySection = ({
 
 export default function HomeScreen() {
   const [language, setLanguage] = useState<Language>('tamil');
+  const [activeCategory, setActiveCategory] = useState<{
+    category: Category;
+    title: string;
+    language: Language;
+  } | null>(null);
+
+  const params = useLocalSearchParams<{
+    category?: Category;
+    title?: string;
+    language?: Language;
+  }>();
+
+  useEffect(() => {
+    if (params.category) {
+      setActiveCategory({
+        category: params.category,
+        title: params.title || CATEGORY_LABELS[params.category] || 'Browse',
+        language: params.language || language,
+      });
+    }
+  }, [params.category, params.title, params.language]);
 
   const { sections, loading, errors, refresh } = useTamilMVCatalog(language);
   const [refreshing, setRefreshing] = React.useState(false);
@@ -104,10 +135,31 @@ export default function HomeScreen() {
         poster:      item.posterUrl,
         type:        item.type,
         publishDate: item.publishDate,
-        allItems:    JSON.stringify(item.allItems), // ← fixed
+        allItems:    JSON.stringify(item.allItems),
       },
     });
   };
+
+  const handleBackToCatalog = () => {
+    setActiveCategory(null);
+    router.setParams({ category: '', title: '', language: '' });
+  };
+
+  // ── Render Paginated Category Screen (Maintains bottom navigation bar!) ──
+  if (activeCategory) {
+    return (
+      <View style={styles.container}>
+        <StatusBar />
+        <BlurGradientBackground />
+        <PaginatedCategoryView
+          category={activeCategory.category}
+          title={activeCategory.title}
+          language={activeCategory.language}
+          onBack={handleBackToCatalog}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -197,6 +249,9 @@ export default function HomeScreen() {
               section={section}
               index={i}
               language={language}
+              onSeeAll={(cat, catTitle, catLang) => {
+                setActiveCategory({ category: cat, title: catTitle, language: catLang });
+              }}
             />
           ))}
         </View>
