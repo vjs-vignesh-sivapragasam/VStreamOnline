@@ -734,10 +734,45 @@ function parseRSSFeed(xmlString: string, language: Language, category: Category)
     const description = extractCDATA(getTagContent(itemContent, 'description'));
     const pubDate = getTagContent(itemContent, 'pubDate');
     const guid = getTagContent(itemContent, 'guid');
+    const link = extractCDATA(getTagContent(itemContent, 'link')) || guid;
     const poster = extractPoster(description);
 
     const magnetLinks = MagnetParser.extractMagnetLinks(description);
-    if (magnetLinks.length === 0) continue;
+    if (magnetLinks.length === 0) {
+      // If no direct magnet links found in description (e.g. DVD9 / DVD5 posts),
+      // create a topic item so it displays on the Home Screen and loads topic magnets upon selection
+      const rawTitle = extractCDATA(getTagContent(itemContent, 'title'))
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (rawTitle && rawTitle.length >= 3) {
+        const { name, year } = cleanTopicTitle(rawTitle);
+        const key = `${(name || rawTitle).toLowerCase()}|||${year || ''}`;
+
+        if (!grouped[key]) {
+          grouped[key] = { name: name || rawTitle, year, items: [] };
+        }
+
+        const topicUrl = link || guid;
+        if (!grouped[key].items.some((i) => i.guid === topicUrl)) {
+          grouped[key].items.push({
+            name: name || rawTitle,
+            year,
+            language,
+            groupid: topicUrl,
+            guid: topicUrl,
+            poster,
+            title: rawTitle,
+            magnetUrl: '',
+            infoHash: '',
+            publishDate: pubDate || new Date().toUTCString(),
+          });
+        }
+      }
+      continue;
+    }
 
     magnetLinks.forEach((magnetLink, i) => {
       const displayName = MagnetParser.extractDisplayName(magnetLink);
@@ -797,6 +832,7 @@ function readCache(key: string): GroupedItem[] | null {
     if (!raw) return null;
     const entry: CacheEntry = JSON.parse(raw);
     if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
+    if (!entry.data || entry.data.length === 0) return null;
     return entry.data;
   } catch {
     return null;
@@ -804,6 +840,7 @@ function readCache(key: string): GroupedItem[] | null {
 }
 
 function writeCache(key: string, data: GroupedItem[]): void {
+  if (!data || data.length === 0) return;
   try {
     const entry: CacheEntry = { data, timestamp: Date.now() };
     storageService.setItem(key, JSON.stringify(entry));
@@ -844,7 +881,32 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const xml = await response.text();
-    const groups = parseRSSFeed(xml, language, category);
+    let groups = parseRSSFeed(xml, language, category);
+
+    // If RSS returns 0 items, fallback to HTML parsing of forum page 1
+    if (groups.length === 0) {
+      const forumSlug = FORUM_IDS[language]?.[category];
+      if (forumSlug) {
+        const baseUrl = getTamilMVBaseUrl();
+        const htmlUrl = `${baseUrl}/index.php?/forums/forum/${forumSlug}/`;
+        try {
+          const htmlRes = await fetch(htmlUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+          });
+          if (htmlRes.ok) {
+            const html = await htmlRes.text();
+            const parsed = parseCategoryPageHtml(html, baseUrl, language, category);
+            if (parsed.items.length > 0) {
+              groups = parsed.items;
+            }
+          }
+        } catch {}
+      }
+    }
+
     writeCache(cacheKey, groups);
     return groups;
   } catch (error: any) {
