@@ -4,7 +4,7 @@ workflows:
   tmv-ios-build:
     name: TMV iOS Build
     environment:
-      node: 18
+      node: 20
       xcode: latest
       groups:
         - EXPO
@@ -182,7 +182,7 @@ workflows:
   tmv-ios-dev:
     name: TMV iOS Development Build
     environment:
-      node: 18
+      node: 20
       xcode: latest
       groups:
         - EXPO
@@ -353,8 +353,8 @@ workflows:
   tmv-android-build:
     name: TMV Android Build
     environment:
-      node: 18
-      java: latest
+      node: 20
+      java: 17
       groups:
         - EXPO
     scripts:
@@ -418,14 +418,14 @@ workflows:
           set -o pipefail
 
           cd android
+          export GRADLE_OPTS="-Dorg.gradle.jvmargs=\"-Xmx4096m -XX:MaxMetaspaceSize=1024m\""
           if [ "$UNSIGNED_BUILD" = "true" ]; then
             echo "📦 Building unsigned release APK"
-            ./gradlew assembleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true
+            ./gradlew assembleRelease -Pandroid.overridePathCheck=true
             BUILD_OUTPUT="app/build/outputs/apk/release"
           else
             echo "📦 Building signed release APK"
             ./gradlew assembleRelease \
-              -x configureCMakeRelease \
               -Pandroid.overridePathCheck=true \
               -Pandroid.injected.signing.store.file=$KEYSTORE_FILE \
               -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
@@ -465,11 +465,11 @@ workflows:
           set -o pipefail
 
           cd android
+          export GRADLE_OPTS="-Dorg.gradle.jvmargs=\"-Xmx4096m -XX:MaxMetaspaceSize=1024m\""
           if [ "$UNSIGNED_BUILD" = "true" ]; then
-            ./gradlew bundleRelease -x configureCMakeRelease -Pandroid.overridePathCheck=true
+            ./gradlew bundleRelease -Pandroid.overridePathCheck=true
           else
             ./gradlew bundleRelease \
-              -x configureCMakeRelease \
               -Pandroid.overridePathCheck=true \
               -Pandroid.injected.signing.store.file=$KEYSTORE_FILE \
               -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
@@ -495,8 +495,8 @@ workflows:
   tmv-android-dev:
     name: TMV Android Development Build
     environment:
-      node: 18
-      java: latest
+      node: 20
+      java: 17
       groups:
         - EXPO
     scripts:
@@ -534,7 +534,8 @@ workflows:
           set -o pipefail
 
           cd android
-          ./gradlew assembleDebug -x configureCMakeDebug -Pandroid.overridePathCheck=true
+          export GRADLE_OPTS="-Dorg.gradle.jvmargs=\"-Xmx4096m -XX:MaxMetaspaceSize=1024m\""
+          ./gradlew assembleDebug -Pandroid.overridePathCheck=true
 
           BUILD_OUTPUT="app/build/outputs/apk/debug"
 

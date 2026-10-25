@@ -56,7 +56,6 @@
       "./plugins/withKSPlayer",
       "expo-router",
       "expo-font",
-      "expo-build-properties",
       [
         "expo-build-properties",
         {
@@ -66,6 +65,7 @@
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
             "buildToolsVersion": "35.0.0",
+            "ndkVersion": "27.0.12077973",
             "packagingOptions": {
               "pickFirst": []
             },
