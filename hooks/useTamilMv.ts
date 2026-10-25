@@ -1011,6 +1011,8 @@ export function detectLanguageFromTitle(title: string, forumId?: string | null):
 
 export function cleanTopicTitle(title: string): { name: string; year: string | null } {
   let cleaned = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|cards|pizza|fi|live)\s*[-_:]\s*/i, '');
+  cleaned = cleaned.replace(/^(?:https?:\/\/)?(?:www\.)?(?:1tamilmv|tamilmv)[\w\.-]*\s*[-_:]\s*/i, '');
+  cleaned = cleaned.replace(/^\[?\b(?:1tamilmv|tamilmv)\b\]?\s*[-_:]?\s*/i, '');
   cleaned = cleaned.replace(/^[\s\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]+/u, '').trim();
 
   const match = cleaned.match(/^([^(]+?)\s*\((\d{4})\)/);
@@ -1442,4 +1444,53 @@ export async function fetchTamilMVRecentlyAdded(
   } catch {}
 
   return results;
+}
+
+// ─── Fetch All Movies (Recently Added + All Major Catalog Feeds) ─────────────
+
+export async function fetchAllTamilMVMovies(
+  forceRefresh: boolean = false,
+  customBaseUrl?: string
+): Promise<GroupedItem[]> {
+  const recentItems = await fetchTamilMVRecentlyAdded(forceRefresh, customBaseUrl);
+  const movieMap = new Map<string, GroupedItem>();
+
+  for (const item of recentItems) {
+    const key = `${(item.name || '').toLowerCase().trim()}|||${item.year || ''}`;
+    movieMap.set(key, item);
+  }
+
+  // Also load movies from catalog feeds across languages
+  const langs: Language[] = ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'];
+  const cats: Category[] = ['webhd', 'predvd'];
+
+  const feedPromises = [];
+  for (const lang of langs) {
+    for (const cat of cats) {
+      feedPromises.push(
+        fetchAndParse(lang, cat).catch(() => [] as GroupedItem[])
+      );
+    }
+  }
+
+  try {
+    const allFeeds = await Promise.all(feedPromises);
+    for (const feed of allFeeds) {
+      for (const group of feed) {
+        const key = `${(group.name || '').toLowerCase().trim()}|||${group.year || ''}`;
+        if (!movieMap.has(key)) {
+          movieMap.set(key, group);
+        } else {
+          const existing = movieMap.get(key)!;
+          for (const it of group.items) {
+            if (!existing.items.some((i) => i.guid === it.guid)) {
+              existing.items.push(it);
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return Array.from(movieMap.values());
 }

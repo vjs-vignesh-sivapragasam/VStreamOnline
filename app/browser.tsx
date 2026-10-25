@@ -749,7 +749,7 @@ export default function BrowserScreen() {
   const [canGoForward, setCanGoForward] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadProgress, setLoadProgress] = useState<number>(0);
-  const [pageTitle, setPageTitle] = useState<string>('TamilMV');
+  const [pageTitle, setPageTitle] = useState<string>('Web View');
   const [blockedAdCount, setBlockedAdCount] = useState<number>(0);
 
   // Detected streams on current page
@@ -794,7 +794,8 @@ export default function BrowserScreen() {
         webViewRef.current.goBack();
         return true;
       }
-      return false;
+      router.back();
+      return true;
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
@@ -1172,6 +1173,19 @@ export default function BrowserScreen() {
       {/* ── Top Browser Navigation Bar ── */}
       <View style={styles.topBar}>
         <View style={styles.navControlsRow}>
+          {/* Back to App / Close Web View */}
+          <TouchableOpacity
+            style={styles.backToAppBtn}
+            onPress={() => {
+              triggerHaptic();
+              router.back();
+            }}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="chevron-back" size={22} color="#ffffff" />
+          </TouchableOpacity>
+
           {/* Back Button */}
           <TouchableOpacity
             style={[styles.navBtn, !canGoBack && styles.navBtnDisabled]}
@@ -1314,7 +1328,7 @@ export default function BrowserScreen() {
             renderLoading={() => (
               <View style={styles.loadingOverlay}>
                 <ActivityIndicator size="large" color="#535aff" />
-                <Text style={styles.loadingText}>Loading TamilMV...</Text>
+                <Text style={styles.loadingText}>Loading Web View...</Text>
               </View>
             )}
           />
@@ -1538,6 +1552,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  backToAppBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#26262a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#38383c',
   },
   navBtn: {
     width: 34,

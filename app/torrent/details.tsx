@@ -763,12 +763,12 @@ const TorrentDetails = () => {
                 <TouchableOpacity
                   style={[styles.searchSourcesBtn, styles.browserSourcesBtn]}
                   onPress={() => {
-                    router.push('/(tabs)/browser' as any);
+                    router.push('/browser' as any);
                   }}
                   activeOpacity={0.8}
                 >
                   <Ionicons name="globe-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-                  <Text style={styles.searchSourcesBtnText}>In-App Browser</Text>
+                  <Text style={styles.searchSourcesBtnText}>Web View</Text>
                 </TouchableOpacity>
               </View>
             </View>

@@ -110,6 +110,14 @@ function RootLayoutNav() {
               }}
             />
             <Stack.Screen
+              name="browser"
+              options={{
+                headerShown: false,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
+              }}
+            />
+            <Stack.Screen
               name="torrent/details"
               options={{
                 headerShown: true,

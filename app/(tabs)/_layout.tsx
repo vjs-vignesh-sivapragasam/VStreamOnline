@@ -14,11 +14,6 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Icon sf="magnifyingglass" drawable="ic_search" />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="browser">
-        <NativeTabs.Trigger.Label>Browser</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="safari" drawable="ic_language" />
-      </NativeTabs.Trigger>
-
       <NativeTabs.Trigger name="library">
         <NativeTabs.Trigger.Label>Library</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="square.stack" drawable="ic_library_books" />
