@@ -18,7 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import { Ionicons } from '@expo/vector-icons';
 import { TorrentItem, fetchTamilMVTopicMagnets, searchTamilMV, cleanTopicTitle } from '@/hooks/useTamilMv';
-import { StreamingServerClient, TorrentFile } from '@/clients/stremio';
+import { StreamingServerClient, TorrentFile, resolveStreamingServerClient } from '@/clients/stremio';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { myListService } from '@/services/MyListService';
@@ -381,13 +381,15 @@ const TorrentDetails = () => {
     : null;
 
   // ── Navigate to player ──
-  const navigateToPlayer = (item: TorrentItem, fileIdx: number) => {
+  const navigateToPlayer = (item: TorrentItem, fileIdx: number, streamUrl?: string) => {
+    const safeIdx = typeof fileIdx === 'number' && fileIdx >= 0 ? fileIdx : 0;
     const streams = JSON.stringify([
       {
         name: item.title,
         title: item.title,
         infoHash: item.infoHash,
-        fileIdx,
+        fileIdx: safeIdx,
+        url: streamUrl,
       },
     ]);
     router.push({
@@ -404,20 +406,31 @@ const TorrentDetails = () => {
 
     setLoadingItem(item.guid);
     try {
-      const client = getActiveStreamingClient();
-      const files = await client.getTorrentFiles(item.infoHash);
+      const client = await resolveStreamingServerClient();
+      const isOnline = await client.isServerOnline(2000);
+      if (!isOnline) {
+        showAlert(
+          'Streaming Server Offline',
+          `Could not connect to the Stremio streaming server (${client.getBaseURL()}). Please make sure the server is running or configure it in Settings.`
+        );
+        return;
+      }
 
-      if (files.length <= 1) {
-        navigateToPlayer(item, files.length === 1 ? files[0].id : 0);
-      } else {
+      const files = await client.getTorrentFiles(item.infoHash, 8000).catch(() => []);
+
+      if (files && files.length > 1) {
         setPendingItem(item);
         setPickerFiles(files);
         setPickerMode('stream');
         setPickerVisible(true);
+      } else {
+        const fileIdx = files && files.length === 1 ? (files[0].id ?? 0) : 0;
+        const streamUrl = await client.getStreamingURL(item.infoHash, fileIdx);
+        navigateToPlayer(item, fileIdx, streamUrl);
       }
     } catch (e) {
       console.warn('[TorrentDetails] Could not fetch file list from streaming server:', e);
-      showAlert('Error', 'Could not load file list. Starting default stream.');
+      showAlert('Notice', 'Starting stream with default settings.');
       navigateToPlayer(item, 0);
     } finally {
       setLoadingItem(null);
@@ -430,14 +443,15 @@ const TorrentDetails = () => {
       if (await isHapticsSupported()) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
-      const client = getActiveStreamingClient();
-      const streamUrl = await client.getStreamingURL(item.infoHash, fileIdx);
+      const client = await resolveStreamingServerClient();
+      const safeIdx = typeof fileIdx === 'number' && fileIdx >= 0 ? fileIdx : 0;
+      const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx);
       const clean = cleanTitle(item.title);
       const finalFileName = fileName || `${clean}.mp4`;
 
       await downloadService.startDownload({
         infoHash: item.infoHash,
-        fileIdx,
+        fileIdx: safeIdx,
         title: clean,
         poster: poster ?? tmdbData?.posterUrl ?? '',
         fileName: finalFileName,
@@ -457,8 +471,8 @@ const TorrentDetails = () => {
     setDownloadingGuid(item.guid);
     try {
       const clean = cleanTitle(item.title);
-      const client = getActiveStreamingClient();
-      const files = await client.getTorrentFiles(item.infoHash, 3000).catch(() => []);
+      const client = await resolveStreamingServerClient();
+      const files = await client.getTorrentFiles(item.infoHash, 4000).catch(() => []);
 
       if (files && files.length > 1) {
         setPendingItem(item);
@@ -466,7 +480,7 @@ const TorrentDetails = () => {
         setPickerMode('download');
         setPickerVisible(true);
       } else {
-        const fileIdx = files && files.length === 1 ? files[0].id : 0;
+        const fileIdx = files && files.length === 1 ? (files[0].id ?? 0) : 0;
         const fileName = files && files.length === 1 ? files[0].name : `${clean}.mp4`;
         const fileLength = files && files.length === 1 ? files[0].length : undefined;
         await executeDownload(item, fileIdx, fileName, fileLength);
@@ -478,13 +492,20 @@ const TorrentDetails = () => {
     }
   };
 
-  const handleFilePick = (file: TorrentFile) => {
+  const handleFilePick = async (file: TorrentFile) => {
     setPickerVisible(false);
     if (!pendingItem) return;
+    const safeIdx = typeof file.id === 'number' && file.id >= 0 ? file.id : 0;
     if (pickerMode === 'download') {
-      executeDownload(pendingItem, file.id, file.name, file.length);
+      executeDownload(pendingItem, safeIdx, file.name, file.length);
     } else {
-      navigateToPlayer(pendingItem, file.id);
+      try {
+        const client = await resolveStreamingServerClient();
+        const streamUrl = await client.getStreamingURL(pendingItem.infoHash, safeIdx);
+        navigateToPlayer(pendingItem, safeIdx, streamUrl);
+      } catch {
+        navigateToPlayer(pendingItem, safeIdx);
+      }
     }
   };
 

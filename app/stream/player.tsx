@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image, StatusBar } from "react-native";
 import { ServerConfig } from "@/components/ServerConfig";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StreamingServerClient } from "@/clients/stremio";
+import { StreamingServerClient, resolveStreamingServerClient } from "@/clients/stremio";
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { TorrentItem } from "@/hooks/useTamilMv";
 import { StorageKeys, storageService } from "@/utils/StorageService";
@@ -267,19 +267,25 @@ const MediaPlayerScreen: React.FC = () => {
 
     const stream = list[streamIndex];
     const infoHash = getInfoHashFromStream(stream);
-    const isTorrentStream = !stream.url && !!infoHash;
+    const isTorrentStream = !!infoHash;
 
     try {
       let finalUrl = stream.url ?? '';
 
       if (isTorrentStream) {
-        const servers = serverList ?? stremioServers;
-        const sid = serverId !== undefined ? serverId : selectedServerId;
-        if (!sid || !servers.length) throw new Error('No Stremio server configured. Please add one in Settings.');
-        const server = servers.find(s => s.serverId === sid);
-        if (!server) throw new Error('Stremio server not found.');
         setIsTorrent(true);
-        finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, stream.fileIdx ?? -1, stremioClient ?? undefined);
+        const safeFileIdx = typeof stream.fileIdx === 'number' && stream.fileIdx >= 0 ? stream.fileIdx : 0;
+
+        // If no explicit stream.url was provided or it points to an unverified localhost, resolve active server
+        if (!finalUrl || finalUrl.includes('127.0.0.1:11470')) {
+          const client = await resolveStreamingServerClient();
+          const isOnline = await client.isServerOnline(2000);
+          if (!isOnline) {
+            throw new Error(`Stremio streaming server is offline (${client.getBaseURL()}). Please make sure the server is running.`);
+          }
+          setStremioClient(client);
+          finalUrl = await client.getStreamingURL(infoHash!, safeFileIdx);
+        }
       } else {
         if (!stream.url) return;
         setIsTorrent(false);
@@ -304,17 +310,14 @@ const MediaPlayerScreen: React.FC = () => {
     if (isProcessing) return;
     setIsProcessing(true);
     const infoHash = getInfoHashFromStream(stream);
-    const isTorrentStream = !stream.url && !!infoHash;
+    const isTorrentStream = !!infoHash;
 
     try {
       let url = stream.url ?? '';
       if (isTorrentStream) {
-        const servers = serverList ?? stremioServers;
-        const sid = serverId !== undefined ? serverId : selectedServerId;
-        if (!sid || !servers.length) { showAlert('Error', 'No Stremio server configured.'); return; }
-        const server = servers.find(s => s.serverId === sid);
-        if (!server) { showAlert('Error', 'Stremio server not found.'); return; }
-        url = `${server.serverUrl}/${encodeURIComponent(infoHash!)}/${encodeURIComponent(stream.fileIdx ?? -1)}`;
+        const client = await resolveStreamingServerClient();
+        const safeFileIdx = typeof stream.fileIdx === 'number' && stream.fileIdx >= 0 ? stream.fileIdx : 0;
+        url = await client.getStreamingURL(infoHash!, safeFileIdx);
       }
       if (!url) { showAlert('Error', 'Unable to generate video URL'); return; }
 

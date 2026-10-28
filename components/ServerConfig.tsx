@@ -5,7 +5,7 @@ import { View, Text } from '@/components/Themed';
 import { confirmAction, showAlert } from '@/utils/platform';
 import { MaterialIcons } from '@expo/vector-icons';
 import { StorageKeys, storageService } from '@/utils/StorageService';
-import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
+import { getDevHostIp } from '@/clients/stremio';
 
 interface ServerConfigProps {
   serverName: string;
@@ -92,14 +92,55 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
       const serversOfType = allServers.filter(s => s.serverType === serverType);
       const defaultExists = serversOfType.some(s => s.serverId === DEFAULT_SERVER_ID);
 
+      let changed = false;
+
       if (!defaultExists) {
         const defaultServer = getDefaultServer(serverType, serverName);
         // If no servers of this type yet, make the default current
         const hasCurrent = serversOfType.some(s => s.current);
         defaultServer.current = !hasCurrent;
 
-        const updatedAll = [...allServers, defaultServer];
-        storageService.setItem(SERVERS_KEY, JSON.stringify(updatedAll));
+        allServers.push(defaultServer);
+        changed = true;
+      }
+
+      // In dev mode, auto-detect computer IP running Metro / npm run server
+      if (serverType === 'stremio') {
+        const devIp = getDevHostIp();
+        if (devIp) {
+          const pcServerUrl = `http://${devIp}:11470`;
+          let pcServer = allServers.find(
+            s => s.serverType === serverType && (s.serverId === 'dev-pc-stremio' || s.serverUrl.includes(devIp))
+          );
+          if (!pcServer) {
+            pcServer = {
+              serverId: 'dev-pc-stremio',
+              serverType,
+              serverName: `Computer (${devIp})`,
+              serverUrl: pcServerUrl,
+              current: false,
+            };
+            allServers.push(pcServer);
+            changed = true;
+          }
+          // If localhost default is current but offline, check if PC is online and promote it
+          const currentServer = allServers.find(s => s.serverType === serverType && s.current);
+          if (currentServer && currentServer.serverUrl.includes('127.0.0.1')) {
+            const pcOnline = await probeServer(`${pcServerUrl}/stats.json`, 800);
+            if (pcOnline) {
+              allServers.forEach(s => {
+                if (s.serverType === serverType) {
+                  s.current = s === pcServer;
+                }
+              });
+              changed = true;
+            }
+          }
+        }
+      }
+
+      if (changed) {
+        storageService.setItem(SERVERS_KEY, JSON.stringify(allServers));
       }
 
       await loadServers();
@@ -149,34 +190,25 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
   };
 
   const checkServerConnection = async (server: ServerConfig): Promise<'connected' | 'disconnected' | 'error'> => {
-    const isLocal =
-      isDefaultServer(server.serverId) ||
-      server.serverUrl.includes('127.0.0.1') ||
-      server.serverUrl.includes('localhost');
-
-    if (isLocal) {
-      startEmbeddedNodeServer();
-    }
-
     const cleanUrl = server.serverUrl.replace(/\/+$/, '');
     const endpoints = [`${cleanUrl}/stats.json`, `${cleanUrl}/`];
 
-    // Retry with brief delay (up to 3 attempts) to accommodate socket/OS resume lag
-    const maxRetries = 3;
+    // Retry with brief delay to accommodate socket/OS resume lag
+    const maxRetries = 2;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       for (const ep of endpoints) {
-        const ok = await probeServer(ep, 2000);
+        const ok = await probeServer(ep, 1500);
         if (ok) {
           return 'connected';
         }
       }
 
       if (attempt < maxRetries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 350));
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
     }
 
-    return 'error';
+    return 'disconnected';
   };
 
   const checkAllConnections = useCallback(async () => {
