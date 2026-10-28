@@ -928,12 +928,20 @@ const TorrentDetails = () => {
                       if (isWatchMode) {
                         setQualityModalVisible(false);
                         if (isItemCompleted && downloadInfo?.fileUri) {
-                          router.push({
-                            pathname: '/stream/player' as any,
-                            params: {
-                              videoUrl: downloadInfo.fileUri,
-                              title: clean,
-                              poster: poster ?? tmdbData?.posterUrl ?? '',
+                          externalPlayerService.promptPlayerSelection({
+                            fileUri: downloadInfo.fileUri,
+                            title: clean,
+                            poster: poster ?? tmdbData?.posterUrl ?? '',
+                            fileLength: downloadInfo.totalBytes,
+                            onPlayInternal: () => {
+                              router.push({
+                                pathname: '/stream/player' as any,
+                                params: {
+                                  videoUrl: downloadInfo.fileUri,
+                                  title: clean,
+                                  poster: poster ?? tmdbData?.posterUrl ?? '',
+                                },
+                              });
                             },
                           });
                         } else {

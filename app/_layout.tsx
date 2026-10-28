@@ -1,3 +1,5 @@
+import '@/utils/crashLogger';
+import { AppCrashErrorBoundary } from '@/utils/crashLogger';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, Theme, ThemeProvider } from 'expo-router/react-navigation';
 import { useFonts } from 'expo-font';
@@ -12,6 +14,8 @@ import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 import { PlayerSelectionModal } from '@/components/PlayerSelectionModal';
 import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
 
+console.log('[APP_BOOT] 1. Root layout module loaded');
+
 export {
   // Catch any errors thrown by the Layout component.
   ErrorBoundary,
@@ -23,9 +27,13 @@ export const unstable_settings = {
 };
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch((e) => {
+  console.warn('[APP_BOOT] preventAutoHideAsync warning:', e);
+});
 
 export default function RootLayout() {
+  console.log('[APP_BOOT] 2. RootLayout rendering');
+
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
@@ -33,21 +41,30 @@ export default function RootLayout() {
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
-    if (error) throw error;
+    if (error) {
+      console.error('[APP_BOOT] Font load error caught:', error);
+      throw error;
+    }
   }, [error]);
 
   useEffect(() => {
     if (loaded) {
-      SplashScreen.hideAsync();
-      startEmbeddedNodeServer();
+      console.log('[APP_BOOT] 3. Fonts loaded, hiding splash screen');
+      SplashScreen.hideAsync().catch((e) => console.warn('[APP_BOOT] hideAsync warning:', e));
     }
   }, [loaded]);
 
   if (!loaded) {
+    console.log('[APP_BOOT] 2b. Fonts not loaded yet, returning null splash');
     return null;
   }
 
-  return <RootLayoutNav />;
+  console.log('[APP_BOOT] 5. Mounting RootLayoutNav within AppCrashErrorBoundary');
+  return (
+    <AppCrashErrorBoundary>
+      <RootLayoutNav />
+    </AppCrashErrorBoundary>
+  );
 }
 
 // Custom header background component
@@ -168,6 +185,7 @@ function RootLayoutNav() {
                 headerShown: false,
                 headerTransparent: true,
                 headerBackground: InvisibleHeaderBackground,
+                contentStyle: { backgroundColor: '#000000' },
               }}
             />
             <Stack.Screen

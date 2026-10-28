@@ -440,7 +440,7 @@ const MediaPlayerScreen: React.FC = () => {
 
   if (isLoadingStream) {
     return (
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000000' }}>
         <View style={styles.loadingContainer}>
           {artwork ? <Image source={{ uri: artwork }} style={styles.backdropImage} /> : null}
           <View style={styles.loadingOverlay}>
@@ -455,7 +455,7 @@ const MediaPlayerScreen: React.FC = () => {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000000' }}>
       <Player
         videoUrl={videoUrl}
         isTorrent={isTorrent}

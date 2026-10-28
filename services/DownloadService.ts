@@ -386,7 +386,8 @@ class DownloadManager {
     let lastProgressBytes = item.downloadedBytes;
     let lastProgressTime = Date.now();
 
-    const task = new DownloadTask(params.streamUrl, targetFile, {
+    const downloadUrl = activeStreamUrl || params.streamUrl;
+    const task = new DownloadTask(downloadUrl, targetFile, {
       sessionType: 'foreground',
       onProgress: (progressData: DownloadProgress) => {
         if (item!.status !== 'downloading') return;

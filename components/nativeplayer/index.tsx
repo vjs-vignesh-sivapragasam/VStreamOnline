@@ -32,6 +32,7 @@ import {
 } from "../coreplayer";
 import { View, Text } from "../Themed";
 import { GlassView } from 'expo-glass-effect';
+import { externalPlayerService } from "@/utils/ExternalPlayerService";
 
 // Menu wrapper component - uses WebMenu on web, MenuView on native
 const MenuWrapper: React.FC<any> = (props) => {
@@ -96,7 +97,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const streamMenuRef = useRef<MenuComponentRef>(null);
 
     // Local state
-    const [contentFit, setContentFit] = useState<ResizeMode>(ResizeMode.COVER);
+    const [contentFit, setContentFit] = useState<ResizeMode>(ResizeMode.CONTAIN);
     const [showContentFitLabel, setShowContentFitLabel] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [videoError, setVideoError] = useState<string | null>(null);
@@ -232,9 +233,18 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, []);
 
     const handleProgress = useCallback((data: OnProgressData) => {
+        if (!playerState.isReady && data.currentTime > 0) {
+            playerState.setIsReady(true);
+            playerState.setIsBuffering(false);
+        }
         if (!playerState.isDragging && !isSeeking.current) {
             playerState.setCurrentTime(data.currentTime);
         }
+    }, [playerState]);
+
+    const handleReadyForDisplay = useCallback(() => {
+        playerState.setIsReady(true);
+        playerState.setIsBuffering(false);
     }, [playerState]);
 
     const handleBuffer = useCallback((data: OnBufferData) => {
@@ -513,6 +523,15 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         showControlsTemporarily();
     }, [showControlsTemporarily]);
 
+    const handleOpenExternal = useCallback(() => {
+        externalPlayerService.promptPlayerSelection({
+            fileUri: videoUrl,
+            title: title || 'Video',
+            poster: artwork,
+            onPlayInternal: () => {},
+        });
+    }, [videoUrl, title, artwork]);
+
     // Prepare selectedTextTrack for Video component
     const videoSelectedTextTrack: SelectedTrack | undefined = useMemo(() => {
         if (selectedTextTrack >= 0) {
@@ -545,6 +564,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 muted={settings.isMuted}
                 rate={settings.playbackSpeed}
                 resizeMode={contentFit}
+                useTextureView={Platform.OS === 'android'}
+                hideShutterView={true}
+                shutterColor="transparent"
+                onReadyForDisplay={handleReadyForDisplay}
                 onLoad={handleLoad}
                 onProgress={handleProgress}
                 onBuffer={handleBuffer}
@@ -617,6 +640,16 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                             {Platform.OS !== 'web' && playerState.isReady && (
                                 <TouchableOpacity style={styles.controlButton} onPress={goToFullscreen}>
                                     <MaterialIcons name={isFullscreen ? "fullscreen-exit" : "fullscreen"} size={24} color="white" />
+                                </TouchableOpacity>
+                            )}
+
+                            {Platform.OS !== 'web' && (
+                                <TouchableOpacity
+                                    style={styles.controlButton}
+                                    onPress={handleOpenExternal}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                >
+                                    <MaterialIcons name="open-in-new" size={22} color="white" />
                                 </TouchableOpacity>
                             )}
 
