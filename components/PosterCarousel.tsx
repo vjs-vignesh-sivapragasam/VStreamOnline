@@ -116,7 +116,7 @@ export default function PosterCarousel({
     }, [filter]);
 
     useEffect(() => {
-        const sub = Dimensions.addEventListener('change', ({ window }) => {
+        const sub = Dimensions.addEventListener('change', ({ window }: { window: any }) => {
             setDimensions({
                 width: window.width,
                 height: window.height,
@@ -135,7 +135,11 @@ export default function PosterCarousel({
             autoPlayRef.current = setInterval(() => {
                 setActiveIndex((prev) => {
                     const next = (prev + 1) % data.length;
-                    flatListRef.current?.scrollToIndex({ index: next, animated: true });
+                    try {
+                        flatListRef.current?.scrollToIndex({ index: next, animated: true });
+                    } catch (e) {
+                        // ignore layout measurement error
+                    }
                     return next;
                 });
             }, autoPlayInterval);
@@ -242,6 +246,13 @@ export default function PosterCarousel({
                 initialNumToRender={3}
                 maxToRenderPerBatch={3}
                 windowSize={5}
+                onScrollToIndexFailed={(info) => {
+                    setTimeout(() => {
+                        try {
+                            flatListRef.current?.scrollToIndex({ index: info.index, animated: false });
+                        } catch {}
+                    }, 500);
+                }}
                 getItemLayout={(_data, index) => ({
                     length: dimensions.width,
                     offset: dimensions.width * index,

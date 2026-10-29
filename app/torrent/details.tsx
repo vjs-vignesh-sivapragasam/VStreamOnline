@@ -128,7 +128,7 @@ const TorrentDetails = () => {
   const { height, width } = useWindowDimensions();
   const isPortrait = height > width;
   const insets = useSafeAreaInsets();
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<any>(null);
 
   // ── TMDB State ──
   const [tmdbData, setTmdbData] = useState<TmdbDetails | null>(null);

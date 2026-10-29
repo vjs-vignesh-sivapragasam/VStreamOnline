@@ -12,6 +12,8 @@ import {
   BackHandler,
 } from 'react-native';
 import { WebView, WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
+
+const RNWebView: any = WebView;
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -1296,7 +1298,7 @@ export default function BrowserScreen() {
         </View>
       ) : (
         <View style={styles.webViewWrap}>
-          <WebView
+          <RNWebView
             ref={webViewRef}
             source={{ uri: currentUrl }}
             style={styles.webView}
@@ -1309,12 +1311,12 @@ export default function BrowserScreen() {
               setIsLoading(true);
               setLoadProgress(0.2);
             }}
-            onLoadProgress={({ nativeEvent }) => setLoadProgress(nativeEvent.progress)}
+            onLoadProgress={({ nativeEvent }: { nativeEvent: any }) => setLoadProgress(nativeEvent.progress)}
             onLoadEnd={() => {
               setIsLoading(false);
               setLoadProgress(1);
             }}
-            onError={(e) => {
+            onError={(e: any) => {
               setIsLoading(false);
               setHasLoadError(true);
             }}
