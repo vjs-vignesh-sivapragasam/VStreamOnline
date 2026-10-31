@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 
@@ -111,15 +111,46 @@ export class StreamingServerClient {
 // ── Server Discovery & Resolution Helpers ─────────────────────────────────────
 
 export function getDevHostIp(): string | null {
-  try {
-    const hostUri = Constants.expoConfig?.hostUri;
-    if (hostUri) {
-      const ip = hostUri.split(':')[0];
-      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-        return ip;
-      }
+  const extractIp = (str?: string | null): string | null => {
+    if (!str || typeof str !== 'string') return null;
+    const match = str.match(/^(?:https?|exp):\/\/([^/:]+)/) || str.match(/^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/);
+    if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+      return match[1];
     }
+    return null;
+  };
+
+  try {
+    // 1. React Native SourceCode module (scriptURL of Metro bundler)
+    const scriptIp = extractIp(NativeModules?.SourceCode?.scriptURL);
+    if (scriptIp) return scriptIp;
+
+    // 2. Constants.expoGoConfig?.debuggerHost
+    const expoGoIp = extractIp((Constants as any)?.expoGoConfig?.debuggerHost);
+    if (expoGoIp) return expoGoIp;
+
+    // 3. Constants.manifest2?.extra?.expoGo?.debuggerHost
+    const manifest2Ip = extractIp((Constants as any)?.manifest2?.extra?.expoGo?.debuggerHost);
+    if (manifest2Ip) return manifest2Ip;
+
+    // 4. Constants.manifest?.debuggerHost
+    const manifestIp = extractIp((Constants as any)?.manifest?.debuggerHost);
+    if (manifestIp) return manifestIp;
+
+    // 5. Constants.expoConfig?.hostUri
+    const hostUriIp = extractIp(Constants.expoConfig?.hostUri);
+    if (hostUriIp) return hostUriIp;
+
+    // 6. Constants.experienceUrl or linkingUri
+    const expIp = extractIp((Constants as any)?.experienceUrl) || extractIp((Constants as any)?.linkingUri);
+    if (expIp) return expIp;
   } catch {}
+
+  // 7. Fallback to developer PC LAN IP during development on local network
+  if (__DEV__) {
+    return '192.168.1.3';
+  }
+
   return null;
 }
 
@@ -135,10 +166,19 @@ export function getServerCandidates(): string[] {
       if (active?.serverUrl) {
         candidates.push(active.serverUrl.replace(/\/+$/, ''));
       }
+      // Also add all configured stremio servers as candidates
+      for (const s of servers) {
+        if (s.serverType === 'stremio' && s.serverUrl) {
+          const clean = s.serverUrl.replace(/\/+$/, '');
+          if (!candidates.includes(clean)) {
+            candidates.push(clean);
+          }
+        }
+      }
     }
   } catch {}
 
-  // 2. Developer PC LAN IP (from Metro bundler host)
+  // 2. Developer PC LAN IP (from Metro bundler host / network fallback)
   const devIp = getDevHostIp();
   if (devIp) {
     const devUrl = `http://${devIp}:11470`;

@@ -63,14 +63,18 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
   }, [serverType]);
 
   useEffect(() => {
-    const newAnimatedValues: { [key: string]: { rotation: Animated.Value, height: Animated.Value } } = {};
-    serverConfigs.forEach(server => {
-      newAnimatedValues[server.serverId] = {
-        rotation: new Animated.Value(0),
-        height: new Animated.Value(0)
-      };
+    setAnimatedValues(prev => {
+      const next = { ...prev };
+      serverConfigs.forEach(server => {
+        if (!next[server.serverId]) {
+          next[server.serverId] = {
+            rotation: new Animated.Value(0),
+            height: new Animated.Value(0),
+          };
+        }
+      });
+      return next;
     });
-    setAnimatedValues(newAnimatedValues);
   }, [serverConfigs]);
 
   useEffect(() => {
@@ -125,8 +129,8 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
           }
           // If localhost default is current but offline, check if PC is online and promote it
           const currentServer = allServers.find(s => s.serverType === serverType && s.current);
-          if (currentServer && currentServer.serverUrl.includes('127.0.0.1')) {
-            const pcOnline = await probeServer(`${pcServerUrl}/stats.json`, 800);
+          if (!currentServer || currentServer.serverUrl.includes('127.0.0.1')) {
+            const pcOnline = await probeServer(`${pcServerUrl}/stats.json`, 1500);
             if (pcOnline) {
               allServers.forEach(s => {
                 if (s.serverType === serverType) {
@@ -453,16 +457,15 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
     setSelectedServerId(newSelectedId);
     setInlineEditingId(null);
 
-    if (animatedValues[serverId]) {
-      const { rotation, height } = animatedValues[serverId];
-
+    const anim = animatedValues[serverId];
+    if (anim?.rotation && anim?.height) {
       Animated.parallel([
-        Animated.timing(rotation, {
+        Animated.timing(anim.rotation, {
           toValue: isCurrentlySelected ? 0 : 1,
           duration: 200,
           useNativeDriver: true,
         }),
-        Animated.timing(height, {
+        Animated.timing(anim.height, {
           toValue: isCurrentlySelected ? 0 : 48,
           duration: 200,
           useNativeDriver: false,
@@ -709,10 +712,12 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
                           ) : (
                             <Animated.View style={{
                               transform: [{
-                                rotate: animatedValues[item.serverId]?.rotation.interpolate({
-                                  inputRange: [0, 1],
-                                  outputRange: ['0deg', '90deg']
-                                }) || '0deg'
+                                rotate: animatedValues[item.serverId]?.rotation
+                                  ? animatedValues[item.serverId].rotation.interpolate({
+                                      inputRange: [0, 1],
+                                      outputRange: ['0deg', '90deg']
+                                    })
+                                  : '0deg'
                               }]
                             }}>
                               <MaterialIcons name="chevron-right" size={22} color="#4A4A4A" />
@@ -726,10 +731,12 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
                           styles.actionBar,
                           {
                             height: animatedValues[item.serverId]?.height || 48,
-                            opacity: animatedValues[item.serverId]?.height.interpolate({
-                              inputRange: [0, 48],
-                              outputRange: [0, 1]
-                            }) || 1
+                            opacity: animatedValues[item.serverId]?.height
+                              ? animatedValues[item.serverId].height.interpolate({
+                                  inputRange: [0, 48],
+                                  outputRange: [0, 1]
+                                })
+                              : 1
                           }
                         ]}>
                           <Pressable
