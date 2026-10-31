@@ -62,9 +62,8 @@
           "android": {
             "usesCleartextTraffic": true,
             "minSdkVersion": 26,
-            "compileSdkVersion": 36,
+            "compileSdkVersion": 37,
             "targetSdkVersion": 35,
-            "buildToolsVersion": "36.0.0",
             "ndkVersion": "27.0.12077973",
             "packagingOptions": {
               "pickFirst": []
