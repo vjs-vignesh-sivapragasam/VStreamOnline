@@ -7,21 +7,45 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Base URL & Constants ─────────────────────────────────────────────────────
 
-export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.solar';
+export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.style';
 
 export const KNOWN_TAMILMV_MIRRORS = [
   'https://www.1tamilmv.style',
+  'https://1tamilmv.style',
+  'https://www.1tamilmv.rocks',
+  'https://1tamilmv.capital',
   'https://www.1tamilmv.solar',
   'https://www.1tamilmv.cards',
-  'https://www.1tamilmv.pizza',
-  'https://www.1tamilmv.fi',
-  'https://www.1tamilmv.live',
-  'https://www.1tamilmv.pm',
-  'https://www.1tamilmv.yt',
-  'https://www.1tamilmv.mx',
-  'https://www.1tamilmv.tf',
-  'https://www.1tamilmv.com',
 ];
+
+const STALE_OR_DEAD_DOMAINS = new Set([
+  'https://www.1tamilmv.com',
+  'https://1tamilmv.com',
+  'https://www.1tamilmv.solar',
+  'https://1tamilmv.solar',
+  'https://www.1tamilmv.cards',
+  'https://1tamilmv.cards',
+  'https://www.1tamilmv.pizza',
+  'https://1tamilmv.pizza',
+  'https://www.1tamilmv.live',
+  'https://1tamilmv.live',
+  'https://www.1tamilmv.pm',
+  'https://1tamilmv.pm',
+  'https://www.1tamilmv.yt',
+  'https://1tamilmv.yt',
+  'https://www.1tamilmv.mx',
+  'https://1tamilmv.mx',
+  'https://www.1tamilmv.fi',
+  'https://1tamilmv.fi',
+  'https://www.1tamilmv.tf',
+  'https://1tamilmv.tf',
+]);
+
+function isUsableDomain(url?: string | null): boolean {
+  if (!url || !url.trim()) return false;
+  const clean = url.trim().replace(/\/+$/, '').toLowerCase();
+  return !STALE_OR_DEAD_DOMAINS.has(clean);
+}
 
 type BaseUrlListener = (newUrl: string) => void;
 const baseUrlListeners = new Set<BaseUrlListener>();
@@ -49,10 +73,13 @@ let cachedTamilMVBaseUrl: string = DEFAULT_TAMILMV_BASE_URL;
 // 1. Initial attempt from synchronous storage (if available)
 try {
   const customUrl = storageService.getItem(StorageKeys.TAMILMV_BASE_URL_KEY);
-  if (customUrl && customUrl.trim() && customUrl.trim() !== 'https://www.1tamilmv.com') {
-    cachedTamilMVBaseUrl = customUrl.trim().replace(/\/+$/, '');
+  if (isUsableDomain(customUrl)) {
+    cachedTamilMVBaseUrl = customUrl!.trim().replace(/\/+$/, '');
   } else {
     cachedTamilMVBaseUrl = DEFAULT_TAMILMV_BASE_URL;
+    try {
+      storageService.setItem(StorageKeys.TAMILMV_BASE_URL_KEY, DEFAULT_TAMILMV_BASE_URL);
+    } catch {}
   }
 } catch (e) {
   console.warn('Failed to read TamilMV base URL from storageService', e);
@@ -61,8 +88,8 @@ try {
 // 2. Hydrate from AsyncStorage immediately so domain persists across app reloads/restarts
 AsyncStorage.getItem(StorageKeys.TAMILMV_BASE_URL_KEY)
   .then(storedUrl => {
-    if (storedUrl && storedUrl.trim() && storedUrl.trim() !== 'https://www.1tamilmv.com') {
-      const sanitized = storedUrl.trim().replace(/\/+$/, '');
+    if (isUsableDomain(storedUrl)) {
+      const sanitized = storedUrl!.trim().replace(/\/+$/, '');
       if (sanitized !== cachedTamilMVBaseUrl) {
         cachedTamilMVBaseUrl = sanitized;
         try {
@@ -502,35 +529,40 @@ export async function verifyTamilMVDomain(domainUrl: string): Promise<boolean> {
 export async function autoDetectTamilMVDomain(
   onProgress?: (status: string) => void
 ): Promise<string | null> {
+  onProgress?.('Checking fast verified mirrors...');
+
+  // Step 1: Check known mirrors first (fastest & most reliable)
+  for (const mirror of KNOWN_TAMILMV_MIRRORS) {
+    onProgress?.(`Verifying mirror: ${mirror}...`);
+    const isValid = await verifyTamilMVDomain(mirror);
+    if (isValid) {
+      onProgress?.(`Configuring base URL with: ${mirror}`);
+      console.log(`[TamilMV] Auto-detected active working mirror: ${mirror}`);
+      await setTamilMVBaseUrl(mirror);
+      return mirror;
+    }
+  }
+
   onProgress?.('Searching Google & online sources for TamilMV domain...');
 
-  // Step 1: Search online via Google, Bing, DuckDuckGo
+  // Step 2: Search online via Google, Bing, DuckDuckGo
   const googleCandidates = await searchGoogleForTamilMVDomains();
 
   onProgress?.('Checking dynamic mirror resolvers...');
-  // Step 2: Probe dynamic redirect resolvers
+  // Step 3: Probe dynamic redirect resolvers
   const redirectCandidates = await probeRedirectTargets();
 
-  // Step 3: Combine discovered candidates + known mirrors (prioritizing detected candidates)
+  // Step 4: Combine remaining discovered candidates
   const candidatePool = Array.from(
     new Set([
       ...googleCandidates,
       ...redirectCandidates,
-      ...KNOWN_TAMILMV_MIRRORS,
-      'https://www.1tamilmv.solar',
-      'https://www.1tamilmv.fi',
-      'https://www.1tamilmv.cards',
-      'https://www.1tamilmv.pizza',
-      'https://www.1tamilmv.live',
-      'https://www.1tamilmv.pm',
-      'https://www.1tamilmv.yt',
-      'https://www.1tamilmv.mx',
     ])
-  );
+  ).filter((c) => !KNOWN_TAMILMV_MIRRORS.includes(c));
 
   onProgress?.(`Verifying ${candidatePool.length} domain candidates...`);
 
-  // Step 4: Verify candidates sequentially
+  // Step 5: Verify candidates sequentially
   for (const candidate of candidatePool) {
     onProgress?.(`Verifying domain: ${candidate}...`);
     const isValid = await verifyTamilMVDomain(candidate);
@@ -860,90 +892,96 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
   const cached = readCache(cacheKey);
   if (cached) return cached;
 
-  const url = getRssUrl(language, category);
-  if (!url) return [];
+  const forumId = FORUM_IDS[language]?.[category];
+  if (!forumId) return [];
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const currentBase = getTamilMVBaseUrl();
+  const mirrorsToTry = [currentBase, ...KNOWN_TAMILMV_MIRRORS.filter((m) => m !== currentBase)];
 
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-        'Cache-Control': 'no-cache',
-      },
-      signal: controller.signal,
-    });
+  let lastError: any = null;
 
-    clearTimeout(timeoutId);
+  for (const mirror of mirrorsToTry) {
+    const rssUrl = `${mirror}/index.php?/forums/forum/${forumId}/all.xml`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    try {
+      const response = await fetch(rssUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+          'Cache-Control': 'no-cache',
+        },
+        signal: controller.signal,
+      });
 
-    const xml = await response.text();
-    let groups = parseRSSFeed(xml, language, category);
+      clearTimeout(timeoutId);
 
-    // If RSS returns 0 items, fallback to HTML parsing of forum page 1
-    if (groups.length === 0) {
-      const forumSlug = FORUM_IDS[language]?.[category];
-      if (forumSlug) {
-        const baseUrl = getTamilMVBaseUrl();
-        const htmlUrl = `${baseUrl}/index.php?/forums/forum/${forumSlug}/`;
-        try {
-          const htmlRes = await fetch(htmlUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            },
-          });
-          if (htmlRes.ok) {
-            const html = await htmlRes.text();
-            const parsed = parseCategoryPageHtml(html, baseUrl, language, category);
-            if (parsed.items.length > 0) {
-              groups = parsed.items;
+      if (response.ok) {
+        const xml = await response.text();
+        let groups = parseRSSFeed(xml, language, category);
+
+        // If RSS returns 0 items, fallback to HTML parsing of forum page 1
+        if (groups.length === 0) {
+          const htmlUrl = `${mirror}/index.php?/forums/forum/${forumId}/`;
+          try {
+            const htmlRes = await fetch(htmlUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              },
+            });
+            if (htmlRes.ok) {
+              const html = await htmlRes.text();
+              const parsed = parseCategoryPageHtml(html, mirror, language, category);
+              if (parsed.items.length > 0) {
+                groups = parsed.items;
+              }
             }
+          } catch {}
+        }
+
+        if (groups.length > 0) {
+          if (mirror !== currentBase) {
+            console.log(`[TamilMV] Active domain failed. Auto-switched to working mirror: ${mirror}`);
+            setTamilMVBaseUrl(mirror).catch(() => {});
           }
-        } catch {}
+          writeCache(cacheKey, groups);
+          return groups;
+        }
       }
+    } catch (e: any) {
+      clearTimeout(timeoutId);
+      lastError = e;
     }
+  }
 
-    writeCache(cacheKey, groups);
-    return groups;
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-
-    // If the active domain fails (blocked by ISP / offline), auto-discover a working mirror from presets and persist to AsyncStorage
-    const currentBase = getTamilMVBaseUrl();
-    const workingMirror = await autoDiscoverWorkingDomain();
-    if (workingMirror && workingMirror !== currentBase) {
-      const retryUrl = getRssUrl(language, category, workingMirror);
-      if (retryUrl) {
-        const retryController = new AbortController();
-        const retryTimeout = setTimeout(() => retryController.abort(), 15000);
-        try {
-          const retryRes = await fetch(retryUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-              'Cache-Control': 'no-cache',
-            },
-            signal: retryController.signal,
-          });
-          clearTimeout(retryTimeout);
-          if (retryRes.ok) {
-            const xml = await retryRes.text();
-            const groups = parseRSSFeed(xml, language, category);
-            writeCache(cacheKey, groups);
-            return groups;
-          }
-        } catch {
-          clearTimeout(retryTimeout);
+  // If all known mirrors fail, attempt online auto-discovery as last resort
+  try {
+    const discovered = await autoDiscoverWorkingDomain();
+    if (discovered && !mirrorsToTry.includes(discovered)) {
+      const retryUrl = `${discovered}/index.php?/forums/forum/${forumId}/all.xml`;
+      const retryRes = await fetch(retryUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+          'Cache-Control': 'no-cache',
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (retryRes.ok) {
+        const xml = await retryRes.text();
+        const groups = parseRSSFeed(xml, language, category);
+        if (groups.length > 0) {
+          writeCache(cacheKey, groups);
+          return groups;
         }
       }
     }
+  } catch {}
 
-    throw error;
-  }
+  if (lastError) throw lastError;
+  return [];
 }
 
 // ─── Hook: single category ────────────────────────────────────────────────────
@@ -1085,7 +1123,7 @@ export function detectLanguageFromTitle(title: string, forumId?: string | null):
 }
 
 export function cleanTopicTitle(title: string): { name: string; year: string | null } {
-  let cleaned = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|cards|pizza|fi|live|style)\s*[-_:]\s*/i, '');
+  let cleaned = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|cards|pizza|fi|live|style|rocks|capital)\s*[-_:]\s*/i, '');
   cleaned = cleaned.replace(/^(?:https?:\/\/)?(?:www\.)?(?:1tamilmv|tamilmv)[\w\.-]*\s*[-_:]\s*/i, '');
   cleaned = cleaned.replace(/^\[?\b(?:1tamilmv|tamilmv)\b\]?\s*[-_:]?\s*/i, '');
   cleaned = cleaned.replace(/^[\s\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]+/u, '').trim();

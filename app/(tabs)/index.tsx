@@ -80,6 +80,7 @@ const LazySection = ({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
+  console.log('[HOME_BOOT] 1. HomeScreen rendered');
   const [language, setLanguage] = useState<Language>('tamil');
   const [activeCategory, setActiveCategory] = useState<{
     category: Category;
@@ -111,10 +112,6 @@ export default function HomeScreen() {
     refresh();
     setTimeout(() => setRefreshing(false), 1500);
   }, [refresh]);
-
-  useEffect(() => {
-    startEmbeddedNodeServer();
-  }, []);
 
   const handleLanguageChange = async (newLanguage: Language) => {
     if (await isHapticsSupported()) {

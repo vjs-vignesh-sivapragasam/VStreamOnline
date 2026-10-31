@@ -30,14 +30,12 @@ import {
 } from '@/hooks/useTamilMv';
 
 const PRESET_DOMAINS = [
-  'https://www.1tamilmv.solar',
+  'https://www.1tamilmv.style',
+  'https://www.1tamilmv.rocks',
+  'https://1tamilmv.style',
+  'https://1tamilmv.capital',
   'https://www.1tamilmv.cards',
-  'https://www.1tamilmv.pizza',
-  'https://www.1tamilmv.fi',
-  'https://www.1tamilmv.live',
-  'https://www.1tamilmv.pm',
-  'https://www.1tamilmv.yt',
-  'https://www.1tamilmv.mx',
+  'https://www.1tamilmv.solar',
 ];
 
 const TamilMvSettingsScreen: React.FC = () => {
@@ -167,7 +165,30 @@ const TamilMvSettingsScreen: React.FC = () => {
   const handleSelectPreset = async (preset: string) => {
     await triggerHaptic();
     setUrlInput(preset);
-    await runPing(preset);
+    setIsPinging(true);
+    setLastPingedUrl(preset);
+    try {
+      const result = await pingTamilMV(preset);
+      setPingResult(result);
+      if (result.success && result.rssWorking) {
+        await setTamilMVBaseUrl(preset);
+        setActiveUrl(preset);
+        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+        showAlert(
+          'Domain Connected & Saved',
+          `${preset} is live and has been configured and saved as your active TamilMV source.`
+        );
+      }
+    } catch (e: any) {
+      setPingResult({
+        success: false,
+        latencyMs: 0,
+        rssWorking: false,
+        message: `Ping failed: ${e?.message || 'Unknown error'}`,
+      });
+    } finally {
+      setIsPinging(false);
+    }
   };
 
   const getStatusBadge = () => {
@@ -376,7 +397,7 @@ const TamilMvSettingsScreen: React.FC = () => {
                   style={styles.textInput}
                   value={urlInput}
                   onChangeText={setUrlInput}
-                  placeholder="https://www.1tamilmv.solar"
+                  placeholder="https://www.1tamilmv.style"
                   placeholderTextColor="#666666"
                   autoCapitalize="none"
                   autoCorrect={false}

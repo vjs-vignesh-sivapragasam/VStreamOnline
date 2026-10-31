@@ -339,7 +339,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#ffffff',
     letterSpacing: -0.3,
-    marginBottom: 6,
+    marginBottom: 6, 
   },
   versionBadge: {
     backgroundColor: 'rgba(83, 90, 255, 0.15)',

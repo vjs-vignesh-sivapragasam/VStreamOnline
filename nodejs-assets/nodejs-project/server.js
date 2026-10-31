@@ -82179,7 +82179,7 @@
         return this._isTickUsed || this._haveDrainedQueues;
     }, Async.prototype.fatalError = function(e, isNode) {
         isNode ? (process.stderr.write("Fatal " + (e instanceof Error ? e.stack : e) + "\n"), 
-        process.exit(2)) : this.throwLater(e);
+        console.error("fatalError suppressed", e)) : this.throwLater(e);
     }, Async.prototype.throwLater = function(fn, arg) {
         if (1 === arguments.length && (arg = fn, fn = function() {
             throw arg;
@@ -100788,7 +100788,7 @@
         return this._isTickUsed || this._haveDrainedQueues;
     }, Async.prototype.fatalError = function(e, isNode) {
         isNode ? (process.stderr.write("Fatal " + (e instanceof Error ? e.stack : e) + "\n"), 
-        process.exit(2)) : this.throwLater(e);
+        console.error("fatalError suppressed", e)) : this.throwLater(e);
     }, Async.prototype.throwLater = function(fn, arg) {
         if (1 === arguments.length && (arg = fn, fn = function() {
             throw arg;

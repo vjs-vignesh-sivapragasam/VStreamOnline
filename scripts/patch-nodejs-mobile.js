@@ -89,6 +89,72 @@ if (fs.existsSync(cmakeListsPath)) {
   }
 }
 
+// ── 2c. Patch RNNodeJsMobileModule.java to prevent unhandled JVM crashes ──────
+const rnNodeJsModulePath = path.join(
+  rootDir,
+  'node_modules',
+  'nodejs-mobile-react-native',
+  'android',
+  'src',
+  'main',
+  'java',
+  'com',
+  'janeasystems',
+  'rn_nodejs_mobile',
+  'RNNodeJsMobileModule.java'
+);
+
+if (fs.existsSync(rnNodeJsModulePath)) {
+  let content = fs.readFileSync(rnNodeJsModulePath, 'utf8');
+  let changed = false;
+
+  // 1. Wrap System.loadLibrary in try/catch to avoid crash on incompatible ABIs or 16KB alignment
+  if (content.includes('System.loadLibrary("nodejs-mobile-react-native-native-lib");') &&
+      !content.includes('Failed to load nodejs-mobile native libraries')) {
+    content = content.replace(
+      /static\s*\{\s*System\.loadLibrary\("nodejs-mobile-react-native-native-lib"\);\s*System\.loadLibrary\("node"\);\s*\}/,
+      `static {\n    try {\n      System.loadLibrary("nodejs-mobile-react-native-native-lib");\n      System.loadLibrary("node");\n      Log.i(TAG, "Successfully loaded nodejs-mobile native libraries");\n    } catch (Throwable t) {\n      Log.e(TAG, "Failed to load nodejs-mobile native libraries: " + t.getMessage(), t);\n    }\n  }`
+    );
+    changed = true;
+  }
+
+  // 2. Prevent unhandled RuntimeException in background thread for asset copy
+  if (content.includes('throw new RuntimeException("Node assets copy failed", e);')) {
+    content = content.replace(
+      'throw new RuntimeException("Node assets copy failed", e);',
+      'Log.e(TAG, "Node assets copy failed safely without crashing JVM: " + e.getMessage(), e);'
+    );
+    changed = true;
+  }
+
+  // 3. Catch errors in startNodeProject background thread
+  if (content.includes('waitForInit();\n          startNodeWithArguments(')) {
+    content = content.replace(
+      'waitForInit();\n          startNodeWithArguments(',
+      'try {\n            waitForInit();\n            startNodeWithArguments('
+    );
+    content = content.replace(
+      'redirectOutputToLogcat\n          );\n        }',
+      'redirectOutputToLogcat\n            );\n          } catch (Throwable t) {\n            Log.e(TAG, "Failed to start node project thread: " + t.getMessage(), t);\n          }\n        }'
+    );
+    changed = true;
+  }
+
+  // 4. Protect event emission across new arch / bridgeless mode
+  if (content.includes('reactContext\n      .getJSModule(RCTNativeAppEventEmitter.class)\n      .emit(eventName, params);')) {
+    content = content.replace(
+      'reactContext\n      .getJSModule(RCTNativeAppEventEmitter.class)\n      .emit(eventName, params);',
+      'try {\n      reactContext.getJSModule(RCTNativeAppEventEmitter.class).emit(eventName, params);\n    } catch (Throwable t) {\n      Log.e(TAG, "Failed to emit event to JS: " + t.getMessage(), t);\n    }'
+    );
+    changed = true;
+  }
+
+  if (changed) {
+    fs.writeFileSync(rnNodeJsModulePath, content, 'utf8');
+    console.log('✅ Patched RNNodeJsMobileModule.java to prevent unhandled JVM crashes');
+  }
+}
+
 // ── 3. Patch metro-config loadConfig.js (replace .toReversed() with safe fallback) ─
 const metroConfigFiles = [
   path.join(rootDir, 'node_modules', '@expo', 'metro', 'node_modules', 'metro-config', 'src', 'loadConfig.js'),
