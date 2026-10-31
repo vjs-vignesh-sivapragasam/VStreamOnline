@@ -208,3 +208,26 @@ if (fs.existsSync(createUpdatesPath)) {
     console.log('✅ Injected toReversed polyfill into expo-updates createUpdatesResources.js');
   }
 }
+
+// ── 5. Patch @react-native-menu/menu RCTBridge.h import for RN 0.88+ New Architecture ──
+const menuViewManagerPath = path.join(
+  rootDir,
+  'node_modules',
+  '@react-native-menu',
+  'menu',
+  'ios',
+  'MenuViewManager.mm'
+);
+
+if (fs.existsSync(menuViewManagerPath)) {
+  let content = fs.readFileSync(menuViewManagerPath, 'utf8');
+  if (content.includes('#import "RCTBridge.h"')) {
+    content = content.replace(
+      '#import "RCTBridge.h"',
+      '#if __has_include(<React/RCTBridge.h>)\n#import <React/RCTBridge.h>\n#elif __has_include("RCTBridge.h")\n#import "RCTBridge.h"\n#endif'
+    );
+    fs.writeFileSync(menuViewManagerPath, content, 'utf8');
+    console.log('✅ Patched @react-native-menu/menu MenuViewManager.mm for React Native 0.88+ header compatibility');
+  }
+}
+
