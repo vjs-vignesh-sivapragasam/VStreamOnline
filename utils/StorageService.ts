@@ -12,9 +12,9 @@ interface StorageBackend {
     contains(key: string): boolean;
 }
 
-// Fallback storage when native NitroModules / MMKV is not compiled in the binary (e.g. Expo Go, Web, or pre-native build)
-// Persists directly to AsyncStorage so data is NEVER lost across app restarts or reloads!
-class FallbackStorage implements StorageBackend {
+// Persistent storage backed by AsyncStorage with a synchronous in-memory cache
+// Provides instant synchronous read/write access with zero native C++ / Nitro module dependencies
+class PersistentStorage implements StorageBackend {
     private memoryStore = new Map<string, any>();
     private isWebStorage = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
     private isHydrated = false;
@@ -35,7 +35,7 @@ class FallbackStorage implements StorageBackend {
                 }
             }
         } catch (e) {
-            console.warn('[StorageService] FallbackStorage failed to hydrate from AsyncStorage:', e);
+            console.warn('[StorageService] PersistentStorage failed to hydrate from AsyncStorage:', e);
         } finally {
             this.isHydrated = true;
         }
@@ -135,30 +135,8 @@ class FallbackStorage implements StorageBackend {
     }
 }
 
-// Safely initialize MMKV or fall back to FallbackStorage
-let isUsingFallbackStorage = false;
-
-function initStorage(): StorageBackend {
-    try {
-        // Dynamically require to avoid crash at module evaluation time when NitroModules is not linked
-        const { createMMKV } = require('react-native-mmkv');
-        const instance = createMMKV({ id: 'tmv' });
-        // Verify it actually works
-        instance.set('__nitro_test__', 'ok');
-        instance.remove('__nitro_test__');
-        return instance;
-    } catch (error) {
-        isUsingFallbackStorage = true;
-        console.warn(
-            '[StorageService] Native MMKV/NitroModules is not available in the current environment (e.g. Expo Go, Web, or native build required). Falling back to memory/web storage.',
-            error
-        );
-        return new FallbackStorage();
-    }
-}
-
-// Initialize MMKV storage safely
-const storage: StorageBackend = initStorage();
+// Initialize persistent storage instance
+const storage: StorageBackend = new PersistentStorage();
 
 export const StorageKeys = {
     SERVERS_KEY: 'TMV_SERVERS',
@@ -237,21 +215,21 @@ export const storageService = {
     clear(): void {
         try {
             storage.clearAll();
-            console.log('MMKV cleared successfully');
+            console.log('Storage cleared successfully');
         } catch (error) {
-            console.error('Error clearing MMKV:', error);
+            console.error('Error clearing storage:', error);
             throw error;
         }
     },
 
     isAvailable(): boolean {
         try {
-            // Test if MMKV is available by attempting a simple operation
+            // Test if storage is available by attempting a simple operation
             storage.set('__test__', 'test');
             storage.remove('__test__');
             return true;
         } catch (error) {
-            console.error('Error checking MMKV availability:', error);
+            console.error('Error checking storage availability:', error);
             return false;
         }
     },
@@ -262,7 +240,7 @@ export const storageService = {
             const value = storage.getString(key);
             return value ? JSON.parse(value) : undefined;
         } catch (error) {
-            console.error('Error parsing object from MMKV:', error);
+            console.error('Error parsing object from storage:', error);
             return undefined;
         }
     },
@@ -271,7 +249,7 @@ export const storageService = {
         try {
             storage.set(key, JSON.stringify(value));
         } catch (error) {
-            console.error('Error setting object to MMKV:', error);
+            console.error('Error setting object to storage:', error);
             throw error;
         }
     },
@@ -281,7 +259,7 @@ export const storageService = {
         try {
             return storage.getBoolean(key);
         } catch (error) {
-            console.error('Error reading boolean from MMKV:', error);
+            console.error('Error reading boolean from storage:', error);
             return undefined;
         }
     },
@@ -290,7 +268,7 @@ export const storageService = {
         try {
             storage.set(key, value);
         } catch (error) {
-            console.error('Error setting boolean to MMKV:', error);
+            console.error('Error setting boolean to storage:', error);
             throw error;
         }
     },
@@ -299,7 +277,7 @@ export const storageService = {
         try {
             return storage.getNumber(key);
         } catch (error) {
-            console.error('Error reading number from MMKV:', error);
+            console.error('Error reading number from storage:', error);
             return undefined;
         }
     },
@@ -308,7 +286,7 @@ export const storageService = {
         try {
             storage.set(key, value);
         } catch (error) {
-            console.error('Error setting number to MMKV:', error);
+            console.error('Error setting number to storage:', error);
             throw error;
         }
     },
@@ -318,14 +296,14 @@ export const storageService = {
         try {
             return storage.getAllKeys();
         } catch (error) {
-            console.error('Error getting all keys from MMKV:', error);
+            console.error('Error getting all keys from storage:', error);
             return [];
         }
     },
 
     // Check if running on native MMKV vs fallback
     isNativeMMKV(): boolean {
-        return !isUsingFallbackStorage;
+        return false;
     },
 
     // Check if key exists
@@ -333,7 +311,7 @@ export const storageService = {
         try {
             return storage.contains(key);
         } catch (error) {
-            console.error('Error checking key existence in MMKV:', error);
+            console.error('Error checking key existence in storage:', error);
             return false;
         }
     }

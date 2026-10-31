@@ -231,25 +231,5 @@ if (fs.existsSync(menuViewManagerPath)) {
   }
 }
 
-// ── 6. Patch react-native-mmkv to exclude duplicate namespace annotation module ──
-const mmkvGradlePath = path.join(
-  rootDir,
-  'node_modules',
-  'react-native-mmkv',
-  'android',
-  'build.gradle'
-);
-
-if (fs.existsSync(mmkvGradlePath)) {
-  let content = fs.readFileSync(mmkvGradlePath, 'utf8');
-  if (content.includes('implementation "io.github.zhongwuzw:mmkv:2.2.4"') && !content.includes('exclude group: "io.github.zhongwuzw"')) {
-    content = content.replace(
-      'implementation "io.github.zhongwuzw:mmkv:2.2.4"',
-      'implementation("io.github.zhongwuzw:mmkv:2.2.4") {\n    exclude group: "io.github.zhongwuzw", module: "annotation"\n  }'
-    );
-    fs.writeFileSync(mmkvGradlePath, content, 'utf8');
-    console.log('✅ Patched react-native-mmkv android/build.gradle to exclude duplicate namespace annotation module');
-  }
-}
 
 

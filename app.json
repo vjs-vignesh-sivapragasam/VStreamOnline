@@ -54,7 +54,6 @@
     },
     "plugins": [
       "./plugins/withKSPlayer",
-      "./plugins/withMMKVFix",
       "expo-router",
       "expo-font",
       [
