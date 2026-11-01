@@ -14,6 +14,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Pressable,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,7 +23,7 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { isHapticsSupported } from '@/utils/platform';
 import { useYouTubePlayer } from '@/contexts/YouTubePlayerContext';
-import { youTubeService, YouTubeVideoItem, YouTubeFormatOption } from '@/services/YouTubeService';
+import { youTubeService, YouTubeVideoItem, YouTubeVideoDetails, YouTubeFormatOption } from '@/services/YouTubeService';
 import { youTubeListService } from '@/services/YouTubeListService';
 import { downloadService } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
@@ -148,14 +149,28 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  const [isTheaterMode, setIsTheaterMode] = useState(false);
-
-  const handleToggleTheaterMode = useCallback(async () => {
-    if (await isHapticsSupported()) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-    setIsTheaterMode((prev) => !prev);
-  }, []);
+  // Swipe left or swipe down on video player to return/minimize like real YouTube
+  const swipePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        // Trigger only on clear deliberate swipes on the player area
+        return (
+          (Math.abs(gestureState.dx) > 50 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5) ||
+          (gestureState.dy > 50 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5)
+        );
+      },
+      onPanResponderRelease: async (_evt, gestureState) => {
+        // Swipe left (dx < -60) or swipe down (dy > 60) minimizes to miniplayer
+        if (gestureState.dx < -60 || gestureState.dy > 60) {
+          if (await isHapticsSupported()) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }
+          minimize();
+        }
+      },
+    })
+  ).current;
 
   // Related videos state
   const [relatedVideos, setRelatedVideos] = useState<YouTubeVideoItem[]>([]);
@@ -164,6 +179,37 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // Download modal state
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [activeDownloadItem, setActiveDownloadItem] = useState<YouTubeVideoItem | null>(null);
+  const [modalVideoDetails, setModalVideoDetails] = useState<YouTubeVideoDetails | null>(null);
+  const [isLoadingModalDetails, setIsLoadingModalDetails] = useState(false);
+
+  const handleOpenDownload = useCallback(
+    async (item: YouTubeVideoItem) => {
+      setActiveDownloadItem(item);
+      setDownloadModalVisible(true);
+
+      if (currentVideo && item.id === currentVideo.id && videoDetails) {
+        setModalVideoDetails(videoDetails);
+        return;
+      }
+
+      setIsLoadingModalDetails(true);
+      try {
+        const details = await youTubeService.getVideoDetails(item.id);
+        setModalVideoDetails(details);
+      } catch (err) {
+        console.warn('[YouTubeWatchOverlay] Could not fetch download formats:', err);
+      } finally {
+        setIsLoadingModalDetails(false);
+      }
+    },
+    [currentVideo, videoDetails]
+  );
+
+  useEffect(() => {
+    if (videoDetails && activeDownloadItem?.id === currentVideo?.id) {
+      setModalVideoDetails(videoDetails);
+    }
+  }, [videoDetails, activeDownloadItem, currentVideo]);
 
   // Comments modal state
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -182,7 +228,6 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       setIsLiked(false);
       setIsDisliked(false);
       setDescriptionExpanded(false);
-      setIsTheaterMode(false);
       setCommentsList(DEFAULT_COMMENTS);
       setActiveDownloadItem(null);
 
@@ -283,7 +328,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
 
       try {
         const ext = format.type === 'audio' ? 'm4a' : 'mp4';
-        const cleanTitle = (videoDetails?.title || targetVideo.title)
+        const cleanTitle = (modalVideoDetails?.title || videoDetails?.title || targetVideo.title)
           .replace(/[^a-zA-Z0-9\s-_]/g, '')
           .trim();
         const fileName = `${cleanTitle}_${format.quality}.${ext}`;
@@ -300,9 +345,9 @@ const YouTubeWatchOverlayInner: React.FC = () => {
 
         Alert.alert(
           'Download Started',
-          `Downloading "${cleanTitle}" (${format.quality} ${ext.toUpperCase()}) to your Library.`,
+          `Downloading "${cleanTitle}" (${format.quality} ${ext.toUpperCase()}) to your Downloads.`,
           [
-            { text: 'View Downloads', onPress: () => router.push('/(tabs)/library') },
+            { text: 'View Downloads', onPress: () => router.push('/youtube/downloads' as any) },
             { text: 'OK', style: 'cancel' },
           ]
         );
@@ -310,7 +355,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         Alert.alert('Download Failed', err?.message || 'Could not start download.');
       }
     },
-    [currentVideo, activeDownloadItem, videoDetails, router]
+    [currentVideo, activeDownloadItem, videoDetails, modalVideoDetails, router]
   );
 
   const handleFullScreen = useCallback(() => {
@@ -425,62 +470,44 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   return (
     <View style={styles.fullWatchOverlay}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        {/* Top 16:9 / Theater Video Player */}
-        <YouTubeInlinePlayer
-          streamUrl={streamUrl}
-          poster={currentVideo.thumbnail}
-          isPlaying={isPlaying}
-          isBuffering={isBuffering}
-          currentTime={currentTime}
-          duration={duration}
-          seekTarget={seekTarget}
-          playbackError={playbackError}
-          isTheaterMode={isTheaterMode}
-          onToggleTheaterMode={handleToggleTheaterMode}
-          onTogglePlay={togglePlay}
-          onMinimize={minimize}
-          onFullScreen={handleFullScreen}
-          onSeek={seekTo}
-          onClearSeekTarget={clearSeekTarget}
-          onProgress={updateProgress}
-          setIsBuffering={setIsBuffering}
-          onPlaybackError={handlePlayerError}
-          onRetry={retryStream}
-          currentQuality={currentQuality}
-          playbackSpeed={playbackSpeed}
-          isLooping={isLooping}
-          availableQualities={availableQualities}
-          onChangeQuality={changeQuality}
-          onSetPlaybackSpeed={setPlaybackSpeed}
-          onToggleLoop={() => setIsLooping(!isLooping)}
-        />
-
-        {/* Dark-themed Theater Mode Banner */}
-        {isTheaterMode && (
-          <View style={styles.theaterModeBar}>
-            <View style={styles.theaterModeLeft}>
-              <Ionicons name="film" size={15} color="#535aff" />
-              <Text style={styles.theaterModeTitle}>THEATER MODE</Text>
-              <Text style={styles.theaterModeSub}>• Lights dimmed</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.exitTheaterBtn}
-              onPress={() => setIsTheaterMode(false)}
-              activeOpacity={0.8}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="close-circle" size={15} color="#ffffff" style={{ marginRight: 4 }} />
-              <Text style={styles.exitTheaterBtnText}>Exit</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Top 16:9 Video Player */}
+        <View {...swipePanResponder.panHandlers}>
+          <YouTubeInlinePlayer
+            title={currentVideo.title}
+            channel={currentVideo.channel}
+            streamUrl={streamUrl}
+            poster={currentVideo.thumbnail}
+            isPlaying={isPlaying}
+            isBuffering={isBuffering}
+            currentTime={currentTime}
+            duration={duration}
+            seekTarget={seekTarget}
+            playbackError={playbackError}
+            onTogglePlay={togglePlay}
+            onMinimize={minimize}
+            onFullScreen={handleFullScreen}
+            onSeek={seekTo}
+            onClearSeekTarget={clearSeekTarget}
+            onProgress={updateProgress}
+            setIsBuffering={setIsBuffering}
+            onPlaybackError={handlePlayerError}
+            onRetry={retryStream}
+            currentQuality={currentQuality}
+            playbackSpeed={playbackSpeed}
+            isLooping={isLooping}
+            availableQualities={availableQualities}
+            onChangeQuality={changeQuality}
+            onSetPlaybackSpeed={setPlaybackSpeed}
+            onToggleLoop={() => setIsLooping(!isLooping)}
+          />
+        </View>
 
         {/* Watch Details & Related Feed */}
         <ScrollView
-          style={[styles.contentScroll, isTheaterMode && styles.contentScrollTheater]}
+          style={styles.contentScroll}
           showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.contentBodyWrap, isTheaterMode && styles.contentBodyTheater]}>
+          <View style={styles.contentBodyWrap}>
             {/* 1. Real YouTube Title Section (16px bold, 2 lines max) */}
             <View style={styles.titleSection}>
               <Text style={styles.videoTitle} numberOfLines={2}>
@@ -630,12 +657,11 @@ const YouTubeWatchOverlayInner: React.FC = () => {
               <TouchableOpacity
                 style={styles.actionPill}
                 onPress={() => {
-                  setActiveDownloadItem(currentVideo);
-                  setDownloadModalVisible(true);
+                  if (currentVideo) handleOpenDownload(currentVideo);
                 }}
                 activeOpacity={0.7}
               >
-                <Ionicons name="download-outline" size={17} color="#ffffff" />
+                <Ionicons name="arrow-down-circle-outline" size={17} color="#ffffff" />
                 <Text style={styles.actionText}>Download</Text>
               </TouchableOpacity>
 
@@ -795,8 +821,8 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         {/* Quality Download Modal */}
         <QualityPickerModal
           visible={downloadModalVisible}
-          isLoading={false}
-          videoDetails={videoDetails}
+          isLoading={isLoadingModalDetails}
+          videoDetails={modalVideoDetails || (activeDownloadItem?.id === currentVideo?.id ? videoDetails : null)}
           isSaved={isSaved}
           onToggleSave={() => handleToggleSave(activeDownloadItem || currentVideo)}
           onClose={() => setDownloadModalVisible(false)}
@@ -964,12 +990,11 @@ const YouTubeWatchOverlayInner: React.FC = () => {
                 onPress={() => {
                   setOptionsModalVisible(false);
                   if (selectedOptionItem) {
-                    setActiveDownloadItem(selectedOptionItem);
-                    setDownloadModalVisible(true);
+                    handleOpenDownload(selectedOptionItem);
                   }
                 }}
               >
-                <Ionicons name="download-outline" size={22} color="#ffffff" />
+                <Ionicons name="arrow-down-circle-outline" size={22} color="#ffffff" />
                 <Text style={styles.optionRowText}>Download video / audio</Text>
               </TouchableOpacity>
 
@@ -1030,52 +1055,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0a0a0c',
   },
-  contentScrollTheater: {
-    backgroundColor: '#000000',
-  },
   contentBodyWrap: {
     flex: 1,
-  },
-  contentBodyTheater: {
-    opacity: 0.32,
-  },
-  theaterModeBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#111114',
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  theaterModeLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  theaterModeTitle: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-  theaterModeSub: {
-    color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 11,
-  },
-  exitTheaterBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 14,
-  },
-  exitTheaterBtnText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '700',
   },
 
   // ── Title & Real YouTube Metadata Line ─────────────────────────────────────

@@ -20,6 +20,8 @@ import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksp
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 
 export interface YouTubeInlinePlayerProps {
+  title?: string;
+  channel?: string;
   streamUrl: string | null;
   poster: string;
   isPlaying: boolean;
@@ -28,7 +30,6 @@ export interface YouTubeInlinePlayerProps {
   duration: number;
   seekTarget: number | null;
   playbackError?: string | null;
-  isTheaterMode?: boolean;
   currentQuality?: string;
   playbackSpeed?: number;
   isLooping?: boolean;
@@ -36,7 +37,6 @@ export interface YouTubeInlinePlayerProps {
   onChangeQuality?: (quality: string) => void;
   onSetPlaybackSpeed?: (speed: number) => void;
   onToggleLoop?: () => void;
-  onToggleTheaterMode?: () => void;
   onTogglePlay: () => void;
   onMinimize: () => void;
   onFullScreen: () => void;
@@ -61,6 +61,8 @@ function formatTime(seconds: number): string {
 }
 
 export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
+  title,
+  channel,
   streamUrl,
   poster,
   isPlaying,
@@ -69,7 +71,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   duration,
   seekTarget,
   playbackError,
-  isTheaterMode = false,
   currentQuality = 'Auto',
   playbackSpeed = 1.0,
   isLooping = false,
@@ -77,7 +78,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   onChangeQuality,
   onSetPlaybackSpeed,
   onToggleLoop,
-  onToggleTheaterMode,
   onTogglePlay,
   onMinimize,
   onFullScreen,
@@ -160,15 +160,16 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
   return (
-    <View
-      style={[styles.container, isTheaterMode && styles.containerTheater]}
-    >
+    <View style={styles.container}>
       {/* Native Video Engine */}
       {streamUrl ? (
         useKSPlayer ? (
           <KSPlayerView
             ref={ksRef}
             url={streamUrl}
+
+
+
             paused={!isPlaying}
             rate={playbackSpeed}
             resizeMode="contain"
@@ -320,24 +321,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             </TouchableOpacity>
 
             <View style={styles.topBarRight}>
-              {onToggleTheaterMode && (
-                <TouchableOpacity
-                  style={[styles.theaterToggleBtn, isTheaterMode && styles.theaterToggleBtnActive]}
-                  onPress={onToggleTheaterMode}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons
-                    name={isTheaterMode ? 'film' : 'film-outline'}
-                    size={14}
-                    color={isTheaterMode ? '#535aff' : '#ffffff'}
-                  />
-                  <Text style={[styles.theaterToggleText, isTheaterMode && { color: '#535aff' }]}>
-                    {isTheaterMode ? 'Theater On' : 'Theater'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-
               {/* Quality Resolution Badge (Tapping opens Quality selection) */}
               <TouchableOpacity
                 style={styles.qualityBadge}
@@ -677,38 +660,10 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
   },
-  containerTheater: {
-    width: '100%',
-    height: 310,
-    aspectRatio: undefined,
-    backgroundColor: '#000000',
-    position: 'relative',
-    overflow: 'hidden',
-  },
   topBarRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  theaterToggleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    gap: 4,
-  },
-  theaterToggleBtnActive: {
-    backgroundColor: 'rgba(83, 90, 255, 0.25)',
-    borderColor: '#535aff',
-  },
-  theaterToggleText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '700',
   },
   gestureFeedbackPill: {
     position: 'absolute',

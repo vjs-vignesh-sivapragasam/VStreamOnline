@@ -40,6 +40,48 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
 }) => {
   const [isCopied, setIsCopied] = useState(false);
 
+  const filteredVideoAdaptive = React.useMemo(() => {
+    if (!videoDetails?.formats?.videoAdaptive) return [];
+    const map = new Map<string, YouTubeFormatOption>();
+    for (const f of videoDetails.formats.videoAdaptive) {
+      const q = f.quality || 'Standard';
+      if (!map.has(q) || (f.container === 'mp4' && map.get(q)?.container !== 'mp4')) {
+        map.set(q, f);
+      }
+    }
+    const qualityRank: Record<string, number> = {
+      '2160p': 2160,
+      '1440p': 1440,
+      '1080p': 1080,
+      '720p': 720,
+      '480p': 480,
+      '360p': 360,
+      '240p': 240,
+      '144p': 144,
+    };
+    return Array.from(map.values()).sort((a, b) => {
+      const rankA = qualityRank[a.quality] || parseInt(a.quality) || 0;
+      const rankB = qualityRank[b.quality] || parseInt(b.quality) || 0;
+      return rankB - rankA;
+    });
+  }, [videoDetails]);
+
+  const filteredAudioAdaptive = React.useMemo(() => {
+    if (!videoDetails?.formats?.audioAdaptive) return [];
+    const map = new Map<string, YouTubeFormatOption>();
+    for (const f of videoDetails.formats.audioAdaptive) {
+      const key = `${f.quality}_${f.container}`;
+      if (!map.has(key)) {
+        map.set(key, f);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      const numA = parseInt(a.quality) || 0;
+      const numB = parseInt(b.quality) || 0;
+      return numB - numA;
+    });
+  }, [videoDetails]);
+
   if (!visible) return null;
 
   const handleCopyLink = async () => {
@@ -132,75 +174,88 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
               </View>
 
               {/* Progressive combined formats (Video + Audio) */}
-              {videoDetails.formats.progressive.map((f, idx) => (
-                <View key={`prog_${f.itag}_${idx}`} style={styles.formatItem}>
-                  <View style={styles.formatBadgeContainer}>
-                    <Text style={styles.formatQuality}>{f.quality}</Text>
-                    <View style={styles.tagBadge}>
-                      <Text style={styles.tagText}>{f.container.toUpperCase()}</Text>
-                    </View>
+              {videoDetails.formats.progressive.length > 0 && (
+                <>
+                  <View style={styles.sectionHeaderRow}>
+                    <Ionicons name="play-circle-outline" size={18} color="#FF0000" />
+                    <Text style={styles.sectionTitle}>Combined Stream (Video + Audio)</Text>
                   </View>
-                  <View style={styles.formatMeta}>
-                    <Text style={styles.formatLabel}>Video + Audio (Ready to play)</Text>
-                    <Text style={styles.formatSize}>{f.sizeFormatted}</Text>
-                  </View>
-                  <View style={styles.formatActionsRow}>
-                    {onPlayFormat && (
-                      <TouchableOpacity
-                        style={styles.actionIconButton}
-                        onPress={() => onPlayFormat(f)}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Ionicons name="play-circle" size={28} color="#ffffff" />
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity
-                      style={styles.actionIconButton}
-                      onPress={() => onSelectFormat(f)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-
-              {/* High-res adaptive video formats (1080p, 720p, etc.) */}
-              {videoDetails.formats.videoAdaptive
-                .filter((f) => f.container === 'mp4')
-                .slice(0, 4)
-                .map((f, idx) => (
-                  <View key={`adapt_${f.itag}_${idx}`} style={styles.formatItem}>
-                    <View style={styles.formatBadgeContainer}>
-                      <Text style={styles.formatQuality}>{f.quality}</Text>
-                      <View style={[styles.tagBadge, { backgroundColor: '#333333' }]}>
-                        <Text style={styles.tagText}>{f.container.toUpperCase()} HD</Text>
+                  {videoDetails.formats.progressive.map((f, idx) => (
+                    <View key={`prog_${f.itag}_${idx}`} style={styles.formatItem}>
+                      <View style={styles.formatBadgeContainer}>
+                        <Text style={styles.formatQuality}>{f.quality}</Text>
+                        <View style={styles.tagBadge}>
+                          <Text style={styles.tagText}>{f.container.toUpperCase()}</Text>
+                        </View>
                       </View>
-                    </View>
-                    <View style={styles.formatMeta}>
-                      <Text style={styles.formatLabel}>Video Track</Text>
-                      <Text style={styles.formatSize}>{f.sizeFormatted}</Text>
-                    </View>
-                    <View style={styles.formatActionsRow}>
-                      {onPlayFormat && (
+                      <View style={styles.formatMeta}>
+                        <Text style={styles.formatLabel}>Video + Audio (Ready to play)</Text>
+                        <Text style={styles.formatSize}>{f.sizeFormatted}</Text>
+                      </View>
+                      <View style={styles.formatActionsRow}>
+                        {onPlayFormat && (
+                          <TouchableOpacity
+                            style={styles.actionIconButton}
+                            onPress={() => onPlayFormat(f)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Ionicons name="play-circle" size={28} color="#ffffff" />
+                          </TouchableOpacity>
+                        )}
                         <TouchableOpacity
                           style={styles.actionIconButton}
-                          onPress={() => onPlayFormat(f)}
+                          onPress={() => onSelectFormat(f)}
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
-                          <Ionicons name="play-circle" size={28} color="#ffffff" />
+                          <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
                         </TouchableOpacity>
-                      )}
-                      <TouchableOpacity
-                        style={styles.actionIconButton}
-                        onPress={() => onSelectFormat(f)}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
-                      </TouchableOpacity>
+                      </View>
                     </View>
+                  ))}
+                </>
+              )}
+
+              {/* High-res adaptive video formats (4K, 1440p, 1080p, 720p, 480p, etc.) */}
+              {filteredVideoAdaptive.length > 0 && (
+                <>
+                  <View style={[styles.sectionHeaderRow, { marginTop: videoDetails.formats.progressive.length > 0 ? 16 : 4 }]}>
+                    <Ionicons name="videocam-outline" size={18} color="#535aff" />
+                    <Text style={styles.sectionTitle}>High Definition Video (Choose Quality)</Text>
                   </View>
-                ))}
+                  {filteredVideoAdaptive.map((f, idx) => (
+                    <View key={`adapt_${f.itag}_${idx}`} style={styles.formatItem}>
+                      <View style={styles.formatBadgeContainer}>
+                        <Text style={styles.formatQuality}>{f.quality}</Text>
+                        <View style={[styles.tagBadge, { backgroundColor: '#333333' }]}>
+                          <Text style={styles.tagText}>{f.container.toUpperCase()} HD</Text>
+                        </View>
+                      </View>
+                      <View style={styles.formatMeta}>
+                        <Text style={styles.formatLabel}>HD Video Track</Text>
+                        <Text style={styles.formatSize}>{f.sizeFormatted}</Text>
+                      </View>
+                      <View style={styles.formatActionsRow}>
+                        {onPlayFormat && (
+                          <TouchableOpacity
+                            style={styles.actionIconButton}
+                            onPress={() => onPlayFormat(f)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Ionicons name="play-circle" size={28} color="#ffffff" />
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          style={styles.actionIconButton}
+                          onPress={() => onSelectFormat(f)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </>
+              )}
 
               {/* ── Section: Audio Formats ────────────────────────────────────── */}
               <View style={[styles.sectionHeaderRow, { marginTop: 20 }]}>
@@ -208,10 +263,10 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
                 <Text style={styles.sectionTitle}>Audio Only (Music / Podcast)</Text>
               </View>
 
-              {videoDetails.formats.audioAdaptive.length === 0 ? (
+              {filteredAudioAdaptive.length === 0 ? (
                 <Text style={styles.emptyText}>No separate audio streams found.</Text>
               ) : (
-                videoDetails.formats.audioAdaptive.map((f, idx) => (
+                filteredAudioAdaptive.map((f, idx) => (
                   <View key={`audio_${f.itag}_${idx}`} style={styles.formatItem}>
                     <View style={styles.formatBadgeContainer}>
                       <Text style={[styles.formatQuality, { color: '#00ffff' }]}>{f.quality}</Text>

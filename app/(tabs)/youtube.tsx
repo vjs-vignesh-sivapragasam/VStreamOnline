@@ -122,7 +122,7 @@ const VideoCard = memo<VideoCardProps>(({ item, isLoading, isSaved, onPress, onD
             hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
             activeOpacity={0.7}
           >
-            <Ionicons name="download-outline" size={18} color="#ffffff" />
+            <Ionicons name="arrow-down-circle-outline" size={18} color="#ffffff" />
           </TouchableOpacity>
         </View>
       </View>
@@ -180,7 +180,7 @@ export default function YouTubeScreen() {
   // Downloads tracking for header badge
   const [downloadsCount, setDownloadsCount] = useState<number>(() => {
     try {
-      return downloadService.getDownloads().length;
+      return downloadService.getDownloads().filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct').length;
     } catch {
       return 0;
     }
@@ -189,7 +189,7 @@ export default function YouTubeScreen() {
   useEffect(() => {
     try {
       const unsub = downloadService.addListener((items) => {
-        setDownloadsCount(items.length);
+        setDownloadsCount(items.filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct').length);
       });
       return unsub;
     } catch {}
@@ -513,6 +513,26 @@ export default function YouTubeScreen() {
     [router, targetVideoItem]
   );
 
+  const handleClearAllMyList = useCallback(() => {
+    Alert.alert(
+      'Clear My List',
+      'Are you sure you want to remove all saved videos from My List?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            if (await isHapticsSupported()) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            }
+            await youTubeListService.clearAll();
+          },
+        },
+      ]
+    );
+  }, []);
+
   const handleDownloadFormat = async (format: YouTubeFormatOption) => {
     setDownloadModalVisible(false);
 
@@ -537,9 +557,9 @@ export default function YouTubeScreen() {
 
       Alert.alert(
         'Download Started',
-        `Downloading "${cleanTitle}" (${format.quality} ${ext.toUpperCase()}) to your Library.`,
+        `Downloading "${cleanTitle}" (${format.quality} ${ext.toUpperCase()}) to YouTube Downloads.`,
         [
-          { text: 'View Downloads', onPress: () => router.push('/(tabs)/library') },
+          { text: 'View Downloads', onPress: () => router.push('/youtube/downloads' as any) },
           { text: 'OK', style: 'cancel' },
         ]
       );
@@ -645,7 +665,7 @@ export default function YouTubeScreen() {
             >
               <Ionicons
                 name={isSearchOpen ? 'close' : 'search-outline'}
-                size={20}
+                size={21}
                 color="#ffffff"
               />
             </TouchableOpacity>
@@ -683,14 +703,14 @@ export default function YouTubeScreen() {
                 if (await isHapticsSupported()) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }
-                router.push('/(tabs)/library' as any);
+                router.push('/youtube/downloads' as any);
               }}
               activeOpacity={0.7}
               hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
             >
               <Ionicons
-                name="download-outline"
-                size={20}
+                name="arrow-down-circle-outline"
+                size={21}
                 color="#ffffff"
               />
               {downloadsCount > 0 && (
@@ -873,13 +893,26 @@ export default function YouTubeScreen() {
                 )}
               </View>
 
-              <TouchableOpacity
-                style={styles.myListCloseBtn}
-                onPress={() => setMyListModalVisible(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={22} color="#ffffff" />
-              </TouchableOpacity>
+              <View style={styles.myListHeaderActions}>
+                {savedList.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.clearAllBtn}
+                    onPress={handleClearAllMyList}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="trash-outline" size={15} color="#ff4444" style={{ marginRight: 4 }} />
+                    <Text style={styles.clearAllBtnText}>Clear All</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.myListCloseBtn}
+                  onPress={() => setMyListModalVisible(false)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Ionicons name="close" size={22} color="#ffffff" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Modal Body */}
@@ -1040,18 +1073,25 @@ const styles = StyleSheet.create({
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.09)',
     borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 40,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    marginTop: 10,
+    marginBottom: 4,
+    height: 44,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 15,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
     height: '100%',
   },
   clearSearchButton: {
@@ -1400,6 +1440,26 @@ const styles = StyleSheet.create({
     color: '#535aff',
     fontSize: 12,
     fontWeight: '700',
+  },
+  myListHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  clearAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 68, 68, 0.25)',
+  },
+  clearAllBtnText: {
+    color: '#ff4444',
+    fontSize: 12,
+    fontWeight: '600',
   },
   myListCloseBtn: {
     width: 32,

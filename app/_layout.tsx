@@ -70,6 +70,7 @@ function RootLayoutNav() {
     ...DarkTheme,
     colors: {
       ...DarkTheme.colors,
+      primary: '#535aff',
       background: '#0a0a0a',
       card: 'rgba(18, 18, 18, 0.9)',
       border: 'rgba(255, 255, 255, 0.1)',
@@ -169,6 +170,14 @@ function RootLayoutNav() {
             />
             <Stack.Screen
               name="youtube/watch"
+              options={{
+                headerShown: false,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
+              }}
+            />
+            <Stack.Screen
+              name="youtube/downloads"
               options={{
                 headerShown: false,
                 headerTransparent: true,

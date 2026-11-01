@@ -255,13 +255,12 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   }, []);
 
   const availableQualities = useMemo(() => {
-    if (!videoDetails?.formats) return ['Auto', '720p', '360p'];
     const qualities = new Set<string>();
     qualities.add('Auto');
 
     const allFormats = [
-      ...videoDetails.formats.progressive,
-      ...videoDetails.formats.videoAdaptive,
+      ...(videoDetails?.formats?.progressive || []),
+      ...(videoDetails?.formats?.videoAdaptive || []),
     ];
 
     allFormats.forEach((f) => {
@@ -269,30 +268,37 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
         const match = f.quality.match(/\d+p/);
         if (match) {
           qualities.add(match[0]);
-        } else if (f.quality) {
+        } else if (f.quality && f.quality !== 'Standard') {
           qualities.add(f.quality);
         }
       }
     });
 
-    const standardOrder = ['Auto', '1080p', '720p', '480p', '360p', '240p', '144p'];
-    const filtered = standardOrder.filter((q) => qualities.has(q));
-    return filtered.length > 1 ? filtered : ['Auto', '720p', '360p'];
+    // Always include standard YouTube quality choices so the user can freely select
+    const standardQualities = ['1080p', '720p', '480p', '360p', '240p', '144p'];
+    standardQualities.forEach((q) => qualities.add(q));
+
+    const standardOrder = ['Auto', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'];
+    return standardOrder.filter((q) => qualities.has(q));
   }, [videoDetails]);
 
   const changeQuality = useCallback(
     async (quality: string) => {
       console.log(`[YouTubePlayer] 🎯 changeQuality requested: ${quality}`);
-      if (!videoDetails?.formats) {
-        setCurrentQuality(quality);
-        return;
-      }
+      setCurrentQuality(quality);
+
+      if (!videoDetails?.formats) return;
 
       // Preserve current playback position accurately
       const resumePosition = currentTime;
       console.log(`[YouTubePlayer] ⏱️ Preserving playback position: ${resumePosition}s`);
 
-      let chosenFormat = null;
+      let chosenFormat: any = null;
+
+      const allVideoFormats = [
+        ...videoDetails.formats.progressive,
+        ...videoDetails.formats.videoAdaptive,
+      ];
 
       if (quality === 'Auto') {
         chosenFormat =
@@ -302,22 +308,36 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
           videoDetails.formats.videoAdaptive[0];
       } else {
         const cleanQuality = quality.replace(/\D/g, ''); // e.g. "1080"
-        chosenFormat =
-          videoDetails.formats.progressive.find((f) => f.quality.includes(cleanQuality)) ||
-          videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality) && f.container === 'mp4') ||
-          videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality));
+
+        // 1. First look for combined progressive format matching quality
+        chosenFormat = videoDetails.formats.progressive.find((f) => f.quality.includes(cleanQuality));
+
+        // 2. If not in progressive, look in videoAdaptive (prefer mp4, then webm)
+        if (!chosenFormat) {
+          chosenFormat =
+            videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality) && f.container === 'mp4') ||
+            videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality));
+        }
+
+        // 3. If exact format not found, gracefully pick closest available format
+        if (!chosenFormat && allVideoFormats.length > 0) {
+          const targetNum = parseInt(cleanQuality, 10) || 720;
+          const sorted = [...allVideoFormats].sort((a, b) => {
+            const numA = parseInt((a.quality.match(/\d+/) || ['360'])[0], 10);
+            const numB = parseInt((b.quality.match(/\d+/) || ['360'])[0], 10);
+            return Math.abs(numA - targetNum) - Math.abs(numB - targetNum);
+          });
+          chosenFormat = sorted[0];
+        }
       }
 
       if (!chosenFormat) {
         console.warn(`[YouTubePlayer] ⚠️ No format found specifically matching ${quality}`);
-        setCurrentQuality(quality);
         return;
       }
 
       const targetUrl = chosenFormat.url || chosenFormat.proxyUrl;
       console.log(`[YouTubePlayer] 🔄 New format chosen: ${chosenFormat.quality} (${chosenFormat.container})`);
-
-      setCurrentQuality(quality);
 
       if (targetUrl === streamUrl) {
         console.log(`[YouTubePlayer] ℹ️ Already playing this URL, skipping reload`);

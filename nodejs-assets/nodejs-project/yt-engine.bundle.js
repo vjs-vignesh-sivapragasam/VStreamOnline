@@ -38838,10 +38838,20 @@ var defaultClient = null;
 var androidClient = null;
 var mwebClient = null;
 var vrClient = null;
+var iosClient = null;
+var tvClient = null;
 async function getClient(type) {
   if (type === "WEB") {
     if (!defaultClient) defaultClient = await Innertube.create();
     return defaultClient;
+  }
+  if (type === "TV") {
+    if (!tvClient) tvClient = await Innertube.create({ client_type: ClientType.TV_EMBEDDED });
+    return tvClient;
+  }
+  if (type === "IOS") {
+    if (!iosClient) iosClient = await Innertube.create({ client_type: ClientType.IOS });
+    return iosClient;
   }
   if (type === "ANDROID") {
     if (!androidClient) androidClient = await Innertube.create({ client_type: ClientType.ANDROID });
@@ -38877,37 +38887,69 @@ async function isUrlPlayable(url) {
   }
 }
 async function resolveVideoWithClients(videoId) {
-  const clientTypes = ["ANDROID", "MWEB", "VR"];
+  const clientTypes = ["TV", "IOS", "MWEB", "ANDROID", "VR"];
   let lastInfo = null;
   let bestCandidate = null;
   for (const cType of clientTypes) {
     try {
-      const clientEnum = cType === "ANDROID" ? ClientType.ANDROID : cType === "MWEB" ? ClientType.MWEB : ClientType.ANDROID_VR;
+      const clientEnum =
+        cType === "TV" ? ClientType.TV_EMBEDDED :
+        cType === "IOS" ? ClientType.IOS :
+        cType === "ANDROID" ? ClientType.ANDROID :
+        cType === "MWEB" ? ClientType.MWEB :
+        ClientType.ANDROID_VR;
       const client = await getClient(cType);
       const info2 = await client.getBasicInfo(videoId, clientEnum);
       lastInfo = info2;
       if (info2.playability_status?.status === "OK" && info2.streaming_data) {
         const formats = info2.streaming_data.formats || [];
         const adaptive = info2.streaming_data.adaptive_formats || [];
+        const player = client.session?.player;
+        if (player) {
+          for (const f of formats) {
+            if (!f.url && typeof f.decipher === "function") {
+              try {
+                f.url = await f.decipher(player);
+              } catch (_) {}
+            }
+          }
+          for (const f of adaptive) {
+            if (!f.url && typeof f.decipher === "function") {
+              try {
+                f.url = await f.decipher(player);
+              } catch (_) {}
+            }
+          }
+        }
         const progressiveWithUrl = formats.filter((f) => f.url);
         const adaptiveWithUrl = adaptive.filter((f) => f.url);
+        console.log(`[yt-server] [${cType}] progressiveWithUrl: ${progressiveWithUrl.length}, adaptiveWithUrl: ${adaptiveWithUrl.length}`);
         if (progressiveWithUrl.length > 0 || adaptiveWithUrl.length > 0) {
           const testUrl = progressiveWithUrl[0]?.url || adaptiveWithUrl[0]?.url;
           const playable = await isUrlPlayable(testUrl);
           if (playable) {
-            return {
+            const candidate = {
               info: info2,
               clientType: cType,
               progressive: progressiveWithUrl,
               adaptive: adaptiveWithUrl
             };
-          } else if (!bestCandidate) {
-            bestCandidate = {
-              info: info2,
-              clientType: cType,
-              progressive: progressiveWithUrl,
-              adaptive: adaptiveWithUrl
-            };
+            if (candidate.progressive.length === 0) {
+              try {
+                const android = await getClient("ANDROID");
+                const aInfo = await android.getBasicInfo(videoId, ClientType.ANDROID);
+                const aProg = (aInfo.streaming_data?.formats || []).filter((f) => f.url);
+                if (aProg.length > 0) {
+                  candidate.progressive = aProg;
+                }
+              } catch (_) {}
+            }
+            if (adaptiveWithUrl.length > 0 || progressiveWithUrl.length > 1) {
+              return candidate;
+            }
+            if (!bestCandidate) {
+              bestCandidate = candidate;
+            }
           }
         }
       }
@@ -38915,7 +38957,19 @@ async function resolveVideoWithClients(videoId) {
       console.warn(`[yt-server] Client ${cType} failed for ${videoId}:`, e.message);
     }
   }
-  if (bestCandidate) return bestCandidate;
+  if (bestCandidate) {
+    if (bestCandidate.progressive.length === 0) {
+      try {
+        const android = await getClient("ANDROID");
+        const aInfo = await android.getBasicInfo(videoId, ClientType.ANDROID);
+        const aProg = (aInfo.streaming_data?.formats || []).filter((f) => f.url);
+        if (aProg.length > 0) {
+          bestCandidate.progressive = aProg;
+        }
+      } catch (_) {}
+    }
+    return bestCandidate;
+  }
   return {
     info: lastInfo,
     clientType: "NONE",
