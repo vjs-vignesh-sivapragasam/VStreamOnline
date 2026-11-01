@@ -31,8 +31,7 @@ import {
 } from "../coreplayer";
 import { View, Text } from "../Themed";
 import { GlassView } from 'expo-glass-effect';
-
-const { KSPlayerView: VideoComponent, isKSPlayerAvailable } = require('@/components/ksplayer/KSPlayerView');
+import KSPlayerView, { isKSPlayerAvailable } from './KSPlayerView';
 
 const RNResizeMode = { COVER: 'cover', CONTAIN: 'contain', STRETCH: 'stretch' };
 
@@ -99,7 +98,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const settingsMenuRef = useRef<MenuComponentRef>(null);
     const streamMenuRef = useRef<MenuComponentRef>(null);
 
-    const [contentFit, setContentFit] = useState<string>(RNResizeMode.COVER);
+    const [contentFit, setContentFit] = useState<'contain' | 'stretch' | 'cover'>('cover');
     const [showContentFitLabel, setShowContentFitLabel] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [videoError, setVideoError] = useState<string | null>(null);
@@ -141,6 +140,15 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     useEffect(() => {
         lastKnownTimeRef.current = playerState.currentTime;
     }, [playerState.currentTime]);
+
+    // Force KSPlayer into landscape edge-to-edge mode
+    useEffect(() => {
+        videoRef.current?.enterFullscreen();
+        const timer = setTimeout(() => {
+            videoRef.current?.enterFullscreen();
+        }, 150);
+        return () => clearTimeout(timer);
+    }, []);
 
     // Cleanup
     useEffect(() => {
@@ -193,6 +201,12 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
 
         Animated.timing(bufferOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
 
+        // Restore playback position seamlessly when switching qualities or reloading stream
+        if (lastKnownTimeRef.current > 1) {
+            videoRef.current?.seek(lastKnownTimeRef.current);
+            playerState.setCurrentTime(lastKnownTimeRef.current);
+        }
+
         if (data.audioTracks?.length > 0) {
             setAvailableAudioTracks(data.audioTracks);
             if (selectedAudioTrack === -1) {
@@ -207,6 +221,9 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
 
         // Clear any subtitle text from previous video
         setCurrentSubtitleText('');
+
+        // Ensure KSPlayer native view expands edge-to-edge in landscape
+        videoRef.current?.enterFullscreen();
     }, [bufferOpacity, playerState, selectedAudioTrack, settings]);
 
     const handleAudioTracks = useCallback((data: { audioTracks: any[] }) => {
@@ -308,7 +325,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, [playerState.currentTime, seekTo, playerState.isReady]);
 
     const cycleContentFit = useCallback(() => {
-        const opts = [RNResizeMode.COVER, RNResizeMode.CONTAIN, RNResizeMode.STRETCH];
+        const opts: ('contain' | 'stretch' | 'cover')[] = ['cover', 'contain', 'stretch'];
         const next = opts[(opts.indexOf(contentFit) + 1) % opts.length];
         setContentFit(next);
         showContentFitLabelTemporarily();
@@ -429,7 +446,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
 
     // ─── Menu actions ─────────────────────────────────────────────────────────
 
-    const settingsActions = useMemo(() => buildSettingsActions(settings.playbackSpeed), [settings.playbackSpeed]);
+    const settingsActions = useMemo(() =>
+        buildSettingsActions(settings.playbackSpeed, streams, currentStreamIndex),
+        [settings.playbackSpeed, streams, currentStreamIndex]
+    );
 
     const subtitleActions = useMemo(() => {
         const adaptedTracks = adaptTracks(availableTextTracks);
@@ -518,7 +538,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
 
     return (
         <View style={styles.container}>
-            <VideoComponent
+            <KSPlayerView
                 ref={videoRef}
                 url={videoUrl}
                 headers={{}}
@@ -565,7 +585,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                         </View>
 
                         <GlassView glassEffectStyle="clear" style={styles.topRightControls}>
-                            {streams.length > 1 && (
+                            {streams.length > 0 && (
                                 <MenuWrapper
                                     style={{ zIndex: 1000 }}
                                     ref={streamMenuRef}

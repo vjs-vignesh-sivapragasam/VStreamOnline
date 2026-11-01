@@ -77,6 +77,10 @@ class KSPlayerRNView: UIView {
         backgroundColor = .black
         addSubview(playerView)
 
+        playerView.updateUI(isLandscape: true)
+        playerView.navigationBar.isHidden = true
+        playerView.toolBar.isHidden = true
+
         NSLayoutConstraint.activate([
             playerView.topAnchor.constraint(equalTo: topAnchor),
             playerView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -239,7 +243,11 @@ class KSPlayerRNView: UIView {
         onSubtitleText?(["text": ""])
     }
 
-    func enterFullscreen() { playerView.updateUI(isLandscape: true) }
+    func enterFullscreen() {
+        playerView.updateUI(isLandscape: true)
+        playerView.navigationBar.isHidden = true
+        playerView.toolBar.isHidden = true
+    }
     func exitFullscreen()  { playerView.updateUI(isLandscape: false) }
 }
 
@@ -250,6 +258,9 @@ extension KSPlayerRNView: PlayerControllerDelegate {
         switch state {
         case .readyToPlay:
             DispatchQueue.main.async {
+                self.playerView.updateUI(isLandscape: true)
+                self.playerView.navigationBar.isHidden = true
+                self.playerView.toolBar.isHidden = true
                 self.playerView.controllerView.isHidden = true
                 self.playerView.maskImageView.isHidden = true
                 self.playerView.isUserInteractionEnabled = false

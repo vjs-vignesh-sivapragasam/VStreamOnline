@@ -1,5 +1,6 @@
 import { Paths, Directory, File, DownloadTask, DownloadProgress } from 'expo-file-system';
 import { StorageKeys, storageService } from '@/utils/StorageService';
+import { getDevHostIp } from '@/services/YouTubeService';
 import {
   StreamingServerClient,
   TorrentStats,
@@ -26,6 +27,7 @@ export interface DownloadItem {
   peers: number; // Connected peers
   errorMessage?: string;
   createdAt: number;
+  sourceType?: 'torrent' | 'direct';
 }
 
 type DownloadListener = (items: DownloadItem[]) => void;
@@ -386,7 +388,7 @@ class DownloadManager {
     let lastProgressBytes = item.downloadedBytes;
     let lastProgressTime = Date.now();
 
-    const task = new DownloadTask(params.streamUrl, targetFile, {
+    const task = new DownloadTask(activeStreamUrl, targetFile, {
       sessionType: 'foreground',
       onProgress: (progressData: DownloadProgress) => {
         if (item!.status !== 'downloading') return;
@@ -472,6 +474,156 @@ class DownloadManager {
     return item;
   }
 
+  // Start or resume a direct URL download (e.g. YouTube MP4 / M4A) with zero torrent dependencies
+  async startDirectDownload(params: {
+    id: string;
+    title: string;
+    poster: string;
+    fileName: string;
+    streamUrl: string;
+    fileLength?: number;
+  }): Promise<DownloadItem> {
+    this.ensureLoaded();
+    const downloadsDir = this.getDownloadsDirectory();
+    const id = params.id;
+    let item = this.inMemoryDownloads.find((d) => d.id === id);
+
+    const sanitizedFileName = (params.fileName || `${params.title}.mp4`).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const targetFile = new File(downloadsDir, `${id}_${sanitizedFileName}`);
+
+    if (!item) {
+      item = {
+        id,
+        title: params.title,
+        poster: params.poster || '',
+        infoHash: '',
+        fileIdx: 0,
+        fileName: params.fileName || `${params.title}.mp4`,
+        fileUri: targetFile.uri,
+        streamUrl: params.streamUrl,
+        totalBytes: params.fileLength || 0,
+        downloadedBytes: 0,
+        progress: 0,
+        status: 'downloading',
+        statusDetail: 'Starting download...',
+        speedBps: 0,
+        speedFormatted: '0 KB/s',
+        peers: 0,
+        createdAt: Date.now(),
+        sourceType: 'direct',
+      };
+      this.inMemoryDownloads.unshift(item);
+    } else {
+      item.status = 'downloading';
+      item.statusDetail = 'Resuming download...';
+      item.streamUrl = params.streamUrl;
+      item.fileUri = targetFile.uri;
+      if (params.poster && (!item.poster || item.poster.trim() === '')) item.poster = params.poster;
+      if (params.fileLength && params.fileLength > 0) item.totalBytes = params.fileLength;
+      item.speedBps = 0;
+      item.speedFormatted = '0 KB/s';
+      item.errorMessage = undefined;
+      item.sourceType = 'direct';
+    }
+
+    this.notifyListeners();
+    this.persistDownloadsImmediately();
+
+    this.stopTracking(id);
+
+    let lastProgressBytes = item.downloadedBytes;
+    let lastProgressTime = Date.now();
+
+    let downloadUrl = params.streamUrl;
+    if (downloadUrl.includes('googlevideo.com')) {
+      const devIp = getDevHostIp();
+      const base = devIp ? `http://${devIp}:11472` : 'http://127.0.0.1:11472';
+      downloadUrl = `${base}/yt/proxy-stream?url=${encodeURIComponent(downloadUrl)}`;
+    }
+    item.streamUrl = downloadUrl;
+
+    const task = new DownloadTask(downloadUrl, targetFile, {
+      sessionType: 'foreground',
+      onProgress: (progressData: DownloadProgress) => {
+        if (item!.status !== 'downloading') return;
+        const now = Date.now();
+        const downloaded = progressData.bytesWritten;
+
+        if (downloaded > item!.downloadedBytes) {
+          item!.downloadedBytes = downloaded;
+        }
+        if (progressData.totalBytes > 0) {
+          item!.totalBytes = progressData.totalBytes;
+        }
+
+        if (item!.totalBytes > 0) {
+          const pct = Math.min(Math.round((item!.downloadedBytes / item!.totalBytes) * 100), 100);
+          if (pct > item!.progress) {
+            item!.progress = pct;
+          }
+        }
+
+        const timeDiff = Math.max((now - lastProgressTime) / 1000, 0.1);
+        const bytesDiff = Math.max(downloaded - lastProgressBytes, 0);
+        const speed = Math.round(bytesDiff / timeDiff);
+        lastProgressBytes = downloaded;
+        lastProgressTime = now;
+
+        if (speed > 0) {
+          item!.speedBps = speed;
+          item!.speedFormatted = this.formatSpeed(speed);
+        }
+
+        item!.statusDetail = `Downloading (${item!.progress}%)`;
+
+        this.notifyListeners();
+        this.persistDownloadsThrottled();
+      },
+    });
+
+    this.activeTasks.set(id, task);
+
+    task
+      .downloadAsync()
+      .then((fileResult: File | null) => {
+        this.activeTasks.delete(id);
+        this.stopTracking(id);
+
+        if (fileResult && fileResult.exists) {
+          item!.status = 'completed';
+          item!.progress = 100;
+          item!.statusDetail = 'Download complete';
+          item!.speedBps = 0;
+          item!.speedFormatted = '';
+          if (fileResult.size) {
+            item!.downloadedBytes = fileResult.size;
+            item!.totalBytes = fileResult.size;
+          }
+        } else if (item!.status !== 'paused') {
+          item!.status = 'error';
+          item!.statusDetail = 'Download did not complete';
+          item!.errorMessage = 'Download did not complete';
+        }
+        this.notifyListeners();
+        this.persistDownloadsImmediately();
+      })
+      .catch((err: any) => {
+        this.activeTasks.delete(id);
+        this.stopTracking(id);
+
+        if (item!.status !== 'paused') {
+          item!.status = 'error';
+          const msg = err?.message || 'Download error';
+          item!.statusDetail = msg;
+          item!.errorMessage = msg;
+          this.notifyListeners();
+          this.persistDownloadsImmediately();
+        }
+      });
+
+    return item;
+  }
+
   // Pause an active download
   async pauseDownload(id: string): Promise<void> {
     this.stopTracking(id);
@@ -492,6 +644,18 @@ class DownloadManager {
     this.ensureLoaded();
     const item = this.inMemoryDownloads.find((d) => d.id === id);
     if (!item) return;
+
+    if (item.sourceType === 'direct') {
+      await this.startDirectDownload({
+        id: item.id,
+        title: item.title,
+        poster: item.poster,
+        fileName: item.fileName,
+        streamUrl: item.streamUrl,
+        fileLength: item.totalBytes,
+      });
+      return;
+    }
 
     await this.startDownload({
       infoHash: item.infoHash,

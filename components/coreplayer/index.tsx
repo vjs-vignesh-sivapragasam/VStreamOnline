@@ -195,7 +195,35 @@ export const handlePlaybackError = (error: any, message: string = "Unable to loa
 
 // ==================== MENU ACTION BUILDERS ====================
 
-export const buildSettingsActions = (currentSpeed: number): MenuAction[] => {
+export const buildSettingsActions = (
+    currentSpeed: number,
+    streams?: Stream[],
+    currentStreamIndex: number = 0
+): MenuAction[] => {
+    const actions: MenuAction[] = [];
+
+    // Quality selection submenu if multiple streams/qualities are available
+    if (streams && streams.length > 0) {
+        const qualityActions = streams.map((s, index) => {
+            const isSelected = index === currentStreamIndex;
+            return {
+                id: `stream-${index}`,
+                title: s.name || s.title || `Quality ${index + 1}`,
+                state: isSelected ? ('on' as const) : undefined,
+                titleColor: isSelected ? '#007AFF' : '#FFFFFF',
+            };
+        });
+
+        actions.push({
+            id: 'settings-quality',
+            title: 'Video Quality',
+            image: Platform.select({ ios: 'slider.horizontal.3', default: undefined }),
+            imageColor: '#ffffff',
+            subactions: qualityActions,
+        });
+    }
+
+    // Playback Speed submenu
     const speedActions = CONSTANTS.PLAYBACK_SPEEDS.map(speed => ({
         id: `speed-${speed}`,
         title: `${speed}x`,
@@ -203,15 +231,15 @@ export const buildSettingsActions = (currentSpeed: number): MenuAction[] => {
         titleColor: currentSpeed === speed ? '#007AFF' : '#FFFFFF',
     }));
 
-    return [
-        {
-            id: 'settings-playback-speed',
-            title: 'Playback Speed',
-            image: Platform.select({ ios: 'speedometer', default: undefined }),
-            imageColor: '#ffffff',
-            subactions: speedActions,
-        }
-    ];
+    actions.push({
+        id: 'settings-playback-speed',
+        title: 'Playback Speed',
+        image: Platform.select({ ios: 'speedometer', default: undefined }),
+        imageColor: '#ffffff',
+        subactions: speedActions,
+    });
+
+    return actions;
 };
 
 export const buildSubtitlePositionActions = (currentPosition: SubtitlePosition): MenuAction[] => {

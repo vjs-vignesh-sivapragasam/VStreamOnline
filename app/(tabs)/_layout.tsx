@@ -14,6 +14,11 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Icon sf="magnifyingglass" drawable="ic_search" />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="youtube">
+        <NativeTabs.Trigger.Label>YouTube</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="play.rectangle.fill" drawable="ic_media_play" />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="library">
         <NativeTabs.Trigger.Label>Library</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="square.stack" drawable="ic_library_books" />

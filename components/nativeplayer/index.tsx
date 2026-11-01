@@ -202,6 +202,12 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
 
         Animated.timing(bufferOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
 
+        // Restore playback position seamlessly when switching qualities or reloading stream
+        if (lastKnownTimeRef.current > 1 && videoRef.current) {
+            videoRef.current.seek(lastKnownTimeRef.current);
+            playerState.setCurrentTime(lastKnownTimeRef.current);
+        }
+
         if (data.audioTracks && Array.isArray(data.audioTracks) && data.audioTracks.length > 0) {
             setAvailableAudioTracks(data.audioTracks);
             if (selectedAudioTrack === -1) {
@@ -414,7 +420,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, []);
 
     // Memoize menu actions
-    const settingsActions = useMemo(() => buildSettingsActions(settings.playbackSpeed), [settings.playbackSpeed]);
+    const settingsActions = useMemo(() =>
+        buildSettingsActions(settings.playbackSpeed, streams, currentStreamIndex),
+        [settings.playbackSpeed, streams, currentStreamIndex]
+    );
 
     const subtitleActions = useMemo(() => {
         const adaptedTracks = adaptTracks(availableTextTracks);
@@ -588,7 +597,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                         </View>
 
                         <GlassView glassEffectStyle="clear" style={styles.topRightControls}>
-                            {streams.length > 1 && (
+                            {streams.length > 0 && (
                                 <MenuWrapper
                                     style={{ zIndex: 1000 }}
                                     ref={streamMenuRef}

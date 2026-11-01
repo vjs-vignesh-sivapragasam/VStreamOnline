@@ -7,6 +7,8 @@ import {
     RefreshControl,
     FlatList,
     Animated,
+    ActivityIndicator,
+    Alert,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,7 +35,7 @@ interface WatchHistoryItem {
     allItems: TorrentItem[];
 }
 
-type LibraryTab = 'All' | 'My List' | 'Downloads' | 'History';
+type LibraryTab = 'All' | 'Movies' | 'Downloads' | 'History';
 
 const CARD_SPACING = 16;
 
@@ -41,6 +43,7 @@ const LibraryScreen: React.FC = () => {
     const [watchHistory, setWatchHistory] = useState<WatchHistoryItem[]>([]);
     const [downloads, setDownloads] = useState<DownloadItem[]>([]);
     const [myList, setMyList] = useState<MyListItem[]>([]);
+
     const [selectedTab, setSelectedTab] = useState<LibraryTab>('All');
     const [refreshing, setRefreshing] = useState(false);
     const animatedValues = useRef(new Map<string, Animated.Value>()).current;
@@ -301,14 +304,14 @@ const LibraryScreen: React.FC = () => {
         let title = 'Nothing Here Yet';
         let description = 'Titles you start watching will appear here so you can pick up where you left off.';
 
-        if (selectedTab === 'My List') {
+        if (selectedTab === 'Movies') {
             iconName = 'bookmark-outline';
-            title = 'Your List is Empty';
-            description = 'Add preferred movies to your list using the bookmark button on any movie poster or details page to play them directly anytime without searching.';
+            title = 'Your Movie List is Empty';
+            description = 'Add preferred movies and series to your list using the bookmark button on any movie poster or details page to play them directly anytime.';
         } else if (selectedTab === 'Downloads') {
             iconName = 'cloud-download-outline';
             title = 'No Downloads Yet';
-            description = 'Tap the download button on any movie in the details screen to save it internally and watch offline.';
+            description = 'Tap the download button on any movie to save it internally and watch offline.';
         }
 
         return (
@@ -623,22 +626,22 @@ const LibraryScreen: React.FC = () => {
         );
     };
 
-    // ── My List Section ──────────────────────────────────────────────────────────
+    // ── My List Section (Movies & Series) ───────────────────────────────────────
 
     const renderMyList = () => {
-        if (selectedTab === 'My List' && myList.length === 0) {
+        if (selectedTab === 'Movies' && myList.length === 0) {
             return renderEmpty();
         }
         if (myList.length === 0) return null;
 
-        if (selectedTab === 'My List') {
-            // Full detailed list view when "My List" tab is selected
+        if (selectedTab === 'Movies') {
+            // Full detailed list view when "Movies" tab is selected
             return (
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.sectionTitleRow}>
                             <Ionicons name="bookmark" size={20} color="#535aff" />
-                            <Text style={styles.sectionTitle}>My List</Text>
+                            <Text style={styles.sectionTitle}>Movies & Series</Text>
                             <View style={styles.countBadge}>
                                 <Text style={styles.countBadgeText}>{myList.length}</Text>
                             </View>
@@ -734,14 +737,14 @@ const LibraryScreen: React.FC = () => {
                 <View style={styles.sectionHeader}>
                     <View style={styles.sectionTitleRow}>
                         <Ionicons name="bookmark" size={20} color="#535aff" />
-                        <Text style={styles.sectionTitle}>My List</Text>
+                        <Text style={styles.sectionTitle}>Movies & Series</Text>
                         <View style={styles.countBadge}>
                             <Text style={styles.countBadgeText}>{myList.length}</Text>
                         </View>
                     </View>
                     <TouchableOpacity
                         style={styles.seeAllButton}
-                        onPress={() => setSelectedTab('My List')}
+                        onPress={() => setSelectedTab('Movies')}
                         activeOpacity={0.7}
                     >
                         <Text style={styles.seeAllText}>See All</Text>
@@ -824,10 +827,13 @@ const LibraryScreen: React.FC = () => {
 
     // ── Root ──────────────────────────────────────────────────────────────────────
 
-    const showMyList = selectedTab === 'All' || selectedTab === 'My List';
+    const showMovies = selectedTab === 'All' || selectedTab === 'Movies';
     const showDownloads = selectedTab === 'All' || selectedTab === 'Downloads';
     const showHistory = selectedTab === 'All' || selectedTab === 'History';
-    const isTotallyEmpty = myList.length === 0 && downloads.length === 0 && watchHistory.length === 0;
+    const isTotallyEmpty =
+        myList.length === 0 &&
+        downloads.length === 0 &&
+        watchHistory.length === 0;
 
     return (
         <SafeAreaView style={styles.container}>
@@ -838,22 +844,38 @@ const LibraryScreen: React.FC = () => {
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Library</Text>
                 <Text style={styles.headerSubtitle}>
-                    {myList.length} in list • {downloads.length} {downloads.length === 1 ? 'download' : 'downloads'} •{' '}
+                    {myList.length} {myList.length === 1 ? 'movie' : 'movies'} • {downloads.length} {downloads.length === 1 ? 'download' : 'downloads'} •{' '}
                     {watchHistory.length} watched
                 </Text>
 
-                {/* Filter Tabs */}
-                <View style={styles.tabRow}>
-                    {(['All', 'My List', 'Downloads', 'History'] as LibraryTab[]).map((tab) => {
+                {/* Filter Tabs - Horizontally Scrollable */}
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.tabScrollView}
+                    contentContainerStyle={styles.tabRow}
+                >
+                    {(['All', 'Movies', 'Downloads', 'History'] as LibraryTab[]).map((tab) => {
                         const isSelected = selectedTab === tab;
                         const count =
-                            tab === 'My List'
+                            tab === 'Movies'
                                 ? myList.length
                                 : tab === 'Downloads'
                                 ? downloads.length
                                 : tab === 'History'
                                 ? watchHistory.length
                                 : null;
+
+                        const iconName =
+                            tab === 'All'
+                                ? 'grid-outline'
+                                : tab === 'Movies'
+                                ? 'film-outline'
+                                : tab === 'Downloads'
+                                ? 'cloud-download-outline'
+                                : 'time-outline';
+
+                        const iconColor = isSelected ? '#ffffff' : 'rgba(255,255,255,0.7)';
 
                         return (
                             <TouchableOpacity
@@ -862,6 +884,12 @@ const LibraryScreen: React.FC = () => {
                                 onPress={() => setSelectedTab(tab)}
                                 activeOpacity={0.75}
                             >
+                                <Ionicons
+                                    name={iconName}
+                                    size={14}
+                                    color={iconColor}
+                                    style={styles.tabPillIcon}
+                                />
                                 <Text
                                     style={[
                                         styles.tabPillText,
@@ -874,10 +902,12 @@ const LibraryScreen: React.FC = () => {
                             </TouchableOpacity>
                         );
                     })}
-                </View>
+                </ScrollView>
             </View>
 
             <ScrollView
+                style={styles.mainScrollView}
+                contentContainerStyle={styles.mainScrollContent}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl
@@ -892,7 +922,7 @@ const LibraryScreen: React.FC = () => {
                     renderEmpty()
                 ) : (
                     <>
-                        {showMyList && renderMyList()}
+                        {showMovies && renderMyList()}
                         {showDownloads && renderActiveDownloads()}
                         {showDownloads && renderCompletedDownloads()}
                         {showDownloads && downloads.length === 0 && selectedTab === 'Downloads' && renderEmpty()}
@@ -928,20 +958,40 @@ const styles = StyleSheet.create({
         marginBottom: 14,
     },
 
+    mainScrollView: {
+        flex: 1,
+    },
+    mainScrollContent: {
+        flexGrow: 1,
+    },
+
     // ── Tab filter pills ─────────────────────────────────────────────────────────
-    tabRow: {
-        flexDirection: 'row',
-        gap: 8,
+    tabScrollView: {
+        marginHorizontal: -16,
         marginTop: 4,
     },
+    tabRow: {
+        flexDirection: 'row',
+        paddingHorizontal: 16,
+        gap: 8,
+        alignItems: 'center',
+    },
     tabPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
         paddingHorizontal: 14,
         paddingVertical: 7,
         borderRadius: 20,
         backgroundColor: 'rgba(255,255,255,0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.06)',
     },
     tabPillActive: {
         backgroundColor: '#535aff',
+        borderColor: '#535aff',
+    },
+    tabPillIcon: {
+        marginRight: 6,
     },
     tabPillText: {
         fontSize: 13,

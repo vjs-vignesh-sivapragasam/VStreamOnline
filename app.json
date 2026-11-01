@@ -23,6 +23,9 @@
       "backgroundColor": "#000000",
       "bundleIdentifier": "com.vijayyuvi.vstreamonline",
       "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
@@ -45,6 +48,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.vijayyuvi.vstreamonline",
+      "supportsPictureInPicture": true,
       "icon": "assets/images/icon.png"
     },
     "web": {

@@ -4,7 +4,7 @@ export const styles = StyleSheet.create({
     // Container
     container: {
         flex: 1,
-        backgroundColor: 'transparent',
+        backgroundColor: '#000000',
     },
 
     // Video

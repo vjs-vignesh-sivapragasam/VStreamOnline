@@ -11,6 +11,8 @@ import { BlurView } from 'expo-blur';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 import { PlayerSelectionModal } from '@/components/PlayerSelectionModal';
 import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
+import { YouTubePlayerProvider } from '@/contexts/YouTubePlayerContext';
+import { YouTubeWatchOverlay } from '@/components/youtube/YouTubeWatchOverlay';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -88,13 +90,14 @@ function RootLayoutNav() {
 
       <ActionSheetProvider>
         <ThemeProvider value={theme}>
-          <Stack
-            screenOptions={{
-              headerStyle: styles.glassHeader,
-              headerBackground: HeaderBackground,
-              contentStyle: styles.screenContent,
-            }}
-          >
+          <YouTubePlayerProvider>
+            <Stack
+              screenOptions={{
+                headerStyle: styles.glassHeader,
+                headerBackground: HeaderBackground,
+                contentStyle: styles.screenContent,
+              }}
+            >
             <Stack.Screen
               name="(tabs)"
               options={{
@@ -157,6 +160,15 @@ function RootLayoutNav() {
             />
             <Stack.Screen
               name="stream/player"
+              options={{
+                headerShown: false,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
+                contentStyle: { backgroundColor: '#000000' },
+              }}
+            />
+            <Stack.Screen
+              name="youtube/watch"
               options={{
                 headerShown: false,
                 headerTransparent: true,
@@ -226,8 +238,10 @@ function RootLayoutNav() {
             />
           </Stack>
           <PlayerSelectionModal />
-        </ThemeProvider>
-      </ActionSheetProvider>
+          <YouTubeWatchOverlay />
+        </YouTubePlayerProvider>
+      </ThemeProvider>
+    </ActionSheetProvider>
     </View>
   );
 }

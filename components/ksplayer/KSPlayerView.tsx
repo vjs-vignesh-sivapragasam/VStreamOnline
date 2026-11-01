@@ -81,29 +81,31 @@ export interface KSPlayerRef {
 
 // ─── Native component ─────────────────────────────────────────────────────────
 
-export const isKSPlayerAvailable = (): boolean => {
-  if (Platform.OS !== 'ios') return false;
-  try {
-    return Boolean(
-      UIManager.getViewManagerConfig &&
-      UIManager.getViewManagerConfig('KSPlayerView')
-    );
-  } catch {
-    return false;
-  }
-};
+let cachedNativeComponent: any = null;
 
 const getKSPlayerNative = () => {
-  if (!isKSPlayerAvailable()) return null;
+  if (Platform.OS !== 'ios') return null;
+  if (cachedNativeComponent) return cachedNativeComponent;
   try {
-    return requireNativeComponent<any>('KSPlayerView');
+    cachedNativeComponent = requireNativeComponent<any>('KSPlayerView');
+    return cachedNativeComponent;
   } catch (e) {
     console.warn('[KSPlayerView] Failed to load native KSPlayerView:', e);
     return null;
   }
 };
 
-const KSPlayerNative = getKSPlayerNative();
+export const isKSPlayerAvailable = (): boolean => {
+  if (Platform.OS !== 'ios') return false;
+  try {
+    if (UIManager.getViewManagerConfig && UIManager.getViewManagerConfig('KSPlayerView')) {
+      return true;
+    }
+    return Boolean(getKSPlayerNative());
+  } catch {
+    return false;
+  }
+};
 
 function dispatchCommand(ref: React.RefObject<any>, command: string, args: any[] = []) {
   const node = findNodeHandle(ref.current);
@@ -166,7 +168,9 @@ export const KSPlayerView = forwardRef<KSPlayerRef, KSPlayerViewProps>((props, r
     [props.onSubtitleText]
   );
 
-  if (!KSPlayerNative) {
+  const NativeComponent = getKSPlayerNative();
+
+  if (!NativeComponent) {
     return (
       <View style={[styles.container, props.style, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: '#fff', fontSize: 14, textAlign: 'center', marginHorizontal: 20 }}>
@@ -178,7 +182,7 @@ export const KSPlayerView = forwardRef<KSPlayerRef, KSPlayerViewProps>((props, r
 
   return (
     <View style={[styles.container, props.style]}>
-      <KSPlayerNative
+      <NativeComponent
         ref={nativeRef}
         style={StyleSheet.absoluteFill}
         url={props.url}
