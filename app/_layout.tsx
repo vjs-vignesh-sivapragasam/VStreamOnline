@@ -120,16 +120,9 @@ function RootLayoutNav() {
             <Stack.Screen
               name="torrent/details"
               options={{
-                headerShown: true,
+                headerShown: false,
                 headerTransparent: true,
                 headerBackground: InvisibleHeaderBackground,
-                headerTitle: '',
-                headerTintColor: '#ffffff',
-                headerBackTitle: '',
-                headerShadowVisible: false,
-                headerStyle: {
-                  backgroundColor: 'transparent',
-                }
               }}
             />
             <Stack.Screen
@@ -213,6 +206,22 @@ function RootLayoutNav() {
                 headerStyle: {
                   backgroundColor: 'transparent',
                 }
+              }}
+            />
+            <Stack.Screen
+              name="settings/about"
+              options={{
+                headerShown: false,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
+              }}
+            />
+            <Stack.Screen
+              name="settings/tmdb"
+              options={{
+                headerShown: false,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
               }}
             />
           </Stack>

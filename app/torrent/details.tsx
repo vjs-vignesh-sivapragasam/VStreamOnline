@@ -11,7 +11,7 @@ import {
   FlatList,
   Image,
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { StatusBar, Text, View } from '../../components/Themed';
 import BottomSpacing from '@/components/BottomSpacing';
 import * as Haptics from 'expo-haptics';
@@ -493,6 +493,7 @@ const TorrentDetails = () => {
 
   return (
     <>
+      <Stack.Screen options={{ headerShown: false }} />
       <ScrollView
         ref={scrollRef}
         style={styles.container}
@@ -517,6 +518,7 @@ const TorrentDetails = () => {
             colors={['rgba(0,0,0,0.45)', 'transparent', 'rgba(0,0,0,0.85)', '#000000']}
             locations={[0, 0.4, 0.8, 1]}
             style={StyleSheet.absoluteFill}
+            pointerEvents="none"
           />
 
           {/* Circular Back Button (top left) */}
@@ -524,6 +526,7 @@ const TorrentDetails = () => {
             style={[styles.backButton, { top: Math.max(insets.top + 6, 20) }]}
             onPress={() => router.back()}
             activeOpacity={0.7}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <Ionicons name="chevron-back" size={24} color="#ffffff" />
           </TouchableOpacity>
@@ -537,6 +540,7 @@ const TorrentDetails = () => {
             ]}
             onPress={handleToggleMyList}
             activeOpacity={0.7}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
           >
             <Ionicons
               name={inMyList ? 'bookmark' : 'bookmark-outline'}
@@ -1167,7 +1171,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 10,
+    zIndex: 99,
+    elevation: 12,
   },
   bookmarkButton: {
     position: 'absolute',
@@ -1178,7 +1183,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 10,
+    zIndex: 99,
+    elevation: 12,
   },
   bookmarkButtonActive: {
     backgroundColor: 'rgba(83, 90, 255, 0.35)',

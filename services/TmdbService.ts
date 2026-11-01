@@ -41,6 +41,19 @@ const DEFAULT_TMDB_API_KEY = 'a07e22bc18f5cb106bfe4cc1f83ad8ed';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
+// ── Language Detection ────────────────────────────────────────────────────────
+
+export function detectLanguageCode(title: string): string {
+  if (!title) return 'ta';
+  const lower = title.toLowerCase();
+  if (lower.includes('telugu') || lower.includes('తెలుగు')) return 'te';
+  if (lower.includes('hindi') || lower.includes('हिन्दी')) return 'hi';
+  if (lower.includes('malayalam') || lower.includes('മലയാളം')) return 'ml';
+  if (lower.includes('kannada') || lower.includes('ಕನ್ನಡ')) return 'kn';
+  if (lower.includes('english') || lower.includes('hollywood')) return 'en';
+  return 'ta';
+}
+
 // ── Title Parsing ─────────────────────────────────────────────────────────────
 
 export function cleanMovieQuery(raw: string): { query: string; year?: string } {
@@ -134,6 +147,35 @@ class TmdbService {
     }
 
     const apiKey = this.getApiKey();
+    const preferredLang = detectLanguageCode(rawTitle);
+
+    const findBestMatch = (results: any[]): any => {
+      if (!results || results.length === 0) return null;
+      if (preferredLang) {
+        // 1. Exact match on title and language
+        const exact = results.find(
+          (r: any) =>
+            (r.title?.toLowerCase() === query.toLowerCase() ||
+              r.original_title?.toLowerCase() === query.toLowerCase() ||
+              r.name?.toLowerCase() === query.toLowerCase()) &&
+            r.original_language === preferredLang
+        );
+        if (exact) return exact;
+
+        // 2. Any match with preferred language
+        const langMatch = results.find((r: any) => r.original_language === preferredLang);
+        if (langMatch) return langMatch;
+
+        // 3. If preferred is an Indian language, prioritize any Indian regional language
+        if (['ta', 'te', 'ml', 'kn', 'hi'].includes(preferredLang)) {
+          const indianMatch = results.find((r: any) =>
+            ['ta', 'te', 'ml', 'kn', 'hi'].includes(r.original_language)
+          );
+          if (indianMatch) return indianMatch;
+        }
+      }
+      return results[0];
+    };
 
     try {
       // 1. Search for movie / TV on TMDB
@@ -153,8 +195,9 @@ class TmdbService {
       const res = await fetch(searchEndpoint);
       if (res.ok) {
         const data = await res.json();
-        if (data.results && data.results.length > 0) {
-          matchedId = data.results[0].id;
+        const best = findBestMatch(data.results);
+        if (best) {
+          matchedId = best.id;
           matchedMediaType = isSeries ? 'tv' : 'movie';
         }
       }
@@ -167,8 +210,9 @@ class TmdbService {
         const fbRes = await fetch(fallbackEndpoint);
         if (fbRes.ok) {
           const fbData = await fbRes.json();
-          if (fbData.results && fbData.results.length > 0) {
-            matchedId = fbData.results[0].id;
+          const best = findBestMatch(fbData.results);
+          if (best) {
+            matchedId = best.id;
             matchedMediaType = isSeries ? 'tv' : 'movie';
           }
         }
@@ -180,12 +224,13 @@ class TmdbService {
         const mRes = await fetch(multiEndpoint);
         if (mRes.ok) {
           const mData = await mRes.json();
-          const valid = mData.results?.find(
+          const valid = mData.results?.filter(
             (r: any) => r.media_type === 'movie' || r.media_type === 'tv'
           );
-          if (valid) {
-            matchedId = valid.id;
-            matchedMediaType = valid.media_type === 'tv' ? 'tv' : 'movie';
+          const best = findBestMatch(valid);
+          if (best) {
+            matchedId = best.id;
+            matchedMediaType = best.media_type === 'tv' ? 'tv' : 'movie';
           }
         }
       }
@@ -230,27 +275,111 @@ class TmdbService {
         profileUrl: c.profile_path ? `${TMDB_IMAGE_BASE}/w185${c.profile_path}` : null,
       }));
 
-      // Recommendations
-      const recommended: TmdbMovieItem[] = (d.recommendations?.results || [])
-        .slice(0, 15)
-        .map((r: any) => ({
-          id: r.id,
-          title: r.title || r.name || '',
-          posterUrl: r.poster_path ? `${TMDB_IMAGE_BASE}/w342${r.poster_path}` : null,
-          year: (r.release_date || r.first_air_date || '').slice(0, 4),
-          voteAverage: r.vote_average,
-        }));
+      // Recommendations & Similar filtered by language to prevent unrelated Hollywood movies
+      const movieLang = d.original_language || preferredLang || 'ta';
+      const isIndianMovie = ['ta', 'te', 'hi', 'ml', 'kn'].includes(movieLang);
+      const genreIds = (d.genres || []).map((g: any) => g.id).slice(0, 3).join(',');
+      const leadCastIds = (d.credits?.cast || []).slice(0, 2).map((c: any) => c.id).join('|');
 
-      // Similar
-      const similar: TmdbMovieItem[] = (d.similar?.results || [])
-        .slice(0, 15)
-        .map((s: any) => ({
-          id: s.id,
-          title: s.title || s.name || '',
-          posterUrl: s.poster_path ? `${TMDB_IMAGE_BASE}/w342${s.poster_path}` : null,
-          year: (s.release_date || s.first_air_date || '').slice(0, 4),
-          voteAverage: s.vote_average,
-        }));
+      const seenIds = new Set<number>([d.id]);
+      const recommended: TmdbMovieItem[] = [];
+      const similar: TmdbMovieItem[] = [];
+
+      const addItem = (targetList: TmdbMovieItem[], item: any, maxCount = 15) => {
+        if (!item || !item.id || seenIds.has(item.id) || targetList.length >= maxCount) return;
+        seenIds.add(item.id);
+        targetList.push({
+          id: item.id,
+          title: item.title || item.name || '',
+          posterUrl: item.poster_path ? `${TMDB_IMAGE_BASE}/w342${item.poster_path}` : null,
+          year: (item.release_date || item.first_air_date || '').slice(0, 4),
+          voteAverage: item.vote_average,
+        });
+      };
+
+      // 1. Filter TMDB raw recommendations & similar for items matching this movie's language
+      const rawTmdbRecs: any[] = d.recommendations?.results || [];
+      const rawTmdbSim: any[] = d.similar?.results || [];
+
+      rawTmdbRecs.forEach((r: any) => {
+        const matchesLang =
+          movieLang === 'en'
+            ? r.original_language === 'en'
+            : r.original_language === movieLang ||
+              (isIndianMovie && ['ta', 'te', 'hi', 'ml', 'kn'].includes(r.original_language));
+        if (matchesLang) {
+          addItem(recommended, r);
+        }
+      });
+
+      rawTmdbSim.forEach((s: any) => {
+        const matchesLang =
+          movieLang === 'en'
+            ? s.original_language === 'en'
+            : s.original_language === movieLang ||
+              (isIndianMovie && ['ta', 'te', 'hi', 'ml', 'kn'].includes(s.original_language));
+        if (matchesLang) {
+          addItem(similar, s);
+        }
+      });
+
+      // 2. Discover by same language & genre to populate rich matching recommendations
+      if (recommended.length < 12 && genreIds) {
+        try {
+          const discUrl = `${TMDB_BASE_URL}/discover/${matchedMediaType}?api_key=${apiKey}&with_original_language=${movieLang}&with_genres=${genreIds}&sort_by=popularity.desc&without_movie_ids=${matchedId}&page=1`;
+          const discRes = await fetch(discUrl);
+          if (discRes.ok) {
+            const discData = await discRes.json();
+            (discData.results || []).forEach((r: any) => addItem(recommended, r));
+          }
+        } catch {}
+      }
+
+      // 3. Discover by star cast in the same language if still needed
+      if (recommended.length < 12 && leadCastIds) {
+        try {
+          const castUrl = `${TMDB_BASE_URL}/discover/${matchedMediaType}?api_key=${apiKey}&with_original_language=${movieLang}&with_people=${leadCastIds}&sort_by=popularity.desc&without_movie_ids=${matchedId}`;
+          const castRes = await fetch(castUrl);
+          if (castRes.ok) {
+            const castData = await castRes.json();
+            (castData.results || []).forEach((r: any) => addItem(recommended, r));
+          }
+        } catch {}
+      }
+
+      // 4. Discover for Similar: top voted/rated in the same language and genres
+      if (similar.length < 12 && genreIds) {
+        try {
+          const simDiscUrl = `${TMDB_BASE_URL}/discover/${matchedMediaType}?api_key=${apiKey}&with_original_language=${movieLang}&with_genres=${genreIds}&sort_by=vote_count.desc&without_movie_ids=${matchedId}&page=1`;
+          const simRes = await fetch(simDiscUrl);
+          if (simRes.ok) {
+            const simData = await simRes.json();
+            (simData.results || []).forEach((s: any) => addItem(similar, s));
+          }
+        } catch {}
+      }
+
+      // 5. Fallback: top popular in that language
+      if (recommended.length < 8) {
+        try {
+          const popUrl = `${TMDB_BASE_URL}/discover/${matchedMediaType}?api_key=${apiKey}&with_original_language=${movieLang}&sort_by=popularity.desc&without_movie_ids=${matchedId}`;
+          const popRes = await fetch(popUrl);
+          if (popRes.ok) {
+            const popData = await popRes.json();
+            (popData.results || []).forEach((r: any) => addItem(recommended, r));
+          }
+        } catch {}
+      }
+      if (similar.length < 8) {
+        try {
+          const popSimUrl = `${TMDB_BASE_URL}/discover/${matchedMediaType}?api_key=${apiKey}&with_original_language=${movieLang}&sort_by=vote_average.desc&vote_count.gte=10&without_movie_ids=${matchedId}`;
+          const popSimRes = await fetch(popSimUrl);
+          if (popSimRes.ok) {
+            const popSimData = await popSimRes.json();
+            (popSimData.results || []).forEach((s: any) => addItem(similar, s));
+          }
+        } catch {}
+      }
 
       const rawReleaseDate = d.release_date || d.first_air_date || '';
       const runtimeMins = d.runtime || (Array.isArray(d.episode_run_time) ? d.episode_run_time[0] : null);
