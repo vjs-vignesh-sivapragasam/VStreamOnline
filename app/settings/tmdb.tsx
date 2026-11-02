@@ -16,11 +16,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import * as Haptics from 'expo-haptics';
 import BottomSpacing from '@/components/BottomSpacing';
+import { useTheme } from '@/contexts/ThemeContext';
 import { router } from 'expo-router';
 
 const DEFAULT_KEY = 'a07e22bc18f5cb106bfe4cc1f83ad8ed';
 
 const TmdbConfigScreen: React.FC = () => {
+  const { theme } = useTheme();
   const [apiKey, setApiKey] = useState('');
   const [useDefaultKey, setUseDefaultKey] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -121,7 +123,7 @@ const TmdbConfigScreen: React.FC = () => {
           {/* Feature Highlight Card */}
           <View style={styles.card}>
             <View style={styles.cardHeader}>
-              <Ionicons name="film" size={24} color="#535aff" />
+              <Ionicons name="film" size={24} color={theme.primary} />
               <Text style={styles.cardTitle}>The Movie Database (TMDB)</Text>
             </View>
             <Text style={styles.cardSubtitle}>
@@ -153,7 +155,7 @@ const TmdbConfigScreen: React.FC = () => {
                 activeOpacity={0.7}
               >
                 {isTesting ? (
-                  <ActivityIndicator size="small" color="#535aff" />
+                  <ActivityIndicator size="small" color={theme.primary} />
                 ) : (
                   <>
                     <Ionicons
@@ -165,7 +167,7 @@ const TmdbConfigScreen: React.FC = () => {
                           : 'flash-outline'
                       }
                       size={16}
-                      color={testResult === 'success' ? '#00e676' : '#535aff'}
+                      color={testResult === 'success' ? '#00e676' : theme.primary}
                       style={{ marginRight: 6 }}
                     />
                     <Text style={styles.testBtnText}>Test Connection</Text>

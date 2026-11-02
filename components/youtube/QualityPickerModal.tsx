@@ -67,19 +67,33 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
   }, [videoDetails]);
 
   const filteredAudioAdaptive = React.useMemo(() => {
-    if (!videoDetails?.formats?.audioAdaptive) return [];
-    const map = new Map<string, YouTubeFormatOption>();
-    for (const f of videoDetails.formats.audioAdaptive) {
-      const key = `${f.quality}_${f.container}`;
-      if (!map.has(key)) {
-        map.set(key, f);
+    let list: YouTubeFormatOption[] = [];
+    if (videoDetails?.formats?.audioAdaptive && videoDetails.formats.audioAdaptive.length > 0) {
+      const map = new Map<string, YouTubeFormatOption>();
+      for (const f of videoDetails.formats.audioAdaptive) {
+        const key = `${f.quality}_${f.container}`;
+        if (!map.has(key)) {
+          map.set(key, { ...f, type: 'audio' as const });
+        }
       }
+      list = Array.from(map.values()).sort((a, b) => {
+        const numA = parseInt(a.quality) || 0;
+        const numB = parseInt(b.quality) || 0;
+        return numB - numA;
+      });
     }
-    return Array.from(map.values()).sort((a, b) => {
-      const numA = parseInt(a.quality) || 0;
-      const numB = parseInt(b.quality) || 0;
-      return numB - numA;
-    });
+
+    if (list.length === 0 && videoDetails?.formats?.progressive && videoDetails.formats.progressive.length > 0) {
+      const best = videoDetails.formats.progressive[0];
+      list.push({
+        ...best,
+        quality: '128 kbps',
+        container: 'mp3',
+        type: 'audio' as const,
+      });
+    }
+
+    return list;
   }, [videoDetails]);
 
   if (!visible) return null;
@@ -259,8 +273,8 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
 
               {/* ── Section: Audio Formats ────────────────────────────────────── */}
               <View style={[styles.sectionHeaderRow, { marginTop: 20 }]}>
-                <Ionicons name="musical-notes-outline" size={18} color="#00ffff" />
-                <Text style={styles.sectionTitle}>Audio Only (Music / Podcast)</Text>
+                <Ionicons name="musical-notes" size={18} color="#00e5ff" />
+                <Text style={styles.sectionTitle}>Audio / MP3 Downloads</Text>
               </View>
 
               {filteredAudioAdaptive.length === 0 ? (
@@ -269,13 +283,13 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
                 filteredAudioAdaptive.map((f, idx) => (
                   <View key={`audio_${f.itag}_${idx}`} style={styles.formatItem}>
                     <View style={styles.formatBadgeContainer}>
-                      <Text style={[styles.formatQuality, { color: '#00ffff' }]}>{f.quality}</Text>
+                      <Text style={[styles.formatQuality, { color: '#00e5ff' }]}>{f.quality}</Text>
                       <View style={[styles.tagBadge, { backgroundColor: '#004455' }]}>
-                        <Text style={[styles.tagText, { color: '#00ffff' }]}>M4A AUDIO</Text>
+                        <Text style={[styles.tagText, { color: '#00e5ff' }]}>MP3 AUDIO</Text>
                       </View>
                     </View>
                     <View style={styles.formatMeta}>
-                      <Text style={styles.formatLabel}>High-Quality AAC Audio</Text>
+                      <Text style={styles.formatLabel}>MP3 Music Track (Audio Only)</Text>
                       <Text style={styles.formatSize}>{f.sizeFormatted}</Text>
                     </View>
                     <View style={styles.formatActionsRow}>

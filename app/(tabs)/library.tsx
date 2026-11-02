@@ -23,6 +23,7 @@ import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { myListService, MyListItem } from '@/services/MyListService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
 import { tmdbService } from '@/services/TmdbService';
+import { useTheme } from '@/contexts/ThemeContext';
 
 // ── Watch history shape — must match what MediaPlayerScreen writes ────────────
 interface WatchHistoryItem {
@@ -40,6 +41,7 @@ type LibraryTab = 'All' | 'Movies' | 'Downloads' | 'History';
 const CARD_SPACING = 16;
 
 const LibraryScreen: React.FC = () => {
+    const { theme } = useTheme();
     const [watchHistory, setWatchHistory] = useState<WatchHistoryItem[]>([]);
     const [downloads, setDownloads] = useState<DownloadItem[]>([]);
     const [myList, setMyList] = useState<MyListItem[]>([]);
@@ -316,7 +318,7 @@ const LibraryScreen: React.FC = () => {
 
         return (
             <View style={styles.emptyContainer}>
-                <Ionicons name={iconName} size={72} color="#535aff" />
+                <Ionicons name={iconName} size={72} color={theme.primary} />
                 <Text style={styles.emptyTitle}>{title}</Text>
                 <Text style={styles.emptyText}>{description}</Text>
             </View>
@@ -336,10 +338,10 @@ const LibraryScreen: React.FC = () => {
             <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                     <View style={styles.sectionTitleRow}>
-                        <Ionicons name="arrow-down-circle" size={20} color="#535aff" />
+                        <Ionicons name="arrow-down-circle" size={20} color={theme.primary} />
                         <Text style={styles.sectionTitle}>Active Downloads</Text>
-                        <View style={styles.countBadge}>
-                            <Text style={styles.countBadgeText}>{activeDownloads.length}</Text>
+                        <View style={[styles.countBadge, { backgroundColor: theme.primary + '30' }]}>
+                            <Text style={[styles.countBadgeText, { color: theme.primaryLight || theme.primary }]}>{activeDownloads.length}</Text>
                         </View>
                     </View>
                     <Text style={styles.storageInfoText}>
@@ -380,7 +382,7 @@ const LibraryScreen: React.FC = () => {
 
                                         {item.peers !== undefined && item.peers > 0 && (
                                             <View style={styles.peersBadge}>
-                                                <Ionicons name="people" size={11} color="#535aff" />
+                                                <Ionicons name="people" size={11} color={theme.primary} />
                                                 <Text style={styles.peersText}>{item.peers} peers</Text>
                                             </View>
                                         )}
@@ -398,7 +400,7 @@ const LibraryScreen: React.FC = () => {
                                                     styles.progressBarFillLarge,
                                                     {
                                                         width: `${Math.min(item.progress, 100)}%`,
-                                                        backgroundColor: isPaused ? '#ff9800' : '#535aff',
+                                                        backgroundColor: isPaused ? '#ff9800' : theme.primary,
                                                     },
                                                 ]}
                                             />
@@ -421,7 +423,7 @@ const LibraryScreen: React.FC = () => {
                                     {/* Controls: Pause / Resume / Cancel */}
                                     <View style={styles.activeControlsRow}>
                                         <TouchableOpacity
-                                            style={[styles.controlPill, isPaused && styles.controlPillResume]}
+                                            style={[styles.controlPill, isPaused ? styles.controlPillResume : { backgroundColor: theme.primary }]}
                                             onPress={() => isDownloading ? downloadService.pauseDownload(item.id) : downloadService.resumeDownload(item.id)}
                                             activeOpacity={0.7}
                                         >
@@ -592,7 +594,7 @@ const LibraryScreen: React.FC = () => {
                                         />
                                         {item.isTorrent && (
                                             <View style={styles.torrentBadge}>
-                                                <Ionicons name="magnet-outline" size={10} color="#535aff" />
+                                                <Ionicons name="magnet-outline" size={10} color={theme.primary} />
                                             </View>
                                         )}
                                         <TouchableOpacity
@@ -609,7 +611,7 @@ const LibraryScreen: React.FC = () => {
                                             <View
                                                 style={[
                                                     styles.progressBarFill,
-                                                    { width: `${Math.min(item.progress, 100)}%` },
+                                                    { width: `${Math.min(item.progress, 100)}%`, backgroundColor: theme.primary },
                                                 ]}
                                             />
                                         </View>
@@ -640,10 +642,10 @@ const LibraryScreen: React.FC = () => {
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.sectionTitleRow}>
-                            <Ionicons name="bookmark" size={20} color="#535aff" />
+                            <Ionicons name="bookmark" size={20} color={theme.primary} />
                             <Text style={styles.sectionTitle}>Movies & Series</Text>
-                            <View style={styles.countBadge}>
-                                <Text style={styles.countBadgeText}>{myList.length}</Text>
+                            <View style={[styles.countBadge, { backgroundColor: theme.primary + '30' }]}>
+                                <Text style={[styles.countBadgeText, { color: theme.primaryLight || theme.primary }]}>{myList.length}</Text>
                             </View>
                         </View>
                     </View>
@@ -699,7 +701,7 @@ const LibraryScreen: React.FC = () => {
                                     {/* Action buttons: Play Directly & Remove */}
                                     <View style={styles.myListActionsRow}>
                                         <TouchableOpacity
-                                            style={styles.directPlayButton}
+                                            style={[styles.directPlayButton, { backgroundColor: theme.primary }]}
                                             onPress={() => handlePlayMyListItem(item)}
                                             activeOpacity={0.8}
                                         >
@@ -736,10 +738,10 @@ const LibraryScreen: React.FC = () => {
             <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                     <View style={styles.sectionTitleRow}>
-                        <Ionicons name="bookmark" size={20} color="#535aff" />
+                        <Ionicons name="bookmark" size={20} color={theme.primary} />
                         <Text style={styles.sectionTitle}>Movies & Series</Text>
-                        <View style={styles.countBadge}>
-                            <Text style={styles.countBadgeText}>{myList.length}</Text>
+                        <View style={[styles.countBadge, { backgroundColor: theme.primary + '30' }]}>
+                            <Text style={[styles.countBadgeText, { color: theme.primaryLight || theme.primary }]}>{myList.length}</Text>
                         </View>
                     </View>
                     <TouchableOpacity
@@ -747,8 +749,8 @@ const LibraryScreen: React.FC = () => {
                         onPress={() => setSelectedTab('Movies')}
                         activeOpacity={0.7}
                     >
-                        <Text style={styles.seeAllText}>See All</Text>
-                        <Ionicons name="chevron-forward" size={14} color="#535aff" />
+                        <Text style={[styles.seeAllText, { color: theme.primary }]}>See All</Text>
+                        <Ionicons name="chevron-forward" size={14} color={theme.primary} />
                     </TouchableOpacity>
                 </View>
 
@@ -880,7 +882,13 @@ const LibraryScreen: React.FC = () => {
                         return (
                             <TouchableOpacity
                                 key={tab}
-                                style={[styles.tabPill, isSelected && styles.tabPillActive]}
+                                style={[
+                                    styles.tabPill,
+                                    isSelected && [
+                                        styles.tabPillActive,
+                                        { backgroundColor: theme.primary, borderColor: theme.primary },
+                                    ],
+                                ]}
                                 onPress={() => setSelectedTab(tab)}
                                 activeOpacity={0.75}
                             >
@@ -913,8 +921,8 @@ const LibraryScreen: React.FC = () => {
                     <RefreshControl
                         refreshing={refreshing}
                         onRefresh={onRefresh}
-                        tintColor="#535aff"
-                        colors={['#535aff']}
+                        tintColor={theme.primary}
+                        colors={[theme.primary]}
                     />
                 }
             >

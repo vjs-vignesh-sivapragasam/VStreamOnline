@@ -535,15 +535,31 @@ class DownloadManager {
     let lastProgressTime = Date.now();
 
     let downloadUrl = params.streamUrl;
-    if (downloadUrl.includes('googlevideo.com')) {
-      const devIp = getDevHostIp();
-      const base = devIp ? `http://${devIp}:11472` : 'http://127.0.0.1:11472';
-      downloadUrl = `${base}/yt/proxy-stream?url=${encodeURIComponent(downloadUrl)}`;
-    }
-    item.streamUrl = downloadUrl;
+    let directUrl = downloadUrl;
 
-    const task = new DownloadTask(downloadUrl, targetFile, {
+    // Unwrap if already a proxy URL
+    if (downloadUrl.includes('/yt/proxy-stream')) {
+      try {
+        const u = new URL(downloadUrl);
+        const raw = u.searchParams.get('url');
+        if (raw) directUrl = decodeURIComponent(raw);
+      } catch {}
+    }
+
+    const isGoogleVideo = directUrl.includes('googlevideo.com');
+    // On native devices, direct Google CDN download with YouTube User-Agent header bypasses
+    // local server dependency, avoiding port 11472 issues and double-proxy wrapping.
+    const targetDownloadUrl = isGoogleVideo ? directUrl : downloadUrl;
+    item.streamUrl = targetDownloadUrl;
+
+    const task = new DownloadTask(targetDownloadUrl, targetFile, {
       sessionType: 'foreground',
+      headers: isGoogleVideo
+        ? {
+            'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip',
+            'Accept': '*/*',
+          }
+        : undefined,
       onProgress: (progressData: DownloadProgress) => {
         if (item!.status !== 'downloading') return;
         const now = Date.now();
@@ -607,7 +623,53 @@ class DownloadManager {
         this.notifyListeners();
         this.persistDownloadsImmediately();
       })
-      .catch((err: any) => {
+      .catch(async (err: any) => {
+        // Fallback: If direct Google Video CDN download failed, attempt retry via local proxy if available
+        if (isGoogleVideo && targetDownloadUrl === directUrl) {
+          try {
+            const devIp = getDevHostIp();
+            const base = devIp ? `http://${devIp}:11472` : 'http://127.0.0.1:11472';
+            const proxyFallbackUrl = `${base}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}`;
+            console.log('[DownloadService] Direct download failed, attempting proxy fallback:', err?.message);
+
+            const retryTask = new DownloadTask(proxyFallbackUrl, targetFile, {
+              sessionType: 'foreground',
+              onProgress: (progressData: DownloadProgress) => {
+                if (item!.status !== 'downloading') return;
+                const downloaded = progressData.bytesWritten;
+                if (downloaded > item!.downloadedBytes) item!.downloadedBytes = downloaded;
+                if (progressData.totalBytes > 0) item!.totalBytes = progressData.totalBytes;
+                if (item!.totalBytes > 0) {
+                  item!.progress = Math.min(Math.round((item!.downloadedBytes / item!.totalBytes) * 100), 100);
+                }
+                item!.statusDetail = `Downloading (${item!.progress}%)`;
+                this.notifyListeners();
+                this.persistDownloadsThrottled();
+              },
+            });
+
+            this.activeTasks.set(id, retryTask);
+            const retryResult = await retryTask.downloadAsync();
+            if (retryResult && retryResult.exists) {
+              item!.status = 'completed';
+              item!.progress = 100;
+              item!.statusDetail = 'Download complete';
+              item!.speedBps = 0;
+              item!.speedFormatted = '';
+              if (retryResult.size) {
+                item!.downloadedBytes = retryResult.size;
+                item!.totalBytes = retryResult.size;
+              }
+              this.activeTasks.delete(id);
+              this.notifyListeners();
+              this.persistDownloadsImmediately();
+              return;
+            }
+          } catch (retryErr) {
+            console.warn('[DownloadService] Proxy retry also failed:', retryErr);
+          }
+        }
+
         this.activeTasks.delete(id);
         this.stopTracking(id);
 

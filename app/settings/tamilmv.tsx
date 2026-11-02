@@ -14,6 +14,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from '@/components/Themed';
 import BottomSpacing from '@/components/BottomSpacing';
+import { useTheme } from '@/contexts/ThemeContext';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import * as Haptics from 'expo-haptics';
@@ -41,6 +42,7 @@ const PRESET_DOMAINS = [
 ];
 
 const TamilMvSettingsScreen: React.FC = () => {
+  const { theme } = useTheme();
   const [activeUrl, setActiveUrl] = useState<string>(DEFAULT_TAMILMV_BASE_URL);
   const [urlInput, setUrlInput] = useState<string>(DEFAULT_TAMILMV_BASE_URL);
   const [isPinging, setIsPinging] = useState<boolean>(false);
@@ -232,7 +234,7 @@ const TamilMvSettingsScreen: React.FC = () => {
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.iconCircle}>
-              <Ionicons name="globe-outline" size={28} color="#535aff" />
+              <Ionicons name="globe-outline" size={28} color={theme.primary} />
             </View>
             <Text style={styles.title}>TamilMV Source</Text>
             <Text style={styles.subtitle}>
@@ -323,7 +325,7 @@ const TamilMvSettingsScreen: React.FC = () => {
             <View style={styles.cardHeader}>
               <Text style={styles.cardSectionTitle}>AUTO-DETECT DOMAIN</Text>
               <View style={styles.autoDetectBadge}>
-                <Ionicons name="sparkles" size={12} color="#535aff" style={{ marginRight: 4 }} />
+                <Ionicons name="sparkles" size={12} color={theme.primary} style={{ marginRight: 4 }} />
                 <Text style={styles.autoDetectBadgeText}>Google Search</Text>
               </View>
             </View>
@@ -334,7 +336,7 @@ const TamilMvSettingsScreen: React.FC = () => {
 
             {isAutoDetecting && (
               <View style={styles.detectingProgressBox}>
-                <ActivityIndicator size="small" color="#535aff" style={{ marginRight: 10 }} />
+                <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 10 }} />
                 <Text style={styles.detectingProgressText} numberOfLines={2}>
                   {detectProgressText || 'Detecting working domain...'}
                 </Text>
@@ -446,7 +448,7 @@ const TamilMvSettingsScreen: React.FC = () => {
 
           {/* Info Card */}
           <View style={styles.infoCard}>
-            <Ionicons name="information-circle" size={20} color="#535aff" style={{ marginRight: 10 }} />
+            <Ionicons name="information-circle" size={20} color={theme.primary} style={{ marginRight: 10 }} />
             <Text style={styles.infoText}>
               TamilMV frequently rotates domains or gets blocked by ISPs. Your chosen domain is saved permanently in AsyncStorage so you don't have to set it each time. The app will also automatically fallback to working mirrors if needed.
             </Text>

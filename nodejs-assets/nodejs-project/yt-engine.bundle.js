@@ -39051,10 +39051,10 @@ var server = import_http.default.createServer(async (req, res) => {
         hasVideo: true,
         type: "video"
       }));
-      let audioAdaptive = adaptive.filter((f) => f.has_audio && f.mime_type?.includes("audio/mp4")).map((f) => ({
+      let audioAdaptive = adaptive.filter((f) => f.has_audio).map((f) => ({
         itag: f.itag,
         quality: `${Math.round((f.bitrate || 128e3) / 1e3)} kbps`,
-        container: "m4a",
+        container: "mp3",
         mimeType: f.mime_type,
         url: f.url,
         contentLength: f.content_length,
@@ -39067,7 +39067,7 @@ var server = import_http.default.createServer(async (req, res) => {
         audioAdaptive.push({
           itag: base.itag,
           quality: "Original Audio (128 kbps)",
-          container: "m4a",
+          container: "mp3",
           mimeType: "audio/mp4",
           url: base.url,
           contentLength: base.contentLength,

@@ -15,6 +15,7 @@ import { isHapticsSupported } from '@/utils/platform';
 import BottomSpacing from '@/components/BottomSpacing';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
+import { useTheme } from '@/contexts/ThemeContext';
 import {
   fetchTamilMVRecentlyAdded,
   searchTamilMV,
@@ -130,6 +131,7 @@ const SearchMovieCard = ({
 // ─── Search Screen ────────────────────────────────────────────────────────────
 
 const SearchScreen = () => {
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{ query?: string }>();
   const [query, setQuery]                           = useState(params.query || '');
   const [moviesList, setMoviesList]                 = useState<GroupedItem[]>([]);
@@ -318,7 +320,7 @@ const SearchScreen = () => {
             autoCapitalize="none"
           />
           {isSearchingLive && (
-            <ActivityIndicator size="small" color="#535aff" style={{ marginRight: 6 }} />
+            <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 6 }} />
           )}
           {query.length > 0 && (
             <Pressable onPress={handleClearQuery} style={styles.clearButton} hitSlop={8}>
@@ -348,7 +350,7 @@ const SearchScreen = () => {
         {/* Loading indicator */}
         {isLoading && (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#535aff" />
+            <ActivityIndicator size="large" color={theme.primary} />
             <Text style={styles.loadingText}>Loading recently added movies…</Text>
           </View>
         )}
@@ -371,7 +373,7 @@ const SearchScreen = () => {
         {!isLoading && moviesList.length === 0 && query.trim() === '' && (
           <View style={styles.emptyStateContainer}>
             <View style={styles.emptyStateIconContainer}>
-              <Ionicons name="film-outline" color="#535aff" size={48} />
+              <Ionicons name="film-outline" color={theme.primary} size={48} />
             </View>
             <Text style={styles.emptyStateTitle}>Discover Movies</Text>
             <Text style={styles.emptyStateSubtitle}>
@@ -379,7 +381,7 @@ const SearchScreen = () => {
             </Text>
             <View style={styles.emptyStateActionsRow}>
               <TouchableOpacity
-                style={styles.loadRecentBtn}
+                style={[styles.loadRecentBtn, { backgroundColor: theme.primary }]}
                 onPress={handleRecentlyAddedPress}
                 activeOpacity={0.8}
               >
@@ -449,7 +451,7 @@ const SearchScreen = () => {
         {!isLoading && (moviesList.length > 0 || liveSearchResults.length > 0) && filteredMovies.length === 0 && query.trim() !== '' && (
           <View style={styles.emptyStateContainer}>
             <View style={styles.emptyStateIconContainer}>
-              <Ionicons name="search-outline" color="#535aff" size={48} />
+              <Ionicons name="search-outline" color={theme.primary} size={48} />
             </View>
             <Text style={styles.emptyStateTitle}>No movies found</Text>
             <Text style={styles.emptyStateSubtitle}>
@@ -460,7 +462,7 @@ const SearchScreen = () => {
                 <Text style={styles.retryButtonText}>Clear Search</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.retryButton, { backgroundColor: '#535aff', borderColor: '#535aff' }]}
+                style={[styles.retryButton, { backgroundColor: theme.primary, borderColor: theme.primary }]}
                 onPress={handleOpenWebView}
               >
                 <Text style={styles.retryButtonText}>Open Web view</Text>

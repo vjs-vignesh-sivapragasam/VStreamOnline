@@ -561,25 +561,27 @@ export default function YouTubeScreen() {
     if (!targetVideoItem) return;
 
     try {
-      const ext = format.type === 'audio' ? 'm4a' : 'mp4';
+      const isAudio = format.type === 'audio';
+      const ext = isAudio ? 'mp3' : 'mp4';
       const cleanTitle = (modalVideoDetails?.title || targetVideoItem.title)
         .replace(/[^a-zA-Z0-9\s-_]/g, '')
         .trim();
-      const fileName = `${cleanTitle}_${format.quality}.${ext}`;
-      const downloadId = `yt_${targetVideoItem.id}_${format.itag}`;
+      const cleanQuality = format.quality.replace(/[^a-zA-Z0-9]/g, '');
+      const fileName = `${cleanTitle}_${cleanQuality}.${ext}`;
+      const downloadId = `yt_${targetVideoItem.id}_${format.itag}_${ext}`;
 
       await downloadService.startDirectDownload({
         id: downloadId,
         title: targetVideoItem.title,
         poster: targetVideoItem.thumbnail,
         fileName,
-        streamUrl: format.proxyUrl || format.url,
+        streamUrl: format.url || format.proxyUrl || '',
         fileLength: format.contentLength,
       });
 
       Alert.alert(
         'Download Started',
-        `Downloading "${cleanTitle}" (${format.quality} ${ext.toUpperCase()}) to YouTube Downloads.`,
+        `Downloading "${cleanTitle}" (${isAudio ? 'MP3 Audio' : format.quality + ' MP4'}) to YouTube Downloads.`,
         [
           { text: 'View Downloads', onPress: () => router.push('/youtube/downloads' as any) },
           { text: 'OK', style: 'cancel' },

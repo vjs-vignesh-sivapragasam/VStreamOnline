@@ -1,20 +1,23 @@
 import React from 'react';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export default function TabLayout() {
+  const { theme } = useTheme();
+
   return (
     <NativeTabs
       minimizeBehavior="onScrollDown"
-      tintColor="#535aff"
-      indicatorColor="rgba(83, 90, 255, 0.25)"
-      rippleColor="rgba(83, 90, 255, 0.15)"
+      tintColor={theme.primary}
+      indicatorColor={theme.indicator}
+      rippleColor={theme.ripple}
       iconColor={{
         default: '#8E8E93',
-        selected: '#535aff',
+        selected: theme.primary,
       }}
       labelStyle={{
         default: { color: '#8E8E93' },
-        selected: { color: '#535aff' },
+        selected: { color: theme.primary },
       }}
     >
       <NativeTabs.Trigger name="index">

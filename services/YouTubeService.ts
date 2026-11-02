@@ -511,20 +511,34 @@ class YouTubeService {
           const mapFormat = (f: any): YouTubeFormatOption => {
             const directUrl = f.url || '';
             const proxyUrl = directUrl ? `${baseUrl}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}` : undefined;
+            const isAudio = f.type === 'audio' || (f.hasAudio && !f.hasVideo);
             return {
               itag: f.itag,
-              quality: f.quality || 'Standard',
-              container: f.container || 'mp4',
-              mimeType: f.mimeType || '',
+              quality: f.quality || (isAudio ? '128 kbps' : 'Standard'),
+              container: isAudio ? 'mp3' : (f.container || 'mp4'),
+              mimeType: f.mimeType || (isAudio ? 'audio/mp4' : 'video/mp4'),
               url: directUrl,
               proxyUrl,
               contentLength: f.contentLength ? Number(f.contentLength) : undefined,
               sizeFormatted: formatBytes(f.contentLength ? Number(f.contentLength) : undefined),
               hasAudio: !!f.hasAudio,
               hasVideo: !!f.hasVideo,
-              type: f.type || (f.hasVideo ? 'video' : 'audio'),
+              type: isAudio ? 'audio' : (f.type || 'video'),
             };
           };
+
+          const progressiveFormats = (data.formats?.progressive || []).map(mapFormat);
+          const videoAdaptiveFormats = (data.formats?.videoAdaptive || []).map(mapFormat);
+          let audioAdaptiveFormats = (data.formats?.audioAdaptive || []).map(mapFormat);
+
+          if (audioAdaptiveFormats.length === 0 && progressiveFormats.length > 0) {
+            audioAdaptiveFormats = progressiveFormats.map((f: YouTubeFormatOption) => ({
+              ...f,
+              type: 'audio' as const,
+              container: 'mp3',
+              quality: '128 kbps',
+            }));
+          }
 
           return {
             id: data.id,
@@ -534,9 +548,9 @@ class YouTubeService {
             duration: data.duration,
             views: data.views,
             formats: {
-              progressive: (data.formats?.progressive || []).map(mapFormat),
-              videoAdaptive: (data.formats?.videoAdaptive || []).map(mapFormat),
-              audioAdaptive: (data.formats?.audioAdaptive || []).map(mapFormat),
+              progressive: progressiveFormats,
+              videoAdaptive: videoAdaptiveFormats,
+              audioAdaptive: audioAdaptiveFormats,
             },
           };
         } catch (err: any) {

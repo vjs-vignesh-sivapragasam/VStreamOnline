@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { StatusBar as DefaultStatusBar } from 'expo-status-bar';
 import Colors from '@/constants/Colors';
+import { useTheme } from '@/contexts/ThemeContext';
 
 
 export type TextProps = DefaultText['props'];
@@ -24,6 +25,15 @@ export function useThemeColor(
   props: { light?: string; dark?: string },
   colorName: keyof typeof Colors.light & keyof typeof Colors.dark
 ) {
+  try {
+    const { theme } = useTheme();
+    if (colorName === 'tint' && theme?.primary) {
+      return theme.primary;
+    }
+  } catch {
+    // Rendered outside ThemeProvider
+  }
+
   const theme = 'dark';
   const colorFromProps = props[theme];
 
@@ -50,8 +60,16 @@ export function TextInput(props: TextInputProps) {
 
 export function ActivityIndicator(props: ActivityIndicatorProps) {
   const { style, color, ...otherProps } = props;
+  let activeThemeColor: string | undefined;
+  try {
+    const { theme } = useTheme();
+    activeThemeColor = theme.primary;
+  } catch {
+    // Fallback
+  }
+
   return (
-    <DefaultActivityIndicator style={style} color={color}  {...otherProps} />
+    <DefaultActivityIndicator style={style} color={color || activeThemeColor} {...otherProps} />
   );
 }
 

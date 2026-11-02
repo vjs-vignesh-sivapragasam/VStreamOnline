@@ -13,6 +13,7 @@ import { PlayerSelectionModal } from '@/components/PlayerSelectionModal';
 import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
 import { YouTubePlayerProvider } from '@/contexts/YouTubePlayerContext';
 import { YouTubeWatchOverlay } from '@/components/youtube/YouTubeWatchOverlay';
+import { AppThemeProvider, useTheme } from '@/contexts/ThemeContext';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -49,7 +50,11 @@ export default function RootLayout() {
     return null;
   }
 
-  return <RootLayoutNav />;
+  return (
+    <AppThemeProvider>
+      <RootLayoutNav />
+    </AppThemeProvider>
+  );
 }
 
 // Custom header background component
@@ -65,32 +70,33 @@ const InvisibleHeaderBackground = () => (
 );
 
 function RootLayoutNav() {
+  const { theme: appTheme } = useTheme();
 
   const GlassDarkTheme: Theme = {
     ...DarkTheme,
     colors: {
       ...DarkTheme.colors,
-      primary: '#535aff',
+      primary: appTheme.primary,
       background: '#0a0a0a',
       card: 'rgba(18, 18, 18, 0.9)',
       border: 'rgba(255, 255, 255, 0.1)',
     }
   };
 
-  const theme = GlassDarkTheme;
+  const navTheme = GlassDarkTheme;
 
   return (
     <View style={styles.container}>
       {/* Global Background Gradient */}
       <LinearGradient
-        colors={['#000000', '#333333', '#666666']}
+        colors={appTheme.gradientColors}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.backgroundGradient}
       />
 
       <ActionSheetProvider>
-        <ThemeProvider value={theme}>
+        <ThemeProvider value={navTheme}>
           <YouTubePlayerProvider>
             <Stack
               screenOptions={{

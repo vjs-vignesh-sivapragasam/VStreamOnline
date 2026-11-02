@@ -17,8 +17,10 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import BottomSpacing from '@/components/BottomSpacing';
+import { useTheme } from '@/contexts/ThemeContext';
 
 const AboutUsScreen: React.FC = () => {
+  const { theme } = useTheme();
   const appVersion = Constants.expoConfig?.version || '1.0.0';
 
   const copyVersion = async () => {
@@ -113,8 +115,8 @@ const AboutUsScreen: React.FC = () => {
 
           {/* Name */}
           <View style={styles.contactRow}>
-            <View style={[styles.contactIconWrap, { backgroundColor: '#535aff20' }]}>
-              <Ionicons name="person-outline" size={18} color="#535aff" />
+            <View style={[styles.contactIconWrap, { backgroundColor: theme.iconBg }]}>
+              <Ionicons name="person-outline" size={18} color={theme.primary} />
             </View>
             <View style={styles.contactTextWrap}>
               <Text style={styles.contactLabel}>Name</Text>
@@ -162,8 +164,8 @@ const AboutUsScreen: React.FC = () => {
           <Text style={styles.cardHeading}>Key Features</Text>
 
           <View style={styles.featureRow}>
-            <View style={[styles.featureIconWrap, { backgroundColor: '#535aff20' }]}>
-              <Ionicons name="film-outline" size={20} color="#535aff" />
+            <View style={[styles.featureIconWrap, { backgroundColor: theme.iconBg }]}>
+              <Ionicons name="film-outline" size={20} color={theme.primary} />
             </View>
             <View style={styles.featureTextWrap}>
               <Text style={styles.featureTitle}>TMDB Integration & Trailers</Text>
@@ -324,7 +326,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderWidth: 1.5,
     borderColor: 'rgba(255, 255, 255, 0.15)',
-    shadowColor: '#535aff',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.35,
     shadowRadius: 14,
@@ -419,7 +421,7 @@ const styles = StyleSheet.create({
   },
   contactValueInteractive: {
     fontSize: 14,
-    color: '#535aff',
+    color: '#ffffff', // replaced static 535aff
     fontWeight: '600',
   },
 
