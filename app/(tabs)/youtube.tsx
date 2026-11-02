@@ -36,9 +36,63 @@ import { isHapticsSupported } from '@/utils/platform';
 
 const { width } = Dimensions.get('window');
 
-const CATEGORY_CHIPS = ['All', 'Trending', 'Tamil Movies', 'Trailers', 'Music', 'Podcasts', 'Gaming'];
-const INITIAL_BATCH_SIZE = 8;
-const LAZY_PAGE_SIZE = 8;
+const CATEGORY_CHIPS = [
+  'All',
+  'Trending',
+  'Tamil Movies',
+  'Trailers',
+  'Music',
+  'News',
+  'Comedy',
+  'Podcasts',
+  'Gaming',
+];
+
+interface CategoryConfig {
+  query: string;
+  sp?: string;
+  refreshSp?: string;
+}
+
+const CATEGORY_MAP: Record<string, CategoryConfig> = {
+  All: {
+    query: 'trending',
+    sp: 'CAMSBAgDEAE%253D', // This week's top trending & viral videos
+    refreshSp: 'CAMSBAgCEAE%253D', // Today's trending / newly viral videos (updates daily)
+  },
+  Trending: {
+    query: 'trending',
+    sp: 'CAMSBAgCEAE%253D', // Today's top trending videos
+    refreshSp: 'CAMSBAgDEAE%253D', // This week's trending
+  },
+  'Tamil Movies': {
+    query: 'latest tamil movies 2026',
+  },
+  Trailers: {
+    query: 'latest official trailers',
+    sp: 'CAMSBAgDEAE%253D',
+  },
+  Music: {
+    query: 'new trending songs',
+    sp: 'CAMSBAgDEAE%253D',
+  },
+  News: {
+    query: 'latest breaking news today',
+    sp: 'CAMSBAgCEAE%253D',
+  },
+  Comedy: {
+    query: 'trending comedy videos',
+    sp: 'CAMSBAgDEAE%253D',
+  },
+  Podcasts: {
+    query: 'popular podcasts',
+    sp: 'CAMSBAgDEAE%253D',
+  },
+  Gaming: {
+    query: 'trending gaming videos',
+    sp: 'CAMSBAgDEAE%253D',
+  },
+};
 
 interface VideoCardProps {
   item: YouTubeVideoItem;
@@ -168,11 +222,10 @@ export default function YouTubeScreen() {
   // Pagination & Deduplication Tracking Refs
   const continuationTokenRef = useRef<string | undefined>(undefined);
   const apiKeyRef = useRef<string | undefined>(undefined);
-  const bufferedVideosRef = useRef<YouTubeVideoItem[]>([]);
   const seenIdsRef = useRef<Set<string>>(new Set());
   const isLoadingMoreRef = useRef(false);
-  const onEndReachedCalledDuringMomentumRef = useRef(true);
   const activeQueryRef = useRef('');
+  const refreshToggleRef = useRef(false);
 
   // My List modal state
   const [myListModalVisible, setMyListModalVisible] = useState(false);
@@ -213,39 +266,46 @@ export default function YouTubeScreen() {
   const [targetVideoItem, setTargetVideoItem] = useState<YouTubeVideoItem | null>(null);
 
   /**
-   * Fetch initial videos for a query or category (limited initial batch).
+   * Fetch videos for a query or category with daily updated feed support.
    */
-  const fetchVideos = async (query: string, isPullToRefresh = false) => {
-    activeQueryRef.current = query;
+  const fetchVideos = async (target: string, isPullToRefresh = false) => {
+    activeQueryRef.current = target;
     setLoadMoreError(null);
     isLoadingMoreRef.current = false;
-    onEndReachedCalledDuringMomentumRef.current = true;
 
     if (!isPullToRefresh) {
       setIsLoading(true);
     }
 
-
-
     try {
-      const targetQuery = query === 'All' ? 'trending' : query;
-      const result = await youTubeService.searchWithContinuation(targetQuery);
+      let resolvedQuery = target;
+      let sp: string | undefined = undefined;
 
-      if (activeQueryRef.current !== query) return;
+      const catConfig = CATEGORY_MAP[target];
+      if (catConfig) {
+        resolvedQuery = catConfig.query;
+        if (isPullToRefresh && catConfig.refreshSp) {
+          // Toggle sp on pull-to-refresh to fetch fresh daily videos
+          refreshToggleRef.current = !refreshToggleRef.current;
+          sp = refreshToggleRef.current ? catConfig.refreshSp : catConfig.sp;
+        } else {
+          sp = catConfig.sp;
+        }
+      }
+
+      const result = await youTubeService.searchWithContinuation(resolvedQuery, sp);
+
+      if (activeQueryRef.current !== target) return;
 
       const allFetched = result.videos || [];
-      const initialBatch = allFetched.slice(0, INITIAL_BATCH_SIZE);
-      const remaining = allFetched.slice(INITIAL_BATCH_SIZE);
-
-      seenIdsRef.current = new Set(initialBatch.map((v) => v.id));
-      bufferedVideosRef.current = remaining;
+      seenIdsRef.current = new Set(allFetched.map((v) => v.id));
       continuationTokenRef.current = result.continuationToken;
       apiKeyRef.current = result.apiKey;
 
-      setVideos(initialBatch);
-      setHasMore(remaining.length > 0 || !!result.continuationToken);
+      setVideos(allFetched);
+      setHasMore(!!result.continuationToken && allFetched.length > 0);
     } catch (err: any) {
-      console.warn('[YouTubeScreen] Error fetching initial videos:', err);
+      console.warn('[YouTubeScreen] Error fetching videos:', err);
       setLoadMoreError(err?.message || 'Failed to load videos. Tap to retry.');
       setHasMore(false);
     } finally {
@@ -262,46 +322,19 @@ export default function YouTubeScreen() {
     async (isRetry = false) => {
       // 1. Prevent duplicate requests while a previous request is already in progress
       if (isLoadingMoreRef.current || isLoading || refreshing) return;
-      if (!isRetry && onEndReachedCalledDuringMomentumRef.current) return;
       if (!hasMore && !isRetry) return;
+
+      const token = continuationTokenRef.current;
+      if (!token) {
+        setHasMore(false);
+        return;
+      }
 
       isLoadingMoreRef.current = true;
       setIsLoadingMore(true);
       setLoadMoreError(null);
 
       try {
-        // 2. Consume from in-memory buffered videos first if available
-        if (bufferedVideosRef.current.length > 0) {
-          const nextSlice = bufferedVideosRef.current.slice(0, LAZY_PAGE_SIZE);
-          bufferedVideosRef.current = bufferedVideosRef.current.slice(LAZY_PAGE_SIZE);
-
-          const uniqueSlice: YouTubeVideoItem[] = [];
-          for (const item of nextSlice) {
-            if (item.id && !seenIdsRef.current.has(item.id)) {
-              seenIdsRef.current.add(item.id);
-              uniqueSlice.push(item);
-            }
-          }
-
-          if (uniqueSlice.length > 0) {
-            setVideos((prev) => [...prev, ...uniqueSlice]);
-          }
-
-          const stillHasMore =
-            bufferedVideosRef.current.length > 0 || !!continuationTokenRef.current;
-          setHasMore(stillHasMore);
-          return;
-        }
-
-
-
-        // 4. Request next continuation batch from YouTube native Innertube API
-        const token = continuationTokenRef.current;
-        if (!token) {
-          setHasMore(false);
-          return;
-        }
-
         const continuationResult = await youTubeService.fetchContinuation(
           token,
           apiKeyRef.current
@@ -313,7 +346,7 @@ export default function YouTubeScreen() {
           apiKeyRef.current = continuationResult.apiKey;
         }
 
-        // 5. Avoid loading duplicate videos
+        // Avoid loading duplicate videos
         const uniqueVideos: YouTubeVideoItem[] = [];
         for (const item of fetchedVideos) {
           if (item.id && !seenIdsRef.current.has(item.id)) {
@@ -323,32 +356,21 @@ export default function YouTubeScreen() {
         }
 
         if (uniqueVideos.length > 0) {
-          const toAppend = uniqueVideos.slice(0, LAZY_PAGE_SIZE);
-          const toBuffer = uniqueVideos.slice(LAZY_PAGE_SIZE);
-          bufferedVideosRef.current = toBuffer;
-
-          setVideos((prev) => [...prev, ...toAppend]);
-          setHasMore(toBuffer.length > 0 || !!continuationTokenRef.current);
-        } else {
-          if (continuationResult.continuationToken) {
-            setHasMore(true);
-          } else {
-            setHasMore(false);
-          }
+          setVideos((prev) => [...prev, ...uniqueVideos]);
         }
+        setHasMore(!!continuationResult.continuationToken);
       } catch (err: any) {
         console.warn('[YouTubeScreen] Error loading more videos:', err);
         setLoadMoreError(err?.message || 'Could not load more videos.');
       } finally {
         isLoadingMoreRef.current = false;
         setIsLoadingMore(false);
-        onEndReachedCalledDuringMomentumRef.current = true;
       }
     },
-    [isLoading, refreshing, hasMore, selectedCategory]
+    [isLoading, refreshing, hasMore]
   );
 
-  useEffect(() => {
+    useEffect(() => {
     fetchVideos(selectedCategory);
   }, [selectedCategory]);
 
@@ -836,9 +858,6 @@ export default function YouTubeScreen() {
           updateCellsBatchingPeriod={50}
           onEndReached={() => handleLoadMore(false)}
           onEndReachedThreshold={0.5}
-          onMomentumScrollBegin={() => {
-            onEndReachedCalledDuringMomentumRef.current = false;
-          }}
           ListFooterComponent={renderListFooter}
           refreshControl={
             <RefreshControl

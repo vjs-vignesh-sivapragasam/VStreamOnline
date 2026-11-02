@@ -38993,7 +38993,8 @@ var server = import_http.default.createServer(async (req, res) => {
     return;
   }
   if (parsedUrl.pathname === "/yt/search") {
-    const q = parsedUrl.searchParams.get("q") || "trending";
+    const rawQ = parsedUrl.searchParams.get("q") || "trending";
+    const q = (rawQ.toLowerCase() === "trending" || rawQ.toLowerCase() === "all") ? "new popular videos" : rawQ;
     try {
       const yt = await getClient("WEB");
       const searchResult = await yt.search(q);
@@ -39173,3 +39174,4 @@ server.on("error", (err) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`YouTube engine listening on http://0.0.0.0:${PORT}`);
 });
+module.exports = { getClient, server };

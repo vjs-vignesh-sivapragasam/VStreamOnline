@@ -208,11 +208,11 @@ class YouTubeService {
   }
 
   /**
-   * Search YouTube videos with pagination continuation support.
+   * Search YouTube videos with pagination continuation support and optional upload date/popularity filter.
    */
-  async searchWithContinuation(query: string = 'trending'): Promise<YouTubeSearchResult> {
+  async searchWithContinuation(query: string = 'trending', sp?: string): Promise<YouTubeSearchResult> {
     // 1. Direct Web Scraping is fastest for search, requires zero local node warm-up, and extracts continuation tokens
-    const webResult = await this.searchViaWebWithContinuation(query);
+    const webResult = await this.searchViaWebWithContinuation(query, sp);
     if (webResult.videos.length > 0) {
       return webResult;
     }
@@ -220,10 +220,11 @@ class YouTubeService {
     // 2. Engine fallback
     try {
       const baseUrl = await this.resolveActiveBaseUrl(1000);
-      const res = await fetch(`${baseUrl}/yt/search?q=${encodeURIComponent(query)}`);
+      const spParam = sp ? `&sp=${encodeURIComponent(sp)}` : '';
+      const res = await fetch(`${baseUrl}/yt/search?q=${encodeURIComponent(query)}${spParam}`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.results)) {
+        if (Array.isArray(data.results) && data.results.length > 0) {
           return { videos: data.results };
         }
       }
@@ -235,8 +236,8 @@ class YouTubeService {
   /**
    * Search YouTube videos (legacy helper returning array).
    */
-  async search(query: string = 'trending'): Promise<YouTubeVideoItem[]> {
-    const result = await this.searchWithContinuation(query);
+  async search(query: string = 'trending', sp?: string): Promise<YouTubeVideoItem[]> {
+    const result = await this.searchWithContinuation(query, sp);
     return result.videos;
   }
 
@@ -244,9 +245,10 @@ class YouTubeService {
    * Direct YouTube web search scraper. Parses ytInitialData from YouTube results page,
    * extracting both initial videos and continuation token.
    */
-  private async searchViaWebWithContinuation(query: string): Promise<YouTubeSearchResult> {
+  private async searchViaWebWithContinuation(query: string, sp?: string): Promise<YouTubeSearchResult> {
     try {
-      const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+      const spParam = sp ? `&sp=${encodeURIComponent(sp)}` : '';
+      const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}${spParam}`;
       const res = await fetch(url, {
         headers: {
           'User-Agent':
@@ -256,13 +258,36 @@ class YouTubeService {
       });
 
       const html = await res.text();
-      const match = html.match(/ytInitialData\s*=\s*({.+?});<\/script>/);
-      if (!match) return { videos: [] };
+      let data: any = null;
+
+      // 1. Robust extraction of ytInitialData supporting multiline JSON
+      const marker = 'ytInitialData';
+      const startIdx = html.indexOf(marker);
+      if (startIdx !== -1) {
+        const jsonStart = html.indexOf('{', startIdx);
+        const scriptEnd = html.indexOf(';</script>', jsonStart);
+        if (scriptEnd !== -1) {
+          try {
+            data = JSON.parse(html.substring(jsonStart, scriptEnd));
+          } catch {}
+        }
+      }
+
+      // 2. Regex fallback if substring boundary varied
+      if (!data) {
+        const match = html.match(/ytInitialData\s*=\s*({.+?});<\/script>/s);
+        if (match) {
+          try {
+            data = JSON.parse(match[1]);
+          } catch {}
+        }
+      }
+
+      if (!data) return { videos: [] };
 
       const keyMatch = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/);
       const apiKey = keyMatch ? keyMatch[1] : 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
 
-      const data = JSON.parse(match[1]);
       const sections =
         data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
 
@@ -273,7 +298,8 @@ class YouTubeService {
         if (sec.continuationItemRenderer) {
           continuationToken =
             sec.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token ||
-            sec.continuationItemRenderer.continuationEndpoint?.continuationItemRenderer?.token;
+            sec.continuationItemRenderer.continuationEndpoint?.continuationItemRenderer?.token ||
+            continuationToken;
         }
 
         const items = sec.itemSectionRenderer?.contents || [];
@@ -281,19 +307,37 @@ class YouTubeService {
           if (item.continuationItemRenderer) {
             continuationToken =
               item.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token ||
-              item.continuationItemRenderer.continuationEndpoint?.continuationItemRenderer?.token;
+              item.continuationItemRenderer.continuationEndpoint?.continuationItemRenderer?.token ||
+              continuationToken;
           }
 
-          const v = item.videoRenderer;
+          const v = item.videoRenderer || item.compactVideoRenderer;
           if (v && v.videoId) {
-            const title = v.title?.runs?.[0]?.text || v.title?.simpleText || 'Untitled';
+            const title =
+              v.title?.runs?.[0]?.text ||
+              v.title?.simpleText ||
+              v.headline?.runs?.[0]?.text ||
+              v.headline?.simpleText ||
+              'Untitled';
             const channel =
-              v.ownerText?.runs?.[0]?.text || v.shortBylineText?.runs?.[0]?.text || 'YouTube';
+              v.ownerText?.runs?.[0]?.text ||
+              v.shortBylineText?.runs?.[0]?.text ||
+              v.longBylineText?.runs?.[0]?.text ||
+              'YouTube';
             const thumbnail =
-              v.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+              v.thumbnail?.thumbnails?.slice(-1)[0]?.url ||
+              `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
             const duration = v.lengthText?.simpleText || '';
-            const views = v.viewCountText?.simpleText || v.shortViewCountText?.simpleText || '';
-            const published = v.publishedTimeText?.simpleText || '';
+            const views =
+              v.viewCountText?.simpleText ||
+              v.viewCountText?.runs?.[0]?.text ||
+              v.shortViewCountText?.simpleText ||
+              v.shortViewCountText?.runs?.[0]?.text ||
+              '';
+            const published =
+              v.publishedTimeText?.simpleText ||
+              v.publishedTimeText?.runs?.[0]?.text ||
+              '';
 
             videos.push({
               id: v.videoId,
@@ -362,7 +406,8 @@ class YouTubeService {
         if (item.continuationItemRenderer) {
           nextContinuationToken =
             item.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token ||
-            item.continuationItemRenderer.continuationEndpoint?.continuationItemRenderer?.token;
+            item.continuationItemRenderer.continuationEndpoint?.continuationItemRenderer?.token ||
+            nextContinuationToken;
         }
 
         const subItems = item.itemSectionRenderer?.contents || (item.videoRenderer ? [item] : []);
@@ -370,19 +415,37 @@ class YouTubeService {
           if (sub.continuationItemRenderer) {
             nextContinuationToken =
               sub.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token ||
-              sub.continuationItemRenderer.continuationEndpoint?.continuationItemRenderer?.token;
+              sub.continuationItemRenderer.continuationEndpoint?.continuationItemRenderer?.token ||
+              nextContinuationToken;
           }
 
-          const v = sub.videoRenderer;
+          const v = sub.videoRenderer || sub.compactVideoRenderer;
           if (v && v.videoId) {
-            const title = v.title?.runs?.[0]?.text || v.title?.simpleText || 'Untitled';
+            const title =
+              v.title?.runs?.[0]?.text ||
+              v.title?.simpleText ||
+              v.headline?.runs?.[0]?.text ||
+              v.headline?.simpleText ||
+              'Untitled';
             const channel =
-              v.ownerText?.runs?.[0]?.text || v.shortBylineText?.runs?.[0]?.text || 'YouTube';
+              v.ownerText?.runs?.[0]?.text ||
+              v.shortBylineText?.runs?.[0]?.text ||
+              v.longBylineText?.runs?.[0]?.text ||
+              'YouTube';
             const thumbnail =
-              v.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+              v.thumbnail?.thumbnails?.slice(-1)[0]?.url ||
+              `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
             const duration = v.lengthText?.simpleText || '';
-            const views = v.viewCountText?.simpleText || v.shortViewCountText?.simpleText || '';
-            const published = v.publishedTimeText?.simpleText || '';
+            const views =
+              v.viewCountText?.simpleText ||
+              v.viewCountText?.runs?.[0]?.text ||
+              v.shortViewCountText?.simpleText ||
+              v.shortViewCountText?.runs?.[0]?.text ||
+              '';
+            const published =
+              v.publishedTimeText?.simpleText ||
+              v.publishedTimeText?.runs?.[0]?.text ||
+              '';
 
             videos.push({
               id: v.videoId,
