@@ -136,6 +136,14 @@ class MyListManager {
     this.persist();
   }
 
+  // Clear all items from MyList
+  async clearAll(): Promise<void> {
+    this.ensureLoaded();
+    this.inMemoryList = [];
+    this.notifyListeners();
+    this.persist();
+  }
+
   // Toggle in/out of MyList
   async toggleMyList(item: Omit<MyListItem, 'addedAt'>): Promise<boolean> {
     if (this.isInMyList(item.id) || this.isInMyList(item.title)) {

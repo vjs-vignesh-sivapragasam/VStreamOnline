@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
+import { useTheme } from '@/contexts/ThemeContext';
 import {
   useTamilMVCatalog,
   Language,
@@ -80,7 +81,7 @@ const LazySection = ({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
-  console.log('[HOME_BOOT] 1. HomeScreen rendered');
+  const { theme } = useTheme();
   const [language, setLanguage] = useState<Language>('tamil');
   const [activeCategory, setActiveCategory] = useState<{
     category: Category;
@@ -112,6 +113,10 @@ export default function HomeScreen() {
     refresh();
     setTimeout(() => setRefreshing(false), 1500);
   }, [refresh]);
+
+  useEffect(() => {
+    startEmbeddedNodeServer();
+  }, []);
 
   const handleLanguageChange = async (newLanguage: Language) => {
     if (await isHapticsSupported()) {
@@ -170,8 +175,8 @@ export default function HomeScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor="#535aff"
-            colors={['#535aff']}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
           />
         }
       >
@@ -222,7 +227,7 @@ export default function HomeScreen() {
           {/* Loading state */}
           {loading && (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator color="#535aff" size="large" />
+              <ActivityIndicator color={theme.primary} size="large" />
               <Text style={styles.loadingText}>
                 Loading content…
               </Text>

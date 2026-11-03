@@ -15,6 +15,7 @@ import { isHapticsSupported } from '@/utils/platform';
 import BottomSpacing from '@/components/BottomSpacing';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
+import { useTheme } from '@/contexts/ThemeContext';
 import {
   fetchTamilMVRecentlyAdded,
   searchTamilMV,
@@ -130,6 +131,7 @@ const SearchMovieCard = ({
 // ─── Search Screen ────────────────────────────────────────────────────────────
 
 const SearchScreen = () => {
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{ query?: string }>();
   const [query, setQuery]                           = useState(params.query || '');
   const [moviesList, setMoviesList]                 = useState<GroupedItem[]>([]);
@@ -297,16 +299,6 @@ const SearchScreen = () => {
       <View style={styles.headerContainer}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Search</Text>
-
-          {/* Web view Shortcut in Header */}
-          <TouchableOpacity
-            style={styles.webViewHeaderButton}
-            onPress={handleOpenWebView}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="globe-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-            <Text style={styles.webViewHeaderButtonText}>Web view</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -328,7 +320,7 @@ const SearchScreen = () => {
             autoCapitalize="none"
           />
           {isSearchingLive && (
-            <ActivityIndicator size="small" color="#535aff" style={{ marginRight: 6 }} />
+            <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 6 }} />
           )}
           {query.length > 0 && (
             <Pressable onPress={handleClearQuery} style={styles.clearButton} hitSlop={8}>
@@ -358,7 +350,7 @@ const SearchScreen = () => {
         {/* Loading indicator */}
         {isLoading && (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#535aff" />
+            <ActivityIndicator size="large" color={theme.primary} />
             <Text style={styles.loadingText}>Loading recently added movies…</Text>
           </View>
         )}
@@ -381,20 +373,31 @@ const SearchScreen = () => {
         {!isLoading && moviesList.length === 0 && query.trim() === '' && (
           <View style={styles.emptyStateContainer}>
             <View style={styles.emptyStateIconContainer}>
-              <Ionicons name="film-outline" color="#535aff" size={48} />
+              <Ionicons name="film-outline" color={theme.primary} size={48} />
             </View>
             <Text style={styles.emptyStateTitle}>Discover Movies</Text>
             <Text style={styles.emptyStateSubtitle}>
-              Search for any movie above, or tap "Recently added" to browse the latest releases.
+              Search for any movie above, or browse recently added releases and Web view.
             </Text>
-            <TouchableOpacity
-              style={styles.loadRecentBtn}
-              onPress={handleRecentlyAddedPress}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="time-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-              <Text style={styles.loadRecentBtnText}>Recently added</Text>
-            </TouchableOpacity>
+            <View style={styles.emptyStateActionsRow}>
+              <TouchableOpacity
+                style={[styles.loadRecentBtn, { backgroundColor: theme.primary }]}
+                onPress={handleRecentlyAddedPress}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="time-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.loadRecentBtnText}>Recently added</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.webViewBtn}
+                onPress={handleOpenWebView}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="globe-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.webViewBtnText}>Web view</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -448,7 +451,7 @@ const SearchScreen = () => {
         {!isLoading && (moviesList.length > 0 || liveSearchResults.length > 0) && filteredMovies.length === 0 && query.trim() !== '' && (
           <View style={styles.emptyStateContainer}>
             <View style={styles.emptyStateIconContainer}>
-              <Ionicons name="search-outline" color="#535aff" size={48} />
+              <Ionicons name="search-outline" color={theme.primary} size={48} />
             </View>
             <Text style={styles.emptyStateTitle}>No movies found</Text>
             <Text style={styles.emptyStateSubtitle}>
@@ -459,7 +462,7 @@ const SearchScreen = () => {
                 <Text style={styles.retryButtonText}>Clear Search</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.retryButton, { backgroundColor: '#535aff', borderColor: '#535aff' }]}
+                style={[styles.retryButton, { backgroundColor: theme.primary, borderColor: theme.primary }]}
                 onPress={handleOpenWebView}
               >
                 <Text style={styles.retryButtonText}>Open Web view</Text>
@@ -495,25 +498,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#ffffff',
     letterSpacing: -0.3,
-  },
-  webViewHeaderButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#535aff',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowColor: '#535aff',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-  webViewHeaderButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.2,
   },
   searchSection: {
     paddingHorizontal: 16,
@@ -608,16 +592,38 @@ const styles = StyleSheet.create({
     maxWidth: 320,
     marginBottom: 16,
   },
+  emptyStateActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
   loadRecentBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#535aff',
     paddingVertical: 11,
-    paddingHorizontal: 22,
+    paddingHorizontal: 20,
     borderRadius: 22,
-    marginTop: 8,
   },
   loadRecentBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  webViewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(83, 90, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(83, 90, 255, 0.4)',
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+    borderRadius: 22,
+  },
+  webViewBtnText: {
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 14,

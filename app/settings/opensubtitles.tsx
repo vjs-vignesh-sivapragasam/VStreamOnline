@@ -11,6 +11,7 @@ import {
     Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@/contexts/ThemeContext';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
@@ -22,6 +23,7 @@ import BottomSpacing from '@/components/BottomSpacing';
 
 
 const OpenSubtitlesConfigScreen: React.FC = () => {
+    const { theme } = useTheme();
     const [apiKey, setApiKey] = useState('');
     const [useDefaultKey, setUseDefaultKey] = useState(true);
     const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['en']);
@@ -226,7 +228,7 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#535aff" />
+                    <ActivityIndicator size="large" color={theme.primary} />
                     <Text style={styles.loadingText}>Loading configuration...</Text>
                 </View>
             </SafeAreaView>
@@ -240,7 +242,7 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
                 style={styles.keyboardAvoid}>
                 <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                     <View style={styles.header}>
-                        <Ionicons name="settings-outline" size={40} color="#535aff" />
+                        <Ionicons name="settings-outline" size={40} color={theme.primary} />
                         <Text style={styles.title}>OpenSubtitles Configuration</Text>
                         <Text style={styles.subtitle}>
                             Configure your API credentials and subtitle preferences
@@ -258,18 +260,18 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
                                 <View style={styles.toggleOption}>
                                     <View style={[
                                         styles.radioButton,
-                                        useDefaultKey && styles.radioButtonSelected
+                                        useDefaultKey && [styles.radioButtonSelected, { borderColor: theme.primary }]
                                     ]}>
-                                        {useDefaultKey && <View style={styles.radioButtonInner} />}
+                                        {useDefaultKey && <View style={[styles.radioButtonInner, { backgroundColor: theme.primary }]} />}
                                     </View>
                                     <Text style={styles.toggleText}>Default</Text>
                                 </View>
                                 <View style={styles.toggleOption}>
                                     <View style={[
                                         styles.radioButton,
-                                        !useDefaultKey && styles.radioButtonSelected
+                                        !useDefaultKey && [styles.radioButtonSelected, { borderColor: theme.primary }]
                                     ]}>
-                                        {!useDefaultKey && <View style={styles.radioButtonInner} />}
+                                        {!useDefaultKey && <View style={[styles.radioButtonInner, { backgroundColor: theme.primary }]} />}
                                     </View>
                                     <Text style={styles.toggleText}>Custom API Key</Text>
                                 </View>
@@ -307,8 +309,8 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
                             )}
                             
                             {useDefaultKey && (
-                                <View style={styles.infoBox}>
-                                    <Ionicons name="information-circle-outline" size={18} color="#535aff" />
+                                <View style={[styles.infoBox, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' }]}>
+                                    <Ionicons name="information-circle-outline" size={18} color={theme.primary} />
                                     <Text style={styles.infoText}>
                                         Using the default API key for OpenSubtitles (Rate-Limited)
                                     </Text>
@@ -360,7 +362,7 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
                             <TouchableOpacity
                                 style={[
                                     styles.button,
-                                    styles.saveButton,
+                                    [styles.saveButton, { backgroundColor: theme.primary }],
                                     (!useDefaultKey && !apiKey.trim()) && styles.disabledButton,
                                 ]}
                                 onPress={saveConfiguration}
@@ -464,13 +466,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     radioButtonSelected: {
-        borderColor: '#535aff',
+        borderColor: '#ffffff',
     },
     radioButtonInner: {
         width: 10,
         height: 10,
         borderRadius: 5,
-        backgroundColor: '#535aff',
+        backgroundColor: '#ffffff',
     },
     toggleText: {
         fontSize: 14,
@@ -507,10 +509,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 8,
         padding: 12,
-        backgroundColor: 'rgba(83, 90, 255, 0.1)',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: 'rgba(83, 90, 255, 0.3)',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
         marginTop: 12,
     },
     infoText: {

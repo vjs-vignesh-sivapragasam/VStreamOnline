@@ -14,6 +14,7 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from '@/components/Themed';
 import BottomSpacing from '@/components/BottomSpacing';
+import { useTheme } from '@/contexts/ThemeContext';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import * as Haptics from 'expo-haptics';
@@ -30,15 +31,18 @@ import {
 } from '@/hooks/useTamilMv';
 
 const PRESET_DOMAINS = [
-  'https://www.1tamilmv.style',
-  'https://www.1tamilmv.rocks',
-  'https://1tamilmv.style',
-  'https://1tamilmv.capital',
-  'https://www.1tamilmv.cards',
   'https://www.1tamilmv.solar',
+  'https://www.1tamilmv.cards',
+  'https://www.1tamilmv.pizza',
+  'https://www.1tamilmv.fi',
+  'https://www.1tamilmv.live',
+  'https://www.1tamilmv.pm',
+  'https://www.1tamilmv.yt',
+  'https://www.1tamilmv.mx',
 ];
 
 const TamilMvSettingsScreen: React.FC = () => {
+  const { theme } = useTheme();
   const [activeUrl, setActiveUrl] = useState<string>(DEFAULT_TAMILMV_BASE_URL);
   const [urlInput, setUrlInput] = useState<string>(DEFAULT_TAMILMV_BASE_URL);
   const [isPinging, setIsPinging] = useState<boolean>(false);
@@ -165,30 +169,7 @@ const TamilMvSettingsScreen: React.FC = () => {
   const handleSelectPreset = async (preset: string) => {
     await triggerHaptic();
     setUrlInput(preset);
-    setIsPinging(true);
-    setLastPingedUrl(preset);
-    try {
-      const result = await pingTamilMV(preset);
-      setPingResult(result);
-      if (result.success && result.rssWorking) {
-        await setTamilMVBaseUrl(preset);
-        setActiveUrl(preset);
-        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-        showAlert(
-          'Domain Connected & Saved',
-          `${preset} is live and has been configured and saved as your active TamilMV source.`
-        );
-      }
-    } catch (e: any) {
-      setPingResult({
-        success: false,
-        latencyMs: 0,
-        rssWorking: false,
-        message: `Ping failed: ${e?.message || 'Unknown error'}`,
-      });
-    } finally {
-      setIsPinging(false);
-    }
+    await runPing(preset);
   };
 
   const getStatusBadge = () => {
@@ -253,7 +234,7 @@ const TamilMvSettingsScreen: React.FC = () => {
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.iconCircle}>
-              <Ionicons name="globe-outline" size={28} color="#535aff" />
+              <Ionicons name="globe-outline" size={28} color={theme.primary} />
             </View>
             <Text style={styles.title}>TamilMV Source</Text>
             <Text style={styles.subtitle}>
@@ -343,9 +324,9 @@ const TamilMvSettingsScreen: React.FC = () => {
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardSectionTitle}>AUTO-DETECT DOMAIN</Text>
-              <View style={styles.autoDetectBadge}>
-                <Ionicons name="sparkles" size={12} color="#535aff" style={{ marginRight: 4 }} />
-                <Text style={styles.autoDetectBadgeText}>Google Search</Text>
+              <View style={[styles.autoDetectBadge, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' }]}>
+                <Ionicons name="sparkles" size={12} color={theme.primary} style={{ marginRight: 4 }} />
+                <Text style={[styles.autoDetectBadgeText, { color: theme.primaryLight || theme.primary }]}>Google Search</Text>
               </View>
             </View>
 
@@ -355,7 +336,7 @@ const TamilMvSettingsScreen: React.FC = () => {
 
             {isAutoDetecting && (
               <View style={styles.detectingProgressBox}>
-                <ActivityIndicator size="small" color="#535aff" style={{ marginRight: 10 }} />
+                <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 10 }} />
                 <Text style={styles.detectingProgressText} numberOfLines={2}>
                   {detectProgressText || 'Detecting working domain...'}
                 </Text>
@@ -365,6 +346,7 @@ const TamilMvSettingsScreen: React.FC = () => {
             <TouchableOpacity
               style={[
                 styles.autoDetectPrimaryBtn,
+                { backgroundColor: theme.primary, shadowColor: theme.primary },
                 (isAutoDetecting || isPinging) && styles.buttonDisabled,
               ]}
               onPress={handleAutoDetectDomain}
@@ -397,7 +379,7 @@ const TamilMvSettingsScreen: React.FC = () => {
                   style={styles.textInput}
                   value={urlInput}
                   onChangeText={setUrlInput}
-                  placeholder="https://www.1tamilmv.style"
+                  placeholder="https://www.1tamilmv.solar"
                   placeholderTextColor="#666666"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -423,7 +405,10 @@ const TamilMvSettingsScreen: React.FC = () => {
                   return (
                     <TouchableOpacity
                       key={domain}
-                      style={[styles.presetPill, isSelected && styles.presetPillActive]}
+                      style={[
+                        styles.presetPill,
+                        isSelected && [styles.presetPillActive, { backgroundColor: theme.primary + '20', borderColor: theme.primary }],
+                      ]}
                       onPress={() => handleSelectPreset(domain)}
                       activeOpacity={0.7}
                     >
@@ -439,7 +424,11 @@ const TamilMvSettingsScreen: React.FC = () => {
             {/* Action Buttons */}
             <View style={styles.actionsContainer}>
               <TouchableOpacity
-                style={[styles.saveButton, isSaving && styles.buttonDisabled]}
+                style={[
+                  styles.saveButton,
+                  { backgroundColor: theme.primary },
+                  isSaving && styles.buttonDisabled,
+                ]}
                 onPress={handleSave}
                 disabled={isSaving}
                 activeOpacity={0.8}
@@ -467,7 +456,7 @@ const TamilMvSettingsScreen: React.FC = () => {
 
           {/* Info Card */}
           <View style={styles.infoCard}>
-            <Ionicons name="information-circle" size={20} color="#535aff" style={{ marginRight: 10 }} />
+            <Ionicons name="information-circle" size={20} color={theme.primary} style={{ marginRight: 10 }} />
             <Text style={styles.infoText}>
               TamilMV frequently rotates domains or gets blocked by ISPs. Your chosen domain is saved permanently in AsyncStorage so you don't have to set it each time. The app will also automatically fallback to working mirrors if needed.
             </Text>
@@ -556,10 +545,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#535aff',
+    backgroundColor: '#ffffff',
     paddingVertical: 13,
     borderRadius: 10,
-    shadowColor: '#535aff',
+    shadowColor: 'transparent',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
@@ -733,7 +722,7 @@ const styles = StyleSheet.create({
   },
   presetPillActive: {
     backgroundColor: 'rgba(83, 90, 255, 0.15)',
-    borderColor: '#535aff',
+    borderColor: '#ffffff',
   },
   presetPillText: {
     fontSize: 12,
@@ -751,7 +740,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#535aff',
+    backgroundColor: '#ffffff',
     paddingVertical: 13,
     borderRadius: 10,
   },

@@ -9,10 +9,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomSpacing from '@/components/BottomSpacing';
 import Constants from 'expo-constants';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
+import { useTheme } from '@/contexts/ThemeContext';
+import { ThemeSelector } from '@/components/settings/ThemeSelector';
+import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 
 const SettingsScreen = () => {
   const router = useRouter();
   const appVersion = Constants.expoConfig?.version;
+  const { theme } = useTheme();
 
   const sourceList: { title: string, route: string, icon: keyof typeof Ionicons.glyphMap }[] = [
     { title: 'TamilMV Source', route: '/settings/tamilmv', icon: 'globe-outline' },
@@ -60,11 +64,11 @@ const SettingsScreen = () => {
         onPressOut={() => setIsPressed(false)}
       >
         <View style={styles.leftContent}>
-          <View style={styles.iconContainer}>
+          <View style={[styles.iconContainer, { backgroundColor: theme.iconBg }]}>
             <Ionicons
               name={icon}
               size={22}
-              color='#535aff'
+              color={theme.primary}
             />
           </View>
           <Text style={styles.settingText}>
@@ -100,6 +104,26 @@ const SettingsScreen = () => {
       >
         <View style={styles.headerContainer}>
           <Text style={styles.headerTitle}>Settings</Text>
+        </View>
+
+        {/* Appearance & Theme Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>
+            APPEARANCE
+          </Text>
+          <View style={styles.themeSectionWrapper}>
+            <ThemeSelector showPreviewBar={false} showNavigationLink={true} />
+          </View>
+        </View>
+
+        {/* Storage & Data Cleanup Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>
+            STORAGE & DATA CLEANUP
+          </Text>
+          <View style={styles.themeSectionWrapper}>
+            <StorageCleanupCard />
+          </View>
         </View>
         
         {/* Content Sources Section */}
@@ -207,6 +231,9 @@ const styles = StyleSheet.create({
     marginRight: 20,
     letterSpacing: 0.5,
   },
+  themeSectionWrapper: {
+    marginHorizontal: 16,
+  },
   settingsGroup: {
     marginHorizontal: 16,
     overflow: 'hidden',
@@ -230,7 +257,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: '#1a1a2e',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
