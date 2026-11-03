@@ -3,26 +3,33 @@ const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
 
-// ── 1. Patch iOS script: ios-build-native-modules.sh ──────────────────────────
-const iosScriptPath = path.join(
-  rootDir,
-  'node_modules',
-  'nodejs-mobile-react-native',
-  'scripts',
-  'ios-build-native-modules.sh'
-);
+// ── 1. Patch iOS scripts: ios-build-native-modules.sh & ios-sign-native-modules.sh ─
+const iosScripts = [
+  'ios-build-native-modules.sh',
+  'ios-sign-native-modules.sh',
+];
 
-if (fs.existsSync(iosScriptPath)) {
-  let content = fs.readFileSync(iosScriptPath, 'utf8');
-  if (content.includes('"$CURRENT_NODE_VERSION" -ne "$DESIRED_NODE_VERSION"')) {
-    content = content.replace(
-      '"$CURRENT_NODE_VERSION" -ne "$DESIRED_NODE_VERSION"',
-      '"$CURRENT_NODE_VERSION" -lt "$DESIRED_NODE_VERSION"'
-    );
-    fs.writeFileSync(iosScriptPath, content, 'utf8');
-    console.log('✅ Patched nodejs-mobile-react-native ios-build-native-modules.sh');
-  } else {
-    console.log('ℹ️ nodejs-mobile-react-native ios script already patched or check not found');
+for (const scriptName of iosScripts) {
+  const scriptPath = path.join(
+    rootDir,
+    'node_modules',
+    'nodejs-mobile-react-native',
+    'scripts',
+    scriptName
+  );
+
+  if (fs.existsSync(scriptPath)) {
+    let content = fs.readFileSync(scriptPath, 'utf8');
+    if (content.includes('"$CURRENT_NODE_VERSION" -ne "$DESIRED_NODE_VERSION"')) {
+      content = content.replace(
+        '"$CURRENT_NODE_VERSION" -ne "$DESIRED_NODE_VERSION"',
+        '"$CURRENT_NODE_VERSION" -lt "$DESIRED_NODE_VERSION"'
+      );
+      fs.writeFileSync(scriptPath, content, 'utf8');
+      console.log(`✅ Patched nodejs-mobile-react-native ${scriptName}`);
+    } else {
+      console.log(`ℹ️ nodejs-mobile-react-native ${scriptName} already patched or check not found`);
+    }
   }
 }
 
