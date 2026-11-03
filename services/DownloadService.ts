@@ -1,6 +1,8 @@
 import { Paths, Directory, File, DownloadTask, DownloadProgress } from 'expo-file-system';
+import { Alert } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import { StorageKeys, storageService } from '@/utils/StorageService';
-import { getDevHostIp } from '@/services/YouTubeService';
+import { getDevHostIp, youTubeService } from '@/services/YouTubeService';
 import {
   StreamingServerClient,
   TorrentStats,
@@ -537,7 +539,6 @@ class DownloadManager {
     let downloadUrl = params.streamUrl;
     let directUrl = downloadUrl;
 
-    // Unwrap if already a proxy URL
     if (downloadUrl.includes('/yt/proxy-stream')) {
       try {
         const u = new URL(downloadUrl);
@@ -547,19 +548,33 @@ class DownloadManager {
     }
 
     const isGoogleVideo = directUrl.includes('googlevideo.com');
-    // On native devices, direct Google CDN download with YouTube User-Agent header bypasses
-    // local server dependency, avoiding port 11472 issues and double-proxy wrapping.
-    const targetDownloadUrl = isGoogleVideo ? directUrl : downloadUrl;
+    const isAdaptiveOrAudio = directUrl.includes('mime=audio') || !directUrl.includes('ratebypass=yes') || params.fileName?.endsWith('.mp3');
+
+    // Use fast chunked proxy for adaptive/audio streams (Google CDN throttles unchunked adaptive streams)
+    let targetDownloadUrl = downloadUrl;
+    if (isGoogleVideo) {
+      if (isAdaptiveOrAudio) {
+        const base = youTubeService.getActiveBaseUrl() || (getDevHostIp() ? `http://${getDevHostIp()}:11472` : 'http://127.0.0.1:11472');
+        targetDownloadUrl = `${base}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}`;
+      } else {
+        targetDownloadUrl = directUrl;
+      }
+    }
     item.streamUrl = targetDownloadUrl;
+
+    const isIosClient = directUrl.includes('c=IOS');
+    const directHeaders = isGoogleVideo && targetDownloadUrl === directUrl
+      ? {
+          'User-Agent': isIosClient
+            ? 'com.google.ios.youtube/19.29.1 (iPhone14,3; U; CPU OS 17_5_1 like Mac OS X)'
+            : 'com.google.android.youtube/19.29.37 (Linux; U; Android 11)',
+          'Accept': '*/*',
+        }
+      : undefined;
 
     const task = new DownloadTask(targetDownloadUrl, targetFile, {
       sessionType: 'foreground',
-      headers: isGoogleVideo
-        ? {
-            'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip',
-            'Accept': '*/*',
-          }
-        : undefined,
+      headers: directHeaders,
       onProgress: (progressData: DownloadProgress) => {
         if (item!.status !== 'downloading') return;
         const now = Date.now();
@@ -628,7 +643,7 @@ class DownloadManager {
         if (isGoogleVideo && targetDownloadUrl === directUrl) {
           try {
             const devIp = getDevHostIp();
-            const base = devIp ? `http://${devIp}:11472` : 'http://127.0.0.1:11472';
+            const base = youTubeService.getActiveBaseUrl() || (devIp ? `http://${devIp}:11472` : 'http://127.0.0.1:11472');
             const proxyFallbackUrl = `${base}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}`;
             console.log('[DownloadService] Direct download failed, attempting proxy fallback:', err?.message);
 
@@ -808,6 +823,52 @@ class DownloadManager {
     this.inMemoryDownloads = this.inMemoryDownloads.filter((d) => !d.id.startsWith('yt_') && d.sourceType !== 'direct');
     this.notifyListeners();
     this.persistDownloadsImmediately();
+  }
+
+  // Export or share a downloaded file to Files Explorer, Gallery, or external applications
+  async exportOrShareDownload(idOrItem: string | DownloadItem): Promise<boolean> {
+    const item = typeof idOrItem === 'string'
+      ? this.inMemoryDownloads.find((d) => d.id === idOrItem)
+      : idOrItem;
+
+    if (!item) {
+      Alert.alert('Download Not Found', 'Could not locate the download details.');
+      return false;
+    }
+
+    if (item.status !== 'completed' || !item.fileUri) {
+      Alert.alert('Download Incomplete', 'Please wait until the download finishes before exporting.');
+      return false;
+    }
+
+    try {
+      const file = new File(item.fileUri);
+      if (!file.exists) {
+        Alert.alert('File Missing', 'The downloaded file was not found on local storage.');
+        return false;
+      }
+
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert('Sharing Unavailable', 'Native file sharing is not supported on this platform.');
+        return false;
+      }
+
+      const name = item.fileName || item.title || 'media';
+      const isAudio = name.endsWith('.mp3') || name.endsWith('.m4a') || name.endsWith('.aac') || name.endsWith('.opus');
+      const mimeType = isAudio ? 'audio/mp4' : 'video/mp4';
+
+      await Sharing.shareAsync(item.fileUri, {
+        mimeType,
+        dialogTitle: `Export "${item.title}"`,
+        UTI: isAudio ? 'public.audio' : 'public.movie',
+      });
+      return true;
+    } catch (err: any) {
+      console.warn('[DownloadService] Share/Export error:', err?.message || err);
+      Alert.alert('Export Failed', err?.message || 'Could not export file.');
+      return false;
+    }
   }
 }
 

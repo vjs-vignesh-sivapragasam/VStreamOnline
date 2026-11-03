@@ -39468,6 +39468,49 @@ var server = import_http.default.createServer(async (req, res) => {
     }
     return;
   }
+  if (parsedUrl.pathname === "/yt/download") {
+    const v = parsedUrl.searchParams.get("v");
+    const downloadType = parsedUrl.searchParams.get("type") || "audio";
+    const itagParam = parsedUrl.searchParams.get("itag");
+    if (!v) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing v param" }));
+      return;
+    }
+    try {
+      const yt = await getClient("WEB");
+      const downloadOptions = {
+        type: downloadType === "audio" ? "audio" : "video+audio",
+        quality: "best",
+        format: "mp4"
+      };
+      if (itagParam) {
+        downloadOptions.itag = parseInt(itagParam, 10);
+      }
+      console.log(`[yt-server] 📥 Starting download for ${v}, type=${downloadType}, itag=${itagParam || "auto"}`);
+      const stream = await yt.download(v, downloadOptions);
+      res.writeHead(200, {
+        "Content-Type": downloadType === "audio" ? "audio/mp4" : "video/mp4",
+        "Access-Control-Allow-Origin": "*",
+        "Content-Disposition": `attachment; filename="${v}.${downloadType === "audio" ? "mp3" : "mp4"}"`
+      });
+      for await (const chunk of stream) {
+        if (req.destroyed || res.destroyed || res.writableEnded) break;
+        const ok = res.write(chunk);
+        if (!ok) {
+          await new Promise((resolve) => res.once("drain", resolve));
+        }
+      }
+      if (!res.writableEnded) {
+        res.end();
+      }
+    } catch (dErr) {
+      console.warn("[yt-server] Download endpoint error:", dErr.message);
+      if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: dErr.message }));
+    }
+    return;
+  }
   if (parsedUrl.pathname === "/yt/proxy-stream") {
     const targetUrl = parsedUrl.searchParams.get("url");
     if (!targetUrl) {
@@ -39476,53 +39519,137 @@ var server = import_http.default.createServer(async (req, res) => {
       return;
     }
     try {
-      const headers = {
-        "User-Agent": "com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip"
-      };
+      const isIos = targetUrl.includes("c=IOS");
+      const baseUA = isIos
+        ? "com.google.ios.youtube/19.29.1 (iPhone14,3; U; CPU OS 17_5_1 like Mac OS X)"
+        : "com.google.android.youtube/19.29.37 (Linux; U; Android 11)";
+
+      // If client sent Range (e.g. video player seeking), forward range request directly
       if (req.headers.range) {
-        headers["Range"] = req.headers.range;
-      }
-      console.log(`[yt-server] \u{1F4E1} Proxy stream ${req.method} request. Range: ${req.headers.range || "all"}`);
-      const upstream = await fetch(targetUrl, {
-        method: req.method === "HEAD" ? "HEAD" : "GET",
-        headers
-      });
-      console.log(`[yt-server] \u{1F4E5} Upstream CDN response status: ${upstream.status}, size: ${upstream.headers.get("content-length") || "unknown"}`);
-      const resHeaders = {
-        "Content-Type": upstream.headers.get("content-type") || "video/mp4",
-        "Accept-Ranges": "bytes",
-        "Access-Control-Allow-Origin": "*"
-      };
-      if (upstream.headers.get("content-length")) {
-        resHeaders["Content-Length"] = upstream.headers.get("content-length");
-      }
-      if (upstream.headers.get("content-range")) {
-        resHeaders["Content-Range"] = upstream.headers.get("content-range");
-      }
-      res.writeHead(upstream.status, resHeaders);
-      if (req.method === "HEAD" || !upstream.body) {
-        res.end();
+        console.log(`[yt-server] 📡 Proxy stream ${req.method} with Range: ${req.headers.range}`);
+        const upstream = await fetch(targetUrl, {
+          method: req.method === "HEAD" ? "HEAD" : "GET",
+          headers: {
+            "User-Agent": baseUA,
+            "Range": req.headers.range
+          }
+        });
+        const resHeaders = {
+          "Content-Type": upstream.headers.get("content-type") || "video/mp4",
+          "Accept-Ranges": "bytes",
+          "Access-Control-Allow-Origin": "*"
+        };
+        if (upstream.headers.get("content-length")) resHeaders["Content-Length"] = upstream.headers.get("content-length");
+        if (upstream.headers.get("content-range")) resHeaders["Content-Range"] = upstream.headers.get("content-range");
+        res.writeHead(upstream.status, resHeaders);
+        if (req.method === "HEAD" || !upstream.body) {
+          res.end();
+          return;
+        }
+        const reader = upstream.body.getReader();
+        while (true) {
+          if (req.destroyed || res.destroyed || res.writableEnded) {
+            try { reader.cancel(); } catch {}
+            break;
+          }
+          const { done, value } = await reader.read();
+          if (done) break;
+          const ok = res.write(value);
+          if (!ok) await new Promise((resolve) => res.once("drain", resolve));
+        }
+        if (!res.writableEnded) res.end();
         return;
       }
-      const reader = upstream.body.getReader();
-      while (true) {
-        if (req.destroyed || res.destroyed || res.writableEnded) {
-          try {
-            reader.cancel();
-          } catch {
+
+      // If NO Range header (e.g. DownloadTask downloading full file):
+      // YouTube CDN throttles non-ranged adaptive streams to real-time speed (~16KB/s) or drops connection.
+      // To bypass throttling and 403, we stream in 2MB chunked byte ranges at full speed!
+      let totalLength = 0;
+      try {
+        const uObj = new URL(targetUrl);
+        const clenParam = uObj.searchParams.get("clen");
+        if (clenParam) totalLength = parseInt(clenParam, 10);
+      } catch {}
+
+      if (!totalLength) {
+        // Probe first byte to get Content-Range and total file size
+        try {
+          const probe = await fetch(targetUrl, {
+            headers: { "User-Agent": baseUA, "Range": "bytes=0-0" }
+          });
+          const cr = probe.headers.get("content-range");
+          if (cr && cr.includes("/")) {
+            totalLength = parseInt(cr.split("/")[1], 10);
           }
-          break;
+        } catch {}
+      }
+
+      const contentType = targetUrl.includes("mime=audio") || targetUrl.includes("audio")
+        ? "audio/mp4"
+        : "video/mp4";
+
+      if (totalLength && totalLength > 0) {
+        console.log(`[yt-server] ⚡ Chunked fast-stream starting for totalLength=${totalLength}`);
+        res.writeHead(200, {
+          "Content-Type": contentType,
+          "Content-Length": String(totalLength),
+          "Accept-Ranges": "bytes",
+          "Access-Control-Allow-Origin": "*"
+        });
+        const chunkSize = 2 * 1024 * 1024; // 2MB chunks
+        let start = 0;
+        while (start < totalLength) {
+          if (req.destroyed || res.destroyed || res.writableEnded) break;
+          const end = Math.min(start + chunkSize - 1, totalLength - 1);
+          const chunkRes = await fetch(targetUrl, {
+            headers: { "User-Agent": baseUA, "Range": `bytes=${start}-${end}` }
+          });
+          if (!chunkRes.ok && chunkRes.status !== 206) {
+            console.warn(`[yt-server] Chunk ${start}-${end} failed with status ${chunkRes.status}`);
+            break;
+          }
+          if (chunkRes.body) {
+            const reader = chunkRes.body.getReader();
+            while (true) {
+              if (req.destroyed || res.destroyed || res.writableEnded) {
+                try { reader.cancel(); } catch {}
+                break;
+              }
+              const { done, value } = await reader.read();
+              if (done) break;
+              const ok = res.write(value);
+              if (!ok) await new Promise((resolve) => res.once("drain", resolve));
+            }
+          }
+          start = end + 1;
         }
-        const { done, value } = await reader.read();
-        if (done) break;
-        const ok = res.write(value);
-        if (!ok) {
-          await new Promise((resolve) => res.once("drain", resolve));
+        if (!res.writableEnded) res.end();
+        return;
+      }
+
+      // Fallback if total length could not be probed
+      console.log(`[yt-server] 📡 Standard stream GET (no length detected)`);
+      const upstream = await fetch(targetUrl, {
+        headers: { "User-Agent": baseUA }
+      });
+      res.writeHead(upstream.status, {
+        "Content-Type": upstream.headers.get("content-type") || contentType,
+        "Access-Control-Allow-Origin": "*"
+      });
+      if (upstream.body) {
+        const reader = upstream.body.getReader();
+        while (true) {
+          if (req.destroyed || res.destroyed || res.writableEnded) {
+            try { reader.cancel(); } catch {}
+            break;
+          }
+          const { done, value } = await reader.read();
+          if (done) break;
+          const ok = res.write(value);
+          if (!ok) await new Promise((resolve) => res.once("drain", resolve));
         }
       }
-      if (!res.writableEnded) {
-        res.end();
-      }
+      if (!res.writableEnded) res.end();
     } catch (streamErr) {
       console.warn("[yt-server] Proxy stream error:", streamErr.message);
       if (!res.headersSent) res.writeHead(500);

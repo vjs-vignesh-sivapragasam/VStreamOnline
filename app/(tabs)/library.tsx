@@ -10,7 +10,7 @@ import {
     ActivityIndicator,
     Alert,
 } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { View, Text, StatusBar } from '@/components/Themed';
 import { StorageKeys, storageService } from '@/utils/StorageService';
@@ -36,7 +36,7 @@ interface WatchHistoryItem {
     allItems: TorrentItem[];
 }
 
-type LibraryTab = 'All' | 'Movies' | 'Downloads' | 'History';
+type LibraryTab = 'All' | 'Movies' | 'Downloads' | 'YouTube' | 'History';
 
 const CARD_SPACING = 16;
 
@@ -49,6 +49,16 @@ const LibraryScreen: React.FC = () => {
     const [selectedTab, setSelectedTab] = useState<LibraryTab>('All');
     const [refreshing, setRefreshing] = useState(false);
     const animatedValues = useRef(new Map<string, Animated.Value>()).current;
+
+    const params = useLocalSearchParams<{ tab?: string }>();
+
+    useEffect(() => {
+        if (params?.tab === 'YouTube') {
+            setSelectedTab('YouTube');
+        } else if (params?.tab === 'Downloads') {
+            setSelectedTab('Downloads');
+        }
+    }, [params?.tab]);
 
     const getAnimatedValue = (key: string) => {
         if (!animatedValues.has(key)) {
@@ -228,6 +238,10 @@ const LibraryScreen: React.FC = () => {
         }
     };
 
+    const handleExportDownload = async (item: DownloadItem) => {
+        await downloadService.exportOrShareDownload(item);
+    };
+
     // ── My List actions ──────────────────────────────────────────────────────────
 
     const handlePlayMyListItem = (item: MyListItem) => {
@@ -314,6 +328,10 @@ const LibraryScreen: React.FC = () => {
             iconName = 'cloud-download-outline';
             title = 'No Downloads Yet';
             description = 'Tap the download button on any movie to save it internally and watch offline.';
+        } else if (selectedTab === 'YouTube') {
+            iconName = 'logo-youtube';
+            title = 'No YouTube Downloads Yet';
+            description = 'Downloaded YouTube videos and MP3 audio tracks will appear here for offline playback.';
         }
 
         return (
@@ -325,9 +343,19 @@ const LibraryScreen: React.FC = () => {
         );
     };
 
-    // Filter downloads into active (in-progress/paused) and completed
-    const activeDownloads = downloads.filter((d) => d.status === 'downloading' || d.status === 'paused' || d.status === 'error');
-    const completedDownloads = downloads.filter((d) => d.status === 'completed');
+    // Filter downloads into Torrent (TamilMV) and YouTube downloads
+    const torrentDownloads = downloads.filter((d) => d.sourceType === 'torrent' || (!d.id.startsWith('yt_') && d.sourceType !== 'direct'));
+    const youtubeDownloads = downloads.filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct');
+
+    const activeTorrentDownloads = torrentDownloads.filter((d) => d.status === 'downloading' || d.status === 'paused' || d.status === 'error');
+    const completedTorrentDownloads = torrentDownloads.filter((d) => d.status === 'completed');
+
+    const activeYouTubeDownloads = youtubeDownloads.filter((d) => d.status === 'downloading' || d.status === 'paused' || d.status === 'error');
+    const completedYouTubeDownloads = youtubeDownloads.filter((d) => d.status === 'completed');
+
+    // Backward-compat aliases
+    const activeDownloads = activeTorrentDownloads;
+    const completedDownloads = completedTorrentDownloads;
 
     // ── Active Downloads Section (with speed, peers, kbs & progress bar) ─────────
 
@@ -512,6 +540,18 @@ const LibraryScreen: React.FC = () => {
                                         <Ionicons name="open-outline" size={12} color="#ffffff" />
                                     </TouchableOpacity>
 
+                                    {/* Export / Share Button (Save to Files / Gallery) */}
+                                    <TouchableOpacity
+                                        style={styles.exportShareButton}
+                                        onPress={(e) => {
+                                            e.stopPropagation();
+                                            handleExportDownload(item);
+                                        }}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Ionicons name="share-outline" size={12} color="#ffffff" />
+                                    </TouchableOpacity>
+
                                     {/* Delete Button */}
                                     <TouchableOpacity
                                         style={styles.removeButton}
@@ -535,6 +575,195 @@ const LibraryScreen: React.FC = () => {
                         );
                     }}
                 />
+            </View>
+        );
+    };
+
+    // ── Dedicated YouTube Downloads Section ───────────────────────────────────────
+
+    const renderYouTubeDownloads = () => {
+        if (youtubeDownloads.length === 0) {
+            if (selectedTab === 'YouTube') return renderEmpty();
+            return null;
+        }
+
+        return (
+            <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                    <View style={styles.sectionTitleRow}>
+                        <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+                        <Text style={styles.sectionTitle}>YouTube Downloads</Text>
+                        <View style={[styles.countBadge, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
+                            <Text style={[styles.countBadgeText, { color: '#ff4444' }]}>{youtubeDownloads.length}</Text>
+                        </View>
+                    </View>
+                    <Text style={styles.storageInfoText}>
+                        {downloadService.formatBytes(downloadService.getFreeDiskSpace())} free
+                    </Text>
+                </View>
+
+                {/* Active in-progress YouTube downloads */}
+                {activeYouTubeDownloads.length > 0 && (
+                    <View style={styles.activeDownloadsContainer}>
+                        {activeYouTubeDownloads.map((item) => {
+                            const isDownloading = item.status === 'downloading';
+                            const isPaused = item.status === 'paused';
+                            const isAudio = item.fileName?.endsWith('.mp3') || item.fileName?.endsWith('.m4a');
+
+                            return (
+                                <View key={item.id} style={styles.activeDownloadCard}>
+                                    {item.poster && item.poster.trim() ? (
+                                        <Image source={{ uri: item.poster }} style={styles.activePoster} resizeMode="cover" />
+                                    ) : (
+                                        <View style={[styles.activePoster, styles.posterFallback]}>
+                                            <Ionicons name={isAudio ? 'musical-notes' : 'film-outline'} size={24} color="#8E8E93" />
+                                        </View>
+                                    )}
+
+                                    <View style={styles.activeInfo}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                            <View style={[styles.ytTypeBadge, isAudio ? styles.ytAudioBadge : styles.ytVideoBadge]}>
+                                                <Text style={[styles.ytTypeBadgeText, isAudio && { color: '#00e5ff' }]}>
+                                                    {isAudio ? 'MP3 AUDIO' : 'VIDEO'}
+                                                </Text>
+                                            </View>
+                                            <Text style={[styles.activeTitle, { flex: 1 }]} numberOfLines={1}>
+                                                {item.title}
+                                            </Text>
+                                        </View>
+
+                                        {/* Speed and Progress */}
+                                        <View style={styles.statsRow}>
+                                            {isDownloading && (
+                                                <View style={styles.speedBadge}>
+                                                    <Ionicons name="flash" size={11} color="#00e676" />
+                                                    <Text style={styles.speedText}>{item.speedFormatted || 'Downloading...'}</Text>
+                                                </View>
+                                            )}
+                                            <Text style={styles.bytesText}>
+                                                {downloadService.formatBytes(item.downloadedBytes)} / {downloadService.formatBytes(item.totalBytes)}
+                                            </Text>
+                                        </View>
+
+                                        <View style={styles.progressRow}>
+                                            <View style={styles.progressBarTrackLarge}>
+                                                <View
+                                                    style={[
+                                                        styles.progressBarFillLarge,
+                                                        {
+                                                            width: `${Math.min(item.progress, 100)}%`,
+                                                            backgroundColor: isPaused ? '#ff9800' : isAudio ? '#00e5ff' : theme.primary,
+                                                        },
+                                                    ]}
+                                                />
+                                            </View>
+                                            <Text style={styles.progressPercentText}>{item.progress}%</Text>
+                                        </View>
+
+                                        {item.statusDetail ? (
+                                            <Text style={[styles.statusDetailText, item.status === 'error' && { color: '#ff453a' }]} numberOfLines={1}>
+                                                {item.status === 'error' ? `⚠️ ${item.statusDetail}` : item.statusDetail}
+                                            </Text>
+                                        ) : null}
+
+                                        {/* Controls */}
+                                        <View style={styles.activeControlsRow}>
+                                            <TouchableOpacity
+                                                style={[styles.controlPill, isPaused ? styles.controlPillResume : { backgroundColor: isAudio ? '#007799' : theme.primary }]}
+                                                onPress={() => isDownloading ? downloadService.pauseDownload(item.id) : downloadService.resumeDownload(item.id)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name={isDownloading ? 'pause' : 'play'} size={13} color="#ffffff" />
+                                                <Text style={styles.controlPillText}>{isDownloading ? 'Pause' : 'Resume'}</Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
+                                                style={styles.cancelPill}
+                                                onPress={() => handleDeleteDownload(item)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name="close" size={13} color="#ff4d4d" />
+                                                <Text style={styles.cancelPillText}>Cancel</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                </View>
+                            );
+                        })}
+                    </View>
+                )}
+
+                {/* Completed YouTube downloads list */}
+                {completedYouTubeDownloads.length > 0 && (
+                    <View style={styles.ytCompletedList}>
+                        {completedYouTubeDownloads.map((item) => {
+                            const isAudio = item.fileName?.endsWith('.mp3') || item.fileName?.endsWith('.m4a');
+
+                            return (
+                                <TouchableOpacity
+                                    key={item.id}
+                                    style={styles.ytDownloadCard}
+                                    onPress={() => handleDownloadItemPress(item)}
+                                    activeOpacity={0.75}
+                                >
+                                    <View style={styles.ytThumbWrap}>
+                                        {item.poster ? (
+                                            <Image source={{ uri: item.poster }} style={styles.ytThumbImage} resizeMode="cover" />
+                                        ) : (
+                                            <View style={[styles.ytThumbImage, styles.posterFallback]}>
+                                                <Ionicons name={isAudio ? 'musical-notes' : 'logo-youtube'} size={24} color="#8E8E93" />
+                                            </View>
+                                        )}
+                                        <View style={[styles.ytTypeBadgeFloating, isAudio ? styles.ytAudioBadge : styles.ytVideoBadge]}>
+                                            <Text style={[styles.ytTypeBadgeText, isAudio && { color: '#00e5ff' }]}>
+                                                {isAudio ? 'MP3' : 'MP4'}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.ytCardDetails}>
+                                        <Text style={styles.ytCardTitle} numberOfLines={2}>
+                                            {item.title}
+                                        </Text>
+                                        <Text style={styles.ytCardMeta} numberOfLines={1}>
+                                            {downloadService.formatBytes(item.totalBytes || item.downloadedBytes)}
+                                            {item.fileName ? ` • ${item.fileName.split('.').pop()?.toUpperCase()}` : ''}
+                                        </Text>
+
+                                        {/* Action Buttons: Play, Export/Share, Delete */}
+                                        <View style={styles.ytCardActionsRow}>
+                                            <TouchableOpacity
+                                                style={[styles.ytActionBtn, { backgroundColor: isAudio ? '#007799' : theme.primary }]}
+                                                onPress={() => handleDownloadItemPress(item)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name="play" size={13} color="#ffffff" />
+                                                <Text style={styles.ytActionBtnText}>Play</Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
+                                                style={[styles.ytActionBtn, styles.ytExportBtn]}
+                                                onPress={() => handleExportDownload(item)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name="share-outline" size={13} color="#ffffff" />
+                                                <Text style={styles.ytActionBtnText}>Share / Save</Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
+                                                style={styles.ytDeleteBtn}
+                                                onPress={() => handleDeleteDownload(item)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name="trash-outline" size={15} color="#ff4d4d" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                )}
             </View>
         );
     };
@@ -831,6 +1060,7 @@ const LibraryScreen: React.FC = () => {
 
     const showMovies = selectedTab === 'All' || selectedTab === 'Movies';
     const showDownloads = selectedTab === 'All' || selectedTab === 'Downloads';
+    const showYouTube = selectedTab === 'All' || selectedTab === 'YouTube';
     const showHistory = selectedTab === 'All' || selectedTab === 'History';
     const isTotallyEmpty =
         myList.length === 0 &&
@@ -857,13 +1087,15 @@ const LibraryScreen: React.FC = () => {
                     style={styles.tabScrollView}
                     contentContainerStyle={styles.tabRow}
                 >
-                    {(['All', 'Movies', 'Downloads', 'History'] as LibraryTab[]).map((tab) => {
+                    {(['All', 'Movies', 'Downloads', 'YouTube', 'History'] as LibraryTab[]).map((tab) => {
                         const isSelected = selectedTab === tab;
                         const count =
                             tab === 'Movies'
                                 ? myList.length
                                 : tab === 'Downloads'
-                                ? downloads.length
+                                ? torrentDownloads.length
+                                : tab === 'YouTube'
+                                ? youtubeDownloads.length
                                 : tab === 'History'
                                 ? watchHistory.length
                                 : null;
@@ -875,6 +1107,8 @@ const LibraryScreen: React.FC = () => {
                                 ? 'film-outline'
                                 : tab === 'Downloads'
                                 ? 'cloud-download-outline'
+                                : tab === 'YouTube'
+                                ? 'logo-youtube'
                                 : 'time-outline';
 
                         const iconColor = isSelected ? '#ffffff' : 'rgba(255,255,255,0.7)';
@@ -886,7 +1120,7 @@ const LibraryScreen: React.FC = () => {
                                     styles.tabPill,
                                     isSelected && [
                                         styles.tabPillActive,
-                                        { backgroundColor: theme.primary, borderColor: theme.primary },
+                                        { backgroundColor: tab === 'YouTube' ? '#cc0000' : theme.primary, borderColor: tab === 'YouTube' ? '#ff0000' : theme.primary },
                                     ],
                                 ]}
                                 onPress={() => setSelectedTab(tab)}
@@ -933,7 +1167,8 @@ const LibraryScreen: React.FC = () => {
                         {showMovies && renderMyList()}
                         {showDownloads && renderActiveDownloads()}
                         {showDownloads && renderCompletedDownloads()}
-                        {showDownloads && downloads.length === 0 && selectedTab === 'Downloads' && renderEmpty()}
+                        {showDownloads && torrentDownloads.length === 0 && selectedTab === 'Downloads' && renderEmpty()}
+                        {showYouTube && renderYouTubeDownloads()}
                         {showHistory && renderContinueWatching()}
                     </>
                 )}
@@ -1279,6 +1514,14 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         padding: 4,
     },
+    exportShareButton: {
+        position: 'absolute',
+        top: 34,
+        right: 6,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        borderRadius: 8,
+        padding: 4,
+    },
     externalPlayerButton: {
         position: 'absolute',
         top: 6,
@@ -1444,6 +1687,99 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,77,77,0.12)',
         alignItems: 'center',
         justifyContent: 'center',
+    },
+
+    // ── YouTube Downloads Section ─────────────────────────────────────────────────
+    ytCompletedList: {
+        gap: 12,
+    },
+    ytDownloadCard: {
+        flexDirection: 'row',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderRadius: 14,
+        padding: 10,
+        gap: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.08)',
+    },
+    ytThumbWrap: {
+        width: 120,
+        height: 70,
+        borderRadius: 10,
+        overflow: 'hidden',
+        backgroundColor: '#1a1a1f',
+        position: 'relative',
+    },
+    ytThumbImage: {
+        width: '100%',
+        height: '100%',
+    },
+    ytTypeBadgeFloating: {
+        position: 'absolute',
+        bottom: 4,
+        left: 4,
+        paddingHorizontal: 5,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    ytTypeBadge: {
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    ytTypeBadgeText: {
+        fontSize: 9,
+        fontWeight: 'bold',
+        color: '#ffffff',
+        letterSpacing: 0.5,
+    },
+    ytAudioBadge: {
+        backgroundColor: 'rgba(0, 229, 255, 0.25)',
+    },
+    ytVideoBadge: {
+        backgroundColor: 'rgba(255, 0, 0, 0.25)',
+    },
+    ytCardDetails: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+    ytCardTitle: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#ffffff',
+        marginBottom: 3,
+        lineHeight: 17,
+    },
+    ytCardMeta: {
+        fontSize: 11,
+        color: 'rgba(255, 255, 255, 0.5)',
+        marginBottom: 8,
+    },
+    ytCardActionsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    ytActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 8,
+    },
+    ytActionBtnText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#ffffff',
+    },
+    ytExportBtn: {
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    },
+    ytDeleteBtn: {
+        padding: 5,
+        marginLeft: 'auto',
     },
 
     // ── Empty ─────────────────────────────────────────────────────────────────────

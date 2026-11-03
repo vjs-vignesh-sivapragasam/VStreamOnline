@@ -298,6 +298,17 @@ export default function YouTubeDownloadsScreen() {
                     </TouchableOpacity>
                   )}
 
+                  {isCompleted && (
+                    <TouchableOpacity
+                      style={styles.actionCircleBtn}
+                      onPress={() => downloadService.exportOrShareDownload(item)}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="share-outline" size={17} color="#ffffff" />
+                    </TouchableOpacity>
+                  )}
+
                   <TouchableOpacity
                     style={styles.actionCircleBtn}
                     onPress={() => handleDeleteItem(item)}

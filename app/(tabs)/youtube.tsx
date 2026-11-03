@@ -742,7 +742,10 @@ export default function YouTubeScreen() {
         'Download Started',
         `Downloading "${cleanTitle}" (${isAudio ? 'MP3 Audio' : format.quality + ' MP4'}) to YouTube Downloads.`,
         [
-          { text: 'View Downloads', onPress: () => router.push('/youtube/downloads' as any) },
+          {
+            text: 'View Downloads',
+            onPress: () => router.push({ pathname: '/(tabs)/library' as any, params: { tab: 'YouTube' } }),
+          },
           { text: 'OK', style: 'cancel' },
         ]
       );
@@ -905,33 +908,7 @@ export default function YouTubeScreen() {
               )}
             </TouchableOpacity>
 
-            {/* 3. Download Icon */}
-            <TouchableOpacity
-              style={styles.headerActionBtn}
-              onPress={async () => {
-                if (await isHapticsSupported()) {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
-                router.push('/youtube/downloads' as any);
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-            >
-              <Ionicons
-                name="arrow-down-circle-outline"
-                size={21}
-                color="#ffffff"
-              />
-              {downloadsCount > 0 && (
-                <View style={[styles.headerBadge, { backgroundColor: theme.primary }]}>
-                  <Text style={styles.headerBadgeText}>
-                    {downloadsCount > 99 ? '99+' : downloadsCount}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* 4. Google / YouTube Account Profile Avatar Button */}
+            {/* 3. Google / YouTube Account Profile Avatar Button */}
             <TouchableOpacity
               style={[
                 styles.headerActionBtn,
