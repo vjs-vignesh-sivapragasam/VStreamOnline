@@ -94,8 +94,7 @@
         {
           "launchMode": "most-recent"
         }
-      ],
-      "expo-sharing"
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,6 +1,5 @@
 import { Paths, Directory, File, DownloadTask, DownloadProgress } from 'expo-file-system';
-import { Alert } from 'react-native';
-import * as Sharing from 'expo-sharing';
+import { Alert, Share, Platform } from 'react-native';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { getDevHostIp, youTubeService } from '@/services/YouTubeService';
 import {
@@ -848,25 +847,49 @@ class DownloadManager {
         return false;
       }
 
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Sharing Unavailable', 'Native file sharing is not supported on this platform.');
-        return false;
+      // Attempt native expo-sharing if available in the custom binary without crashing if absent
+      let shared = false;
+      try {
+        const expoSharing = require('expo-sharing');
+        if (expoSharing && typeof expoSharing.isAvailableAsync === 'function') {
+          const available = await expoSharing.isAvailableAsync().catch(() => false);
+          if (available) {
+            const name = item.fileName || item.title || 'media';
+            const isAudio = name.endsWith('.mp3') || name.endsWith('.m4a') || name.endsWith('.aac') || name.endsWith('.opus');
+            const mimeType = isAudio ? 'audio/mp4' : 'video/mp4';
+
+            await expoSharing.shareAsync(item.fileUri, {
+              mimeType,
+              dialogTitle: `Export "${item.title}"`,
+              UTI: isAudio ? 'public.audio' : 'public.movie',
+            });
+            shared = true;
+          }
+        }
+      } catch (_) {
+        shared = false;
       }
 
-      const name = item.fileName || item.title || 'media';
-      const isAudio = name.endsWith('.mp3') || name.endsWith('.m4a') || name.endsWith('.aac') || name.endsWith('.opus');
-      const mimeType = isAudio ? 'audio/mp4' : 'video/mp4';
-
-      await Sharing.shareAsync(item.fileUri, {
-        mimeType,
-        dialogTitle: `Export "${item.title}"`,
-        UTI: isAudio ? 'public.audio' : 'public.movie',
-      });
+      // Built-in React Native Share fallback (works out-of-the-box on every device with zero native compilation)
+      if (!shared) {
+        await Share.share(
+          Platform.select({
+            ios: {
+              url: item.fileUri,
+              title: item.title,
+            },
+            default: {
+              title: item.title,
+              message: item.fileUri,
+              url: item.fileUri,
+            },
+          })!
+        );
+      }
       return true;
     } catch (err: any) {
       console.warn('[DownloadService] Share/Export error:', err?.message || err);
-      Alert.alert('Export Failed', err?.message || 'Could not export file.');
+      Alert.alert('Export', err?.message || 'Could not export file.');
       return false;
     }
   }
