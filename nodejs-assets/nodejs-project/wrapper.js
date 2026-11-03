@@ -28,6 +28,8 @@ try {
 
   process.env.APP_PATH = appDataDir;
   process.env.TMPDIR = tmpDir;
+  // Disable SSDP casting multicast to prevent EADDRNOTAVAIL crashes on local networks
+  process.env.CASTING_DISABLED = '1';
   os.tmpdir = () => tmpDir;
 } catch (e) {
   console.warn('[NODEJS-MOBILE] Could not initialize writable directories:', e);

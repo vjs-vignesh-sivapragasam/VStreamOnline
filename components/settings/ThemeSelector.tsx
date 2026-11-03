@@ -156,73 +156,24 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
         })}
       </View>
 
-      {/* Live Preview Strip */}
-      {showPreviewBar && (
-        <View style={styles.previewSection}>
-          <View style={styles.previewHeaderRow}>
-            <View style={styles.previewHeaderLeft}>
-              <Ionicons name="sparkles" size={12} color={theme.primary} style={{ marginRight: 5 }} />
-              <Text style={styles.previewHeaderLabel}>LIVE PREVIEW</Text>
-            </View>
-
-            {showNavigationLink && (
-              <TouchableOpacity
-                onPress={handleOpenDetails}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={styles.moreDetailsButton}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.moreDetailsText, { color: theme.primaryLight || theme.primary }]}>
-                  More options
-                </Text>
-                <Ionicons
-                  name="chevron-forward"
-                  size={12}
-                  color={theme.primaryLight || theme.primary}
-                  style={{ marginLeft: 2 }}
-                />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <View style={styles.previewShowcaseRow}>
-            {/* Mock Primary Button */}
-            <View style={[styles.previewPlayBtn, { backgroundColor: theme.primary }]}>
-              <Ionicons name="play" size={13} color="#FFFFFF" style={{ marginRight: 5 }} />
-              <Text style={styles.previewPlayBtnText}>Play</Text>
-            </View>
-
-            {/* Mock Active Tab Pill */}
-            <View
-              style={[
-                styles.previewTabPill,
-                {
-                  backgroundColor: theme.primary,
-                  borderColor: theme.primary,
-                },
-              ]}
-            >
-              <Ionicons name="film" size={13} color="#FFFFFF" style={{ marginRight: 5 }} />
-              <Text style={[styles.previewTabPillText, { color: '#FFFFFF' }]}>Active Tab</Text>
-            </View>
-
-            {/* Mock Badge */}
-            <View
-              style={[
-                styles.previewTagBadge,
-                {
-                  backgroundColor: theme.primary + '18',
-                  borderColor: theme.primary + '40',
-                },
-              ]}
-            >
-              <View style={[styles.previewTagDot, { backgroundColor: theme.primary }]} />
-              <Text style={[styles.previewTagText, { color: theme.primaryLight || theme.primary }]}>
-                4K HDR
-              </Text>
-            </View>
-          </View>
-        </View>
+      {/* Navigation Link to Detailed Theme Screen */}
+      {showNavigationLink && (
+        <TouchableOpacity
+          onPress={handleOpenDetails}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={styles.moreDetailsRow}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.moreDetailsText, { color: theme.primaryLight || theme.primary }]}>
+            More palette details & options
+          </Text>
+          <Ionicons
+            name="chevron-forward"
+            size={13}
+            color={theme.primaryLight || theme.primary}
+            style={{ marginLeft: 3 }}
+          />
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -336,85 +287,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: 0.2,
   },
-  previewSection: {
+  moreDetailsRow: {
     marginTop: 14,
-    paddingTop: 12,
+    paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#242426',
-  },
-  previewHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  previewHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  previewHeaderLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#8E8E93',
-    letterSpacing: 0.7,
-  },
-  moreDetailsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'center',
   },
   moreDetailsText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  previewShowcaseRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  previewPlayBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-  },
-  previewPlayBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  previewTabPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
-  previewTabPillText: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  previewTagBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 5,
-    paddingHorizontal: 9,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  previewTagDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    marginRight: 5,
-  },
-  previewTagText: {
-    fontSize: 11,
-    fontWeight: '700',
   },
 });

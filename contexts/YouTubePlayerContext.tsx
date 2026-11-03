@@ -58,7 +58,7 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   const [duration, setDuration] = useState(0);
   const [seekTarget, setSeekTarget] = useState<number | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
-  const [currentQuality, setCurrentQuality] = useState<string>('Auto');
+  const [currentQuality, setCurrentQuality] = useState<string>('480p');
   const [playbackSpeed, setPlaybackSpeedState] = useState<number>(1.0);
   const [isLooping, setIsLooping] = useState<boolean>(false);
 
@@ -73,7 +73,7 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     setVideoDetails(null);
     setStreamUrl(null);
     setPlaybackError(null);
-    setCurrentQuality('Auto');
+    setCurrentQuality('480p');
     setPlaybackSpeedState(1.0);
     setCurrentTime(0);
     setDuration(0);
@@ -98,10 +98,30 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
         setDuration(details.duration);
       }
 
-      const chosenFormat =
-        details.formats.progressive[0] ||
-        details.formats.videoAdaptive.find((f) => f.container === 'mp4') ||
-        details.formats.videoAdaptive[0];
+      // Default to 480p as requested
+      const cleanQuality = '480';
+
+      // 1. Check if a progressive stream (video + audio) matching 480p exists
+      let chosenFormat = details.formats.progressive.find((f) => f.quality.includes(cleanQuality));
+
+      // 2. If no 480p progressive stream exists, pick the progressive stream closest to 480p (e.g. 720p or 360p)
+      // This is crucial: progressive streams contain BOTH audio and video, avoiding silent playback
+      if (!chosenFormat && details.formats.progressive.length > 0) {
+        const sorted = [...details.formats.progressive].sort((a, b) => {
+          const numA = parseInt((a.quality.match(/\d+/) || ['360'])[0], 10);
+          const numB = parseInt((b.quality.match(/\d+/) || ['360'])[0], 10);
+          return Math.abs(numA - 480) - Math.abs(numB - 480);
+        });
+        chosenFormat = sorted[0];
+      }
+
+      // 3. Fallback to adaptive if no progressive available
+      if (!chosenFormat) {
+        chosenFormat =
+          details.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality) && f.container === 'mp4') ||
+          details.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality)) ||
+          details.formats.videoAdaptive[0];
+      }
 
       if (!chosenFormat) {
         const errMsg = 'No playable format returned from YouTube engine';
@@ -136,10 +156,26 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
       return;
     }
 
-    const chosenFormat =
-      videoDetails.formats.progressive[0] ||
-      videoDetails.formats.videoAdaptive.find((f) => f.container === 'mp4') ||
-      videoDetails.formats.videoAdaptive[0];
+    const cleanQuality = currentQuality === 'Auto' ? '480' : currentQuality.replace(/\D/g, '') || '480';
+
+    let chosenFormat = videoDetails.formats.progressive.find((f) => f.quality.includes(cleanQuality));
+
+    if (!chosenFormat && videoDetails.formats.progressive.length > 0) {
+      const targetNum = parseInt(cleanQuality, 10) || 480;
+      const sorted = [...videoDetails.formats.progressive].sort((a, b) => {
+        const numA = parseInt((a.quality.match(/\d+/) || ['360'])[0], 10);
+        const numB = parseInt((b.quality.match(/\d+/) || ['360'])[0], 10);
+        return Math.abs(numA - targetNum) - Math.abs(numB - targetNum);
+      });
+      chosenFormat = sorted[0];
+    }
+
+    if (!chosenFormat) {
+      chosenFormat =
+        videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality) && f.container === 'mp4') ||
+        videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality)) ||
+        videoDetails.formats.videoAdaptive[0];
+    }
 
     if (!chosenFormat) return;
 
@@ -227,10 +263,7 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     });
   }, []);
 
-  const minimize = useCallback(() => {
-    console.log('[YouTubePlayer] 🔽 minimize to floating mini player bar');
-    setIsMinimized(true);
-  }, []);
+
 
   const expand = useCallback(() => {
     console.log('[YouTubePlayer] 🔼 expand to full watch screen');
@@ -244,7 +277,7 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     setVideoDetails(null);
     setStreamUrl(null);
     setPlaybackError(null);
-    setCurrentQuality('Auto');
+    setCurrentQuality('480p');
     setPlaybackSpeedState(1.0);
     setIsLooping(false);
     setIsPlaying(false);
@@ -253,6 +286,11 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     setCurrentTime(0);
     setDuration(0);
   }, []);
+
+  const minimize = useCallback(() => {
+    console.log('[YouTubePlayer] 🔽 minimize called -> closing player (miniplayer removed)');
+    close();
+  }, [close]);
 
   const availableQualities = useMemo(() => {
     const qualities = new Set<string>();
@@ -312,22 +350,23 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
         // 1. First look for combined progressive format matching quality
         chosenFormat = videoDetails.formats.progressive.find((f) => f.quality.includes(cleanQuality));
 
-        // 2. If not in progressive, look in videoAdaptive (prefer mp4, then webm)
-        if (!chosenFormat) {
-          chosenFormat =
-            videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality) && f.container === 'mp4') ||
-            videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality));
-        }
-
-        // 3. If exact format not found, gracefully pick closest available format
-        if (!chosenFormat && allVideoFormats.length > 0) {
-          const targetNum = parseInt(cleanQuality, 10) || 720;
-          const sorted = [...allVideoFormats].sort((a, b) => {
+        // 2. If not found in progressive, check if any progressive format exists before falling back to adaptive without audio
+        if (!chosenFormat && videoDetails.formats.progressive.length > 0) {
+          const targetNum = parseInt(cleanQuality, 10) || 480;
+          const sorted = [...videoDetails.formats.progressive].sort((a, b) => {
             const numA = parseInt((a.quality.match(/\d+/) || ['360'])[0], 10);
             const numB = parseInt((b.quality.match(/\d+/) || ['360'])[0], 10);
             return Math.abs(numA - targetNum) - Math.abs(numB - targetNum);
           });
           chosenFormat = sorted[0];
+        }
+
+        // 3. If no progressive format at all, look in videoAdaptive
+        if (!chosenFormat) {
+          chosenFormat =
+            videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality) && f.container === 'mp4') ||
+            videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality)) ||
+            videoDetails.formats.videoAdaptive[0];
         }
       }
 

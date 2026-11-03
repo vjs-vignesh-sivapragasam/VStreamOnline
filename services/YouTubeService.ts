@@ -10,6 +10,7 @@ export interface YouTubeVideoItem {
   duration?: string;
   views?: string;
   published?: string;
+  isShort?: boolean;
 }
 
 export interface YouTubeSearchResult {
@@ -58,6 +59,31 @@ export interface YouTubeChannelSubscription {
   channelTitle: string;
   avatarUrl?: string;
   subscribedAt: number;
+}
+
+export interface YouTubeUserProfile {
+  name: string;
+  email?: string;
+  avatar?: string;
+}
+
+export interface YouTubeAuthStatus {
+  authenticated: boolean;
+  pending?: {
+    user_code: string;
+    verification_url: string;
+    expires_in: number;
+    startedAt?: number;
+  } | null;
+  user?: YouTubeUserProfile | null;
+}
+
+export interface YouTubeAuthStartResponse {
+  status: 'authenticated' | 'pending' | 'starting' | 'error';
+  user_code?: string;
+  verification_url?: string;
+  expires_in?: number;
+  error?: string;
 }
 
 const YT_SUBSCRIPTIONS_KEY = 'yt_local_subscriptions';
@@ -636,6 +662,154 @@ class YouTubeService {
 
     storageService.setItem(YT_SUBSCRIPTIONS_KEY, JSON.stringify(subs));
     return subscribed;
+  }
+
+  // ── YouTube Google Account / SSO ──────────────────────────────────────────
+
+  async getAuthStatus(timeoutMs = 2500): Promise<YouTubeAuthStatus> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/auth/status`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        return await res.json();
+      }
+      return { authenticated: false };
+    } catch {
+      return { authenticated: false };
+    }
+  }
+
+  async startAuth(timeoutMs = 12000): Promise<YouTubeAuthStartResponse> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(2000);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/auth/start`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        return await res.json();
+      }
+      const data = await res.json().catch(() => ({}));
+      return { status: 'error', error: data.error || 'Failed to start authentication' };
+    } catch (err: any) {
+      return { status: 'error', error: err?.message || 'Authentication timeout' };
+    }
+  }
+
+  async logout(timeoutMs = 3000): Promise<boolean> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/auth/logout`, {
+        method: 'POST',
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // ── Authenticated Real YouTube Feeds ───────────────────────────────────────
+
+  async getHomeFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/feed/home`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const data = await res.json();
+        return { videos: data.results || [] };
+      }
+      return { videos: [] };
+    } catch (err: any) {
+      console.warn('[YouTubeService] getHomeFeed error:', err);
+      return { videos: [] };
+    }
+  }
+
+  async getSubscriptionsFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/feed/subscriptions`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const data = await res.json();
+        return { videos: data.results || [] };
+      }
+      return { videos: [] };
+    } catch (err: any) {
+      console.warn('[YouTubeService] getSubscriptionsFeed error:', err);
+      return { videos: [] };
+    }
+  }
+
+  async getHistoryFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/feed/history`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const data = await res.json();
+        return { videos: data.results || [] };
+      }
+      return { videos: [] };
+    } catch (err: any) {
+      console.warn('[YouTubeService] getHistoryFeed error:', err);
+      return { videos: [] };
+    }
+  }
+
+  async getShortsFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/feed/shorts`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          videos: (data.results || []).map((v: any) => ({
+            id: v.id,
+            title: v.title,
+            channel: v.channel,
+            thumbnail: v.thumbnail,
+            duration: v.duration,
+            views: v.views,
+            published: v.published,
+            isShort: true,
+          })),
+        };
+      }
+      return { videos: [] };
+    } catch (err: any) {
+      console.warn('[YouTubeService] getShortsFeed error:', err);
+      return { videos: [] };
+    }
   }
 }
 

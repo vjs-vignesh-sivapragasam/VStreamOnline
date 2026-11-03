@@ -117,6 +117,10 @@ export function formatReleaseDate(dateStr?: string): string {
 class TmdbService {
   private inMemoryCache = new Map<string, TmdbDetails>();
 
+  clearCache(): void {
+    this.inMemoryCache.clear();
+  }
+
   private getApiKey(): string {
     // Check user configured key first
     const saved = storageService.getItem(StorageKeys.TMDB_API_KEY as any);

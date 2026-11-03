@@ -324,9 +324,9 @@ const TamilMvSettingsScreen: React.FC = () => {
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardSectionTitle}>AUTO-DETECT DOMAIN</Text>
-              <View style={styles.autoDetectBadge}>
+              <View style={[styles.autoDetectBadge, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' }]}>
                 <Ionicons name="sparkles" size={12} color={theme.primary} style={{ marginRight: 4 }} />
-                <Text style={styles.autoDetectBadgeText}>Google Search</Text>
+                <Text style={[styles.autoDetectBadgeText, { color: theme.primaryLight || theme.primary }]}>Google Search</Text>
               </View>
             </View>
 
@@ -346,6 +346,7 @@ const TamilMvSettingsScreen: React.FC = () => {
             <TouchableOpacity
               style={[
                 styles.autoDetectPrimaryBtn,
+                { backgroundColor: theme.primary, shadowColor: theme.primary },
                 (isAutoDetecting || isPinging) && styles.buttonDisabled,
               ]}
               onPress={handleAutoDetectDomain}
@@ -404,7 +405,10 @@ const TamilMvSettingsScreen: React.FC = () => {
                   return (
                     <TouchableOpacity
                       key={domain}
-                      style={[styles.presetPill, isSelected && styles.presetPillActive]}
+                      style={[
+                        styles.presetPill,
+                        isSelected && [styles.presetPillActive, { backgroundColor: theme.primary + '20', borderColor: theme.primary }],
+                      ]}
                       onPress={() => handleSelectPreset(domain)}
                       activeOpacity={0.7}
                     >
@@ -420,7 +424,11 @@ const TamilMvSettingsScreen: React.FC = () => {
             {/* Action Buttons */}
             <View style={styles.actionsContainer}>
               <TouchableOpacity
-                style={[styles.saveButton, isSaving && styles.buttonDisabled]}
+                style={[
+                  styles.saveButton,
+                  { backgroundColor: theme.primary },
+                  isSaving && styles.buttonDisabled,
+                ]}
                 onPress={handleSave}
                 disabled={isSaving}
                 activeOpacity={0.8}
@@ -537,10 +545,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#535aff',
+    backgroundColor: '#ffffff',
     paddingVertical: 13,
     borderRadius: 10,
-    shadowColor: '#535aff',
+    shadowColor: 'transparent',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
@@ -714,7 +722,7 @@ const styles = StyleSheet.create({
   },
   presetPillActive: {
     backgroundColor: 'rgba(83, 90, 255, 0.15)',
-    borderColor: '#535aff',
+    borderColor: '#ffffff',
   },
   presetPillText: {
     fontSize: 12,
@@ -732,7 +740,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#535aff',
+    backgroundColor: '#ffffff',
     paddingVertical: 13,
     borderRadius: 10,
   },

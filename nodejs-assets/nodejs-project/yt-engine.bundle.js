@@ -38834,15 +38834,133 @@ Platform.load({
 });
 
 // yt-server.js
+var fs = require("fs");
+var path = require("path");
 var defaultClient = null;
 var androidClient = null;
 var mwebClient = null;
 var vrClient = null;
 var iosClient = null;
 var tvClient = null;
+var guestClient = null;
+
+var authCredentialsFile = path.join(process.env.APP_PATH || ".", "yt_oauth_credentials.json");
+var pendingAuth = null;
+var cachedUserProfile = null;
+var authListenersAttached = false;
+
+function setupAuthListeners(client) {
+  if (authListenersAttached || !client?.session) return;
+  authListenersAttached = true;
+
+  client.session.on("auth-pending", (data) => {
+    console.log("[yt-server] YouTube auth-pending received! User code:", data.user_code);
+    pendingAuth = {
+      device_code: data.device_code,
+      user_code: data.user_code,
+      verification_url: data.verification_url || "https://www.google.com/device",
+      expires_in: data.expires_in || 1800,
+      interval: data.interval || 5,
+      startedAt: Date.now(),
+      status: "pending"
+    };
+  });
+
+  client.session.on("auth", async ({ credentials }) => {
+    console.log("[yt-server] YouTube auth SUCCESS!");
+    pendingAuth = null;
+    try {
+      fs.writeFileSync(authCredentialsFile, JSON.stringify(credentials, null, 2), "utf8");
+    } catch (e) {
+      console.warn("[yt-server] Failed to save credentials:", e.message);
+    }
+    try {
+      const acc = await client.account.getInfo();
+      const item = acc?.contents?.contents?.[0] || (Array.isArray(acc?.contents) ? acc.contents[0] : acc?.contents);
+      cachedUserProfile = {
+        name: item?.account_name?.text || item?.account_name?.toString?.() || "YouTube User",
+        email: item?.account_byline?.text || item?.account_byline?.toString?.() || "",
+        avatar: item?.account_photo?.slice(-1)[0]?.url || item?.account_photo?.[0]?.url || ""
+      };
+    } catch (_) {}
+  });
+
+  client.session.on("auth-error", (err) => {
+    console.warn("[yt-server] YouTube auth error:", err?.message || err);
+    pendingAuth = {
+      status: "error",
+      error: err?.message || "Authentication error"
+    };
+  });
+}
+
+async function restoreAuthIfAvailable(client) {
+  try {
+    if (fs.existsSync(authCredentialsFile)) {
+      const raw = fs.readFileSync(authCredentialsFile, "utf8");
+      const creds = JSON.parse(raw);
+      if (creds && (creds.access_token || creds.refresh_token)) {
+        console.log("[yt-server] Restoring saved YouTube OAuth credentials...");
+        await client.session.signIn(creds);
+        console.log("[yt-server] Restored OAuth credentials! Logged in:", client.session.logged_in);
+        try {
+          const acc = await client.account.getInfo();
+          const item = acc?.contents?.contents?.[0] || (Array.isArray(acc?.contents) ? acc.contents[0] : acc?.contents);
+          cachedUserProfile = {
+            name: item?.account_name?.text || item?.account_name?.toString?.() || "YouTube User",
+            email: item?.account_byline?.text || item?.account_byline?.toString?.() || "",
+            avatar: item?.account_photo?.slice(-1)[0]?.url || item?.account_photo?.[0]?.url || ""
+          };
+        } catch (_) {}
+      }
+    }
+  } catch (e) {
+    console.warn("[yt-server] Could not restore credentials from disk:", e.message);
+  }
+}
+
+function parseTvTile(tile) {
+  if (!tile) return null;
+  const t = tile.tileRenderer || tile;
+  const id = t.contentId || t.onSelectCommand?.watchEndpoint?.videoId;
+  if (!id) return null;
+  const title = t.metadata?.tileMetadataRenderer?.title?.simpleText || 
+                t.metadata?.tileMetadataRenderer?.title?.runs?.map((r) => r.text).join('') || '';
+  const lines = t.metadata?.tileMetadataRenderer?.lines || [];
+  const channel = lines[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.runs?.map((r) => r.text).join('') || 
+                  lines[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.simpleText || '';
+  const views = lines[1]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.simpleText || '';
+  const published = lines[1]?.lineRenderer?.items?.[2]?.lineItemRenderer?.text?.simpleText || '';
+  const thumbnail = t.header?.tileHeaderRenderer?.thumbnail?.thumbnails?.slice(-1)[0]?.url || 
+                    (`https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
+  const duration = t.header?.tileHeaderRenderer?.thumbnailOverlays?.[0]?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || '';
+  return { id, title, channel, thumbnail, duration, views, published };
+}
+
+function formatFeedVideos(feed) {
+  const list = feed?.videos || feed?.contents?.contents || [];
+  return list.filter((v) => v && (v.id || v.video_id)).map((v) => ({
+    id: v.id || v.video_id,
+    title: v.title?.text || v.title?.toString?.() || v.headline?.text || "",
+    channel: v.author?.name || v.author?.toString?.() || (typeof v.author === "string" ? v.author : ""),
+    thumbnail: v.thumbnails?.slice(-1)[0]?.url || (Array.isArray(v.thumbnail) ? v.thumbnail.slice(-1)[0]?.url : (v.thumbnails?.[0]?.url || "")),
+    duration: v.duration?.text || v.length_text?.text || "",
+    views: v.short_view_count?.text || v.views?.text || v.view_count?.text || "",
+    published: v.published?.text || v.published_time_text?.text || ""
+  }));
+}
+
 async function getClient(type) {
+  if (type === "GUEST") {
+    if (!guestClient) guestClient = await Innertube.create();
+    return guestClient;
+  }
   if (type === "WEB") {
-    if (!defaultClient) defaultClient = await Innertube.create();
+    if (!defaultClient) {
+      defaultClient = await Innertube.create();
+      setupAuthListeners(defaultClient);
+      await restoreAuthIfAvailable(defaultClient);
+    }
     return defaultClient;
   }
   if (type === "TV") {
@@ -38992,11 +39110,263 @@ var server = import_http.default.createServer(async (req, res) => {
     res.end(JSON.stringify({ status: "ok", time: Date.now() }));
     return;
   }
+  if (parsedUrl.pathname === "/yt/auth/status") {
+    try {
+      const yt = await getClient("WEB");
+      const isLoggedIn = !!yt.session.logged_in;
+      if (isLoggedIn && !cachedUserProfile) {
+        try {
+          const acc = await yt.account.getInfo();
+          const item = acc?.contents?.contents?.[0] || (Array.isArray(acc?.contents) ? acc.contents[0] : acc?.contents);
+          cachedUserProfile = {
+            name: item?.account_name?.text || item?.account_name?.toString?.() || "YouTube User",
+            email: item?.account_byline?.text || item?.account_byline?.toString?.() || "",
+            avatar: item?.account_photo?.slice(-1)[0]?.url || item?.account_photo?.[0]?.url || ""
+          };
+        } catch (_) {}
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        authenticated: isLoggedIn,
+        pending: pendingAuth && pendingAuth.status === "pending" ? {
+          user_code: pendingAuth.user_code,
+          verification_url: pendingAuth.verification_url,
+          expires_in: pendingAuth.expires_in,
+          startedAt: pendingAuth.startedAt
+        } : null,
+        user: isLoggedIn ? (cachedUserProfile || { name: "YouTube User" }) : null
+      }));
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message, authenticated: false }));
+    }
+    return;
+  }
+  if (parsedUrl.pathname === "/yt/auth/start") {
+    try {
+      const yt = await getClient("WEB");
+      if (yt.session.logged_in) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "authenticated" }));
+        return;
+      }
+      if (pendingAuth && pendingAuth.status === "pending" && Date.now() - pendingAuth.startedAt < (pendingAuth.expires_in || 300) * 1000) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "pending", ...pendingAuth }));
+        return;
+      }
+      pendingAuth = { status: "starting", startedAt: Date.now() };
+      yt.session.signIn().catch((err) => {
+        console.warn("[yt-server] signIn catch:", err.message);
+      });
+      const startWait = Date.now();
+      while (!pendingAuth?.user_code && Date.now() - startWait < 8000) {
+        if (pendingAuth?.status === "error") break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (pendingAuth?.status === "error") {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: pendingAuth.error || "Authentication error", status: "error" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        status: pendingAuth?.user_code ? "pending" : "starting",
+        user_code: pendingAuth?.user_code,
+        verification_url: pendingAuth?.verification_url || "https://www.google.com/device",
+        expires_in: pendingAuth?.expires_in || 1800
+      }));
+    } catch (err) {
+      console.error("[yt-server] Auth start error:", err);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+  if (parsedUrl.pathname === "/yt/auth/logout") {
+    try {
+      const yt = await getClient("WEB");
+      if (yt.session.logged_in) {
+        try {
+          await yt.session.signOut();
+        } catch (_) {
+          yt.session.logged_in = false;
+        }
+      }
+      if (fs.existsSync(authCredentialsFile)) {
+        try { fs.unlinkSync(authCredentialsFile); } catch (_) {}
+      }
+      pendingAuth = null;
+      cachedUserProfile = null;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "logged_out" }));
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+  if (parsedUrl.pathname === "/yt/feed/home") {
+    try {
+      const yt = await getClient("WEB");
+      let videos = [];
+      if (yt.session.logged_in) {
+        try {
+          const subs = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', client: 'TV' });
+          const tabs = subs.data?.contents?.tvBrowseRenderer?.content?.tvSecondaryNavRenderer?.sections?.[0]?.tvSecondaryNavSectionRenderer?.tabs || [];
+          const allItems = tabs[0]?.tabRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer?.contents?.[0]?.shelfRenderer?.content?.horizontalListRenderer?.items || [];
+          for (const item of allItems) {
+            const parsed = parseTvTile(item);
+            if (parsed && !videos.some((v) => v.id === parsed.id)) {
+              videos.push(parsed);
+            }
+          }
+          const channelNames = tabs.slice(1, 6).map((t) => t.tabRenderer?.title).filter((t) => t && t !== 'A-Z');
+          const guest = await getClient("GUEST");
+          for (const chName of channelNames) {
+            try {
+              const chSearch = await guest.search(chName, { type: 'video' });
+              const list = chSearch.videos || [];
+              for (const v of list.slice(0, 3)) {
+                if (v?.id && !videos.some((exist) => exist.id === v.id)) {
+                  videos.push({
+                    id: v.id,
+                    title: v.title?.text || v.title?.toString?.() || '',
+                    channel: v.author?.name || chName,
+                    thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+                    duration: v.duration?.text || '',
+                    views: v.short_view_count?.text || v.views?.text || '',
+                    published: v.published?.text || ''
+                  });
+                }
+              }
+            } catch (_) {}
+          }
+        } catch (e) {
+          console.warn("[yt-server] Personalized home error:", e.message);
+        }
+      }
+      if (videos.length === 0) {
+        try {
+          const guest = await getClient("GUEST");
+          const searchResult = await guest.search("trending popular new videos");
+          const list = searchResult.videos || [];
+          videos = list.filter((v) => v.id).map((v) => ({
+            id: v.id,
+            title: v.title?.text || v.title?.toString?.() || "",
+            channel: v.author?.name || "",
+            thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+            duration: v.duration?.text || "",
+            views: v.short_view_count?.text || v.views?.text || "",
+            published: v.published?.text || ""
+          }));
+        } catch (_) {}
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results: videos, authenticated: !!yt.session.logged_in }));
+    } catch (err) {
+      console.warn("[yt-server] Home feed error:", err.message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message, results: [] }));
+    }
+    return;
+  }
+  if (parsedUrl.pathname === "/yt/feed/subscriptions") {
+    try {
+      const yt = await getClient("WEB");
+      if (!yt.session.logged_in) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "You must be signed in to view your subscriptions.", authenticated: false, results: [] }));
+        return;
+      }
+      let videos = [];
+      try {
+        const subs = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', client: 'TV' });
+        const tabs = subs.data?.contents?.tvBrowseRenderer?.content?.tvSecondaryNavRenderer?.sections?.[0]?.tvSecondaryNavSectionRenderer?.tabs || [];
+        for (const tab of tabs) {
+          const items = tab?.tabRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer?.contents?.[0]?.shelfRenderer?.content?.horizontalListRenderer?.items || [];
+          for (const item of items) {
+            const parsed = parseTvTile(item);
+            if (parsed && !videos.some((v) => v.id === parsed.id)) {
+              videos.push(parsed);
+            }
+          }
+        }
+      } catch (subErr) {
+        console.warn("[yt-server] Subscriptions TV browse error:", subErr.message);
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results: videos, authenticated: true }));
+    } catch (err) {
+      console.warn("[yt-server] Subscriptions feed error:", err.message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message, results: [] }));
+    }
+    return;
+  }
+  if (parsedUrl.pathname === "/yt/feed/history") {
+    try {
+      const yt = await getClient("WEB");
+      if (!yt.session.logged_in) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "You must be signed in to view your watch history.", authenticated: false, results: [] }));
+        return;
+      }
+      let videos = [];
+      try {
+        const hist = await yt.session.actions.execute('/browse', { browseId: 'FEhistory', client: 'TV' });
+        const surface = hist.data?.contents?.tvBrowseRenderer?.content?.tvSurfaceContentRenderer?.content;
+        const sections = surface?.sectionListRenderer?.contents || [];
+        for (const s of sections) {
+          const items = s.shelfRenderer?.content?.horizontalListRenderer?.items || [];
+          for (const item of items) {
+            const parsed = parseTvTile(item);
+            if (parsed && !videos.some((v) => v.id === parsed.id)) {
+              videos.push(parsed);
+            }
+          }
+        }
+      } catch (hErr) {
+        console.warn("[yt-server] History browse error:", hErr.message);
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results: videos, authenticated: true }));
+    } catch (err) {
+      console.warn("[yt-server] History feed error:", err.message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message, results: [] }));
+    }
+    return;
+  }
+  if (parsedUrl.pathname === "/yt/feed/shorts") {
+    try {
+      const yt = await getClient("GUEST");
+      const searchRes = await yt.search("#shorts", { type: "video" });
+      const list = searchRes.videos || [];
+      const shorts = list.filter((v) => v.id).map((v) => ({
+        id: v.id,
+        title: v.title?.text || v.title?.toString?.() || "",
+        channel: v.author?.name || "",
+        thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+        duration: v.duration?.text || "",
+        views: v.short_view_count?.text || v.views?.text || "",
+        published: v.published?.text || "",
+        isShort: true
+      }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results: shorts }));
+    } catch (err) {
+      console.warn("[yt-server] Shorts feed error:", err.message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message, results: [] }));
+    }
+    return;
+  }
   if (parsedUrl.pathname === "/yt/search") {
     const rawQ = parsedUrl.searchParams.get("q") || "trending";
     const q = (rawQ.toLowerCase() === "trending" || rawQ.toLowerCase() === "all") ? "new popular videos" : rawQ;
     try {
-      const yt = await getClient("WEB");
+      const yt = await getClient("GUEST");
       const searchResult = await yt.search(q);
       const list = searchResult.videos && searchResult.videos.length ? searchResult.videos : searchResult.results || [];
       const videos = list.filter((v) => v.id || v.video_id).map((v) => ({

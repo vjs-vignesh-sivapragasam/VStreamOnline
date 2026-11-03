@@ -11,6 +11,7 @@ import Constants from 'expo-constants';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeSelector } from '@/components/settings/ThemeSelector';
+import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 
 const SettingsScreen = () => {
   const router = useRouter();
@@ -111,7 +112,17 @@ const SettingsScreen = () => {
             APPEARANCE
           </Text>
           <View style={styles.themeSectionWrapper}>
-            <ThemeSelector showPreviewBar={true} showNavigationLink={true} />
+            <ThemeSelector showPreviewBar={false} showNavigationLink={true} />
+          </View>
+        </View>
+
+        {/* Storage & Data Cleanup Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>
+            STORAGE & DATA CLEANUP
+          </Text>
+          <View style={styles.themeSectionWrapper}>
+            <StorageCleanupCard />
           </View>
         </View>
         

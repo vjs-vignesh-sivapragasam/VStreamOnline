@@ -24,12 +24,16 @@ import {
   YouTubeSearchResult,
   YouTubeVideoDetails,
   YouTubeFormatOption,
+  YouTubeAuthStatus,
   extractYouTubeVideoId,
 } from '@/services/YouTubeService';
 import { youTubeListService, SavedYouTubeItem } from '@/services/YouTubeListService';
 import { downloadService } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
+import { YouTubeAuthModal } from '@/components/youtube/YouTubeAuthModal';
+import { useTheme } from '@/hooks/useTheme';
 import { useYouTubePlayer } from '@/contexts/YouTubePlayerContext';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { isHapticsSupported } from '@/utils/platform';
@@ -38,6 +42,7 @@ const { width } = Dimensions.get('window');
 
 const CATEGORY_CHIPS = [
   'All',
+  'Shorts',
   'Trending',
   'Tamil Movies',
   'Trailers',
@@ -59,6 +64,9 @@ const CATEGORY_MAP: Record<string, CategoryConfig> = {
     query: 'trending',
     sp: 'CAMSBAgDEAE%253D', // This week's top trending & viral videos
     refreshSp: 'CAMSBAgCEAE%253D', // Today's trending / newly viral videos (updates daily)
+  },
+  Shorts: {
+    query: '#shorts',
   },
   Trending: {
     query: 'trending',
@@ -94,6 +102,100 @@ const CATEGORY_MAP: Record<string, CategoryConfig> = {
   },
 };
 
+interface ShortCardProps {
+  item: YouTubeVideoItem;
+  isLoading: boolean;
+  onPress: (item: YouTubeVideoItem) => void;
+  width?: number;
+}
+
+const ShortCard = memo<ShortCardProps>(({ item, isLoading, onPress, width: customWidth }) => {
+  const cardWidth = customWidth || 148;
+  const cardHeight = Math.round(cardWidth * (16 / 9));
+
+  return (
+    <TouchableOpacity
+      style={[styles.shortCardContainer, { width: cardWidth, height: cardHeight }]}
+      activeOpacity={0.88}
+      onPress={() => onPress(item)}
+      disabled={isLoading}
+    >
+      <Image source={{ uri: item.thumbnail }} style={styles.shortThumbnailImage} />
+
+      {/* Smooth Bottom Gradient for text readability without any harsh box shadow */}
+      <LinearGradient
+        colors={['transparent', 'rgba(0, 0, 0, 0.35)', 'rgba(0, 0, 0, 0.88)']}
+        locations={[0, 0.5, 1]}
+        style={styles.shortGradientOverlay}
+        pointerEvents="none"
+      />
+
+      {/* Top Shorts Logo Badge */}
+      <View style={styles.shortBadgeContainer}>
+        <View style={styles.shortBadgeIconBox}>
+          <Ionicons name="play" size={9} color="#ffffff" />
+        </View>
+        <Text style={styles.shortBadgeText}>Shorts</Text>
+      </View>
+
+      {/* Bottom Title & Views */}
+      <View style={styles.shortMetaContainer}>
+        <Text style={styles.shortTitle} numberOfLines={2}>
+          {item.title}
+        </Text>
+        {item.views ? (
+          <Text style={styles.shortViewsText} numberOfLines={1}>
+            {item.views}
+          </Text>
+        ) : null}
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+interface ShortsShelfProps {
+  shorts: YouTubeVideoItem[];
+  isLoading: boolean;
+  onPressShort: (item: YouTubeVideoItem) => void;
+  onSeeAll?: () => void;
+}
+
+const ShortsShelf = memo<ShortsShelfProps>(({ shorts, isLoading, onPressShort, onSeeAll }) => {
+  if (shorts.length === 0) return null;
+
+  return (
+    <View style={styles.shortsShelfContainer}>
+      <View style={styles.shortsShelfHeader}>
+        <View style={styles.shortsShelfTitleRow}>
+          <View style={styles.shortsLogoIconBox}>
+            <Ionicons name="play" size={13} color="#ffffff" />
+          </View>
+          <Text style={styles.shortsShelfTitle}>Shorts</Text>
+        </View>
+        {onSeeAll && (
+          <TouchableOpacity
+            onPress={onSeeAll}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.shortsSeeAllText}>View all</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <FlatList
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        data={shorts}
+        keyExtractor={(item) => `shelf_short_${item.id}`}
+        contentContainerStyle={styles.shortsShelfContent}
+        renderItem={({ item }) => (
+          <ShortCard item={item} isLoading={isLoading} onPress={onPressShort} />
+        )}
+      />
+    </View>
+  );
+});
+
 interface VideoCardProps {
   item: YouTubeVideoItem;
   isLoading: boolean;
@@ -105,6 +207,7 @@ interface VideoCardProps {
 }
 
 const VideoCard = memo<VideoCardProps>(({ item, isLoading, isSaved, onPress, onDownload, onToggleSave, onCopyLink }) => {
+  const { theme } = useTheme();
   return (
     <TouchableOpacity
       style={styles.cardContainer}
@@ -158,7 +261,10 @@ const VideoCard = memo<VideoCardProps>(({ item, isLoading, isSaved, onPress, onD
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.cardBookmarkButton, isSaved && styles.cardBookmarkButtonActive]}
+            style={[
+              styles.cardBookmarkButton,
+              isSaved && [styles.cardBookmarkButtonActive, { backgroundColor: `${theme.primary}33` }],
+            ]}
             onPress={() => onToggleSave(item)}
             hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
             activeOpacity={0.7}
@@ -166,7 +272,7 @@ const VideoCard = memo<VideoCardProps>(({ item, isLoading, isSaved, onPress, onD
             <Ionicons
               name={isSaved ? 'bookmark' : 'bookmark-outline'}
               size={18}
-              color={isSaved ? '#535aff' : '#aaaaaa'}
+              color={isSaved ? theme.primary : '#aaaaaa'}
             />
           </TouchableOpacity>
 
@@ -186,6 +292,9 @@ const VideoCard = memo<VideoCardProps>(({ item, isLoading, isSaved, onPress, onD
 
 export default function YouTubeScreen() {
   const router = useRouter();
+  const { theme } = useTheme();
+  const [authStatus, setAuthStatus] = useState<YouTubeAuthStatus>({ authenticated: false });
+  const [isAuthModalVisible, setIsAuthModalVisible] = useState(false);
   const { playVideo: playInYouTubeWatch } = useYouTubePlayer();
   const flatListRef = useRef<FlatList>(null);
 
@@ -265,6 +374,42 @@ export default function YouTubeScreen() {
   const [modalLoading, setModalLoading] = useState(false);
   const [targetVideoItem, setTargetVideoItem] = useState<YouTubeVideoItem | null>(null);
 
+  // Check Google / YouTube auth status on mount
+  useEffect(() => {
+    let mounted = true;
+    youTubeService.getAuthStatus().then((status) => {
+      if (mounted) {
+        setAuthStatus(status);
+        if (status.authenticated && selectedCategory === 'All') {
+          setSelectedCategory('Home');
+        }
+      }
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  // Shorts Shelf state
+  const [shortsList, setShortsList] = useState<YouTubeVideoItem[]>([]);
+
+  // Load Shorts on mount
+  useEffect(() => {
+    let mounted = true;
+    youTubeService.getShortsFeed().then((res) => {
+      if (mounted && res.videos?.length) {
+        setShortsList(res.videos);
+      }
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  // Dynamic Category Chips reflecting Google Account feeds
+  const dynamicCategoryChips = useMemo(() => {
+    if (authStatus.authenticated) {
+      return ['Home', 'Shorts', 'Subscriptions', 'History', ...CATEGORY_CHIPS.filter((c) => c !== 'All' && c !== 'Shorts')];
+    }
+    return CATEGORY_CHIPS;
+  }, [authStatus.authenticated]);
+
   /**
    * Fetch videos for a query or category with daily updated feed support.
    */
@@ -275,25 +420,39 @@ export default function YouTubeScreen() {
 
     if (!isPullToRefresh) {
       setIsLoading(true);
+    } else {
+      youTubeService.getShortsFeed().then((res) => {
+        if (res.videos?.length) setShortsList(res.videos);
+      }).catch(() => {});
     }
 
     try {
-      let resolvedQuery = target;
-      let sp: string | undefined = undefined;
+      let result: YouTubeSearchResult;
 
-      const catConfig = CATEGORY_MAP[target];
-      if (catConfig) {
-        resolvedQuery = catConfig.query;
-        if (isPullToRefresh && catConfig.refreshSp) {
-          // Toggle sp on pull-to-refresh to fetch fresh daily videos
-          refreshToggleRef.current = !refreshToggleRef.current;
-          sp = refreshToggleRef.current ? catConfig.refreshSp : catConfig.sp;
-        } else {
-          sp = catConfig.sp;
+      if (target === 'Home') {
+        result = await youTubeService.getHomeFeed();
+      } else if (target === 'Shorts') {
+        result = await youTubeService.getShortsFeed();
+      } else if (target === 'Subscriptions') {
+        result = await youTubeService.getSubscriptionsFeed();
+      } else if (target === 'History') {
+        result = await youTubeService.getHistoryFeed();
+      } else {
+        let resolvedQuery = target;
+        let sp: string | undefined = undefined;
+
+        const catConfig = CATEGORY_MAP[target];
+        if (catConfig) {
+          resolvedQuery = catConfig.query;
+          if (isPullToRefresh && catConfig.refreshSp) {
+            refreshToggleRef.current = !refreshToggleRef.current;
+            sp = refreshToggleRef.current ? catConfig.refreshSp : catConfig.sp;
+          } else {
+            sp = catConfig.sp;
+          }
         }
+        result = await youTubeService.searchWithContinuation(resolvedQuery, sp);
       }
-
-      const result = await youTubeService.searchWithContinuation(resolvedQuery, sp);
 
       if (activeQueryRef.current !== target) return;
 
@@ -593,20 +752,34 @@ export default function YouTubeScreen() {
   };
 
   const renderVideoCard = useCallback(
-    ({ item }: { item: YouTubeVideoItem }) => {
+    ({ item, index }: { item: YouTubeVideoItem; index: number }) => {
+      const isShelfIndex = index === 1 && shortsList.length > 0 && selectedCategory !== 'Shorts' && !searchQuery.trim();
       return (
-        <VideoCard
-          item={item}
-          isLoading={loadingVideoId === item.id}
-          isSaved={savedIds.has(item.id)}
-          onPress={handlePlayVideo}
-          onDownload={handleOpenDownloadModal}
-          onToggleSave={handleToggleSave}
-          onCopyLink={handleCopyLink}
-        />
+        <View key={item.id}>
+          {isShelfIndex && (
+            <ShortsShelf
+              shorts={shortsList}
+              isLoading={loadingVideoId !== null}
+              onPressShort={handlePlayVideo}
+              onSeeAll={() => {
+                setSearchQuery('');
+                setSelectedCategory('Shorts');
+              }}
+            />
+          )}
+          <VideoCard
+            item={item}
+            isLoading={loadingVideoId === item.id}
+            isSaved={savedIds.has(item.id)}
+            onPress={handlePlayVideo}
+            onDownload={handleOpenDownloadModal}
+            onToggleSave={handleToggleSave}
+            onCopyLink={handleCopyLink}
+          />
+        </View>
       );
     },
-    [loadingVideoId, savedIds, handlePlayVideo, handleOpenDownloadModal, handleToggleSave, handleCopyLink]
+    [loadingVideoId, savedIds, shortsList, selectedCategory, searchQuery, handlePlayVideo, handleOpenDownloadModal, handleToggleSave, handleCopyLink]
   );
 
   const keyExtractor = useCallback((item: YouTubeVideoItem) => item.id, []);
@@ -670,11 +843,17 @@ export default function YouTubeScreen() {
             <Text style={styles.logoText}>Premium</Text>
           </TouchableOpacity>
 
-          {/* Top Header Icons: Search, My List, Download */}
+          {/* Top Header Icons in requested order: Search, My List, Download, User Profile Avatar */}
           <View style={styles.headerActionsRow}>
-            {/* Search Icon */}
+            {/* 1. Search Icon */}
             <TouchableOpacity
-              style={[styles.headerActionBtn, isSearchOpen && styles.headerActionBtnActive]}
+              style={[
+                styles.headerActionBtn,
+                isSearchOpen && [
+                  styles.headerActionBtnActive,
+                  { backgroundColor: `${theme.primary}33`, borderColor: theme.primary, borderWidth: 1 },
+                ],
+              ]}
               onPress={() => {
                 setIsSearchOpen((prev) => {
                   const next = !prev;
@@ -694,9 +873,15 @@ export default function YouTubeScreen() {
               />
             </TouchableOpacity>
 
-            {/* My List Icon */}
+            {/* 2. My List Icon */}
             <TouchableOpacity
-              style={[styles.headerActionBtn, myListModalVisible && styles.headerActionBtnActive]}
+              style={[
+                styles.headerActionBtn,
+                myListModalVisible && [
+                  styles.headerActionBtnActive,
+                  { backgroundColor: `${theme.primary}33`, borderColor: theme.primary, borderWidth: 1 },
+                ],
+              ]}
               onPress={async () => {
                 if (await isHapticsSupported()) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -712,7 +897,7 @@ export default function YouTubeScreen() {
                 color="#ffffff"
               />
               {savedList.length > 0 && (
-                <View style={styles.headerBadge}>
+                <View style={[styles.headerBadge, { backgroundColor: theme.primary }]}>
                   <Text style={styles.headerBadgeText}>
                     {savedList.length > 99 ? '99+' : savedList.length}
                   </Text>
@@ -720,7 +905,7 @@ export default function YouTubeScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Download Icon */}
+            {/* 3. Download Icon */}
             <TouchableOpacity
               style={styles.headerActionBtn}
               onPress={async () => {
@@ -738,11 +923,43 @@ export default function YouTubeScreen() {
                 color="#ffffff"
               />
               {downloadsCount > 0 && (
-                <View style={styles.headerBadge}>
+                <View style={[styles.headerBadge, { backgroundColor: theme.primary }]}>
                   <Text style={styles.headerBadgeText}>
                     {downloadsCount > 99 ? '99+' : downloadsCount}
                   </Text>
                 </View>
+              )}
+            </TouchableOpacity>
+
+            {/* 4. Google / YouTube Account Profile Avatar Button */}
+            <TouchableOpacity
+              style={[
+                styles.headerActionBtn,
+                authStatus.authenticated && [styles.headerAccountBtn, { borderColor: theme.primary }],
+              ]}
+              onPress={async () => {
+                if (await isHapticsSupported()) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }
+                setIsAuthModalVisible(true);
+              }}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+            >
+              {authStatus.authenticated && authStatus.user?.avatar ? (
+                <Image source={{ uri: authStatus.user.avatar }} style={styles.headerAvatarImg} />
+              ) : authStatus.authenticated ? (
+                <View style={[styles.headerAvatarFallback, { backgroundColor: theme.primary }]}>
+                  <Text style={styles.headerAvatarFallbackText}>
+                    {(authStatus.user?.name || 'U').charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              ) : (
+                <Ionicons
+                  name="person-circle-outline"
+                  size={23}
+                  color="#ffffff"
+                />
               )}
             </TouchableOpacity>
           </View>
@@ -769,12 +986,12 @@ export default function YouTubeScreen() {
             ) : (
               <TouchableOpacity
                 onPress={handlePasteLink}
-                style={styles.pasteButton}
+                style={[styles.pasteButton, { backgroundColor: `${theme.primary}25` }]}
                 activeOpacity={0.7}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name="clipboard-outline" size={15} color="#535aff" style={{ marginRight: 4 }} />
-                <Text style={styles.pasteButtonText}>Paste</Text>
+                <Ionicons name="clipboard-outline" size={15} color={theme.primary} style={{ marginRight: 4 }} />
+                <Text style={[styles.pasteButtonText, { color: theme.primary }]}>Paste</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -786,7 +1003,7 @@ export default function YouTubeScreen() {
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={CATEGORY_CHIPS}
+          data={dynamicCategoryChips}
           keyExtractor={(item) => item}
           contentContainerStyle={styles.chipsContent}
           renderItem={({ item }) => {
@@ -801,8 +1018,52 @@ export default function YouTubeScreen() {
                   setSearchQuery('');
                   setSelectedCategory(item);
                 }}
+                activeOpacity={0.8}
               >
-                <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                {item === 'Home' && (
+                  <Ionicons
+                    name="sparkles"
+                    size={13}
+                    color={isSelected ? '#000000' : theme.primary}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
+                {item === 'Shorts' && (
+                  <Ionicons
+                    name="play-circle"
+                    size={14}
+                    color={isSelected ? '#000000' : '#FF0000'}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
+                {item === 'Trending' && (
+                  <Ionicons
+                    name="flame"
+                    size={13}
+                    color={isSelected ? '#000000' : '#FF6B00'}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
+                {item === 'Subscriptions' && (
+                  <Ionicons
+                    name="albums-outline"
+                    size={13}
+                    color={isSelected ? '#000000' : theme.primary}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
+                {item === 'History' && (
+                  <Ionicons
+                    name="time-outline"
+                    size={13}
+                    color={isSelected ? '#000000' : theme.primary}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
+                <Text
+                  style={[styles.chipText, isSelected && styles.chipTextSelected]}
+                  numberOfLines={1}
+                >
                   {item}
                 </Text>
               </TouchableOpacity>
@@ -810,8 +1071,6 @@ export default function YouTubeScreen() {
           }}
         />
       </View>
-
-
 
       {/* Videos List Feed */}
       {isLoading && !refreshing ? (
@@ -845,8 +1104,39 @@ export default function YouTubeScreen() {
             </TouchableOpacity>
           )}
         </View>
+      ) : selectedCategory === 'Shorts' ? (
+        <FlatList
+          key="shorts_grid"
+          ref={flatListRef}
+          data={videos}
+          keyExtractor={keyExtractor}
+          numColumns={2}
+          columnWrapperStyle={styles.shortsGridColumnWrapper}
+          contentContainerStyle={styles.shortsGridContent}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          renderItem={({ item }) => (
+            <ShortCard
+              item={item}
+              isLoading={loadingVideoId === item.id}
+              onPress={handlePlayVideo}
+              width={(width - 42) / 2}
+            />
+          )}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#FF0000"
+              colors={['#FF0000']}
+            />
+          }
+        />
       ) : (
         <FlatList
+          key="videos_list"
           ref={flatListRef}
           data={videos}
           keyExtractor={keyExtractor}
@@ -905,11 +1195,11 @@ export default function YouTubeScreen() {
             {/* Modal Header */}
             <View style={styles.myListHeader}>
               <View style={styles.myListTitleRow}>
-                <Ionicons name="bookmark" size={20} color="#535aff" style={{ marginRight: 8 }} />
+                <Ionicons name="bookmark" size={20} color={theme.primary} style={{ marginRight: 8 }} />
                 <Text style={styles.myListTitle}>My List</Text>
                 {savedList.length > 0 && (
-                  <View style={styles.myListCountBadge}>
-                    <Text style={styles.myListCountText}>{savedList.length}</Text>
+                  <View style={[styles.myListCountBadge, { backgroundColor: `${theme.primary}33` }]}>
+                    <Text style={[styles.myListCountText, { color: theme.primary }]}>{savedList.length}</Text>
                   </View>
                 )}
               </View>
@@ -1000,6 +1290,21 @@ export default function YouTubeScreen() {
           </View>
         </View>
       </Modal>
+      {/* YouTube Google Account / SSO Modal */}
+      <YouTubeAuthModal
+        visible={isAuthModalVisible}
+        onClose={() => setIsAuthModalVisible(false)}
+        authStatus={authStatus}
+        onAuthChange={(s) => {
+          setAuthStatus(s);
+          if (s.authenticated) {
+            setSelectedCategory('Home');
+          } else {
+            setSelectedCategory('All');
+          }
+        }}
+        onSelectFeed={(feed) => setSelectedCategory(feed)}
+      />
     </SafeAreaView>
   );
 }
@@ -1041,13 +1346,35 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   headerActionBtnActive: {
-    backgroundColor: 'rgba(83, 90, 255, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  headerAccountBtn: {
+    borderWidth: 1.5,
+    borderColor: '#ffffff',
+    overflow: 'hidden',
+  },
+  headerAvatarImg: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+  },
+  headerAvatarFallback: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarFallbackText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
   },
   headerBadge: {
     position: 'absolute',
     top: -2,
     right: -4,
-    backgroundColor: '#535aff',
+    backgroundColor: '#ff0000',
     borderRadius: 9,
     minWidth: 18,
     height: 18,
@@ -1072,9 +1399,14 @@ const styles = StyleSheet.create({
   },
   logoText: {
     color: '#ffffff',
-    fontSize: 20,
+    fontSize: 21,
+    fontFamily: Platform.select({
+      ios: 'AvenirNextCondensed-Bold',
+      android: 'sans-serif-condensed',
+      default: 'sans-serif',
+    }),
     fontWeight: '800',
-    letterSpacing: -0.5,
+    letterSpacing: -0.7,
   },
   adFreeBadge: {
     backgroundColor: 'rgba(0, 255, 136, 0.15)',
@@ -1121,13 +1453,13 @@ const styles = StyleSheet.create({
   pasteButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(83, 90, 255, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   pasteButtonText: {
-    color: '#7b82ff',
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -1141,17 +1473,21 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'nowrap',
     paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingVertical: 7,
+    borderRadius: 18,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   chipButtonSelected: {
     backgroundColor: '#ffffff',
   },
   savedChipButton: {
-    backgroundColor: 'rgba(83, 90, 255, 0.15)',
-    borderColor: '#535aff',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1160,9 +1496,128 @@ const styles = StyleSheet.create({
     color: '#aaaaaa',
     fontSize: 13,
     fontWeight: '600',
+    flexShrink: 0,
   },
   chipTextSelected: {
     color: '#000000',
+  },
+
+  // Shorts Shelf & Grid Styles (Real YouTube Look)
+  shortsShelfContainer: {
+    paddingVertical: 14,
+    marginBottom: 16,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+  },
+  shortsShelfHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  shortsShelfTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  shortsLogoIconBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: '#FF0000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shortsShelfTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  shortsSeeAllText: {
+    color: '#7b82ff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  shortsShelfContent: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  shortCardContainer: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#1c1c20',
+    position: 'relative',
+  },
+  shortThumbnailImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  shortGradientOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '46%',
+  },
+  shortBadgeContainer: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    gap: 4,
+  },
+  shortBadgeIconBox: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    backgroundColor: '#FF0000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shortBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  shortMetaContainer: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    right: 10,
+  },
+  shortTitle: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 17,
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    marginBottom: 4,
+  },
+  shortViewsText: {
+    color: '#dddddd',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  shortsGridColumnWrapper: {
+    paddingHorizontal: 14,
+    gap: 10,
+    marginBottom: 14,
+  },
+  shortsGridContent: {
+    paddingTop: 12,
+    paddingBottom: 110,
   },
   feedScrollContent: {
     paddingBottom: 110,
@@ -1259,7 +1714,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   cardBookmarkButtonActive: {
-    backgroundColor: 'rgba(83, 90, 255, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   cardDownloadButton: {
     padding: 6,
@@ -1455,10 +1910,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 10,
-    backgroundColor: 'rgba(83, 90, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
   myListCountText: {
-    color: '#535aff',
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: '700',
   },

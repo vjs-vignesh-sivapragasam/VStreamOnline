@@ -260,7 +260,7 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
                                 <View style={styles.toggleOption}>
                                     <View style={[
                                         styles.radioButton,
-                                        useDefaultKey && styles.radioButtonSelected
+                                        useDefaultKey && [styles.radioButtonSelected, { borderColor: theme.primary }]
                                     ]}>
                                         {useDefaultKey && <View style={[styles.radioButtonInner, { backgroundColor: theme.primary }]} />}
                                     </View>
@@ -269,9 +269,9 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
                                 <View style={styles.toggleOption}>
                                     <View style={[
                                         styles.radioButton,
-                                        !useDefaultKey && styles.radioButtonSelected
+                                        !useDefaultKey && [styles.radioButtonSelected, { borderColor: theme.primary }]
                                     ]}>
-                                        {!useDefaultKey && <View style={styles.radioButtonInner} />}
+                                        {!useDefaultKey && <View style={[styles.radioButtonInner, { backgroundColor: theme.primary }]} />}
                                     </View>
                                     <Text style={styles.toggleText}>Custom API Key</Text>
                                 </View>
@@ -309,7 +309,7 @@ const OpenSubtitlesConfigScreen: React.FC = () => {
                             )}
                             
                             {useDefaultKey && (
-                                <View style={styles.infoBox}>
+                                <View style={[styles.infoBox, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' }]}>
                                     <Ionicons name="information-circle-outline" size={18} color={theme.primary} />
                                     <Text style={styles.infoText}>
                                         Using the default API key for OpenSubtitles (Rate-Limited)
@@ -466,13 +466,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     radioButtonSelected: {
-        borderColor: '#535aff',
+        borderColor: '#ffffff',
     },
     radioButtonInner: {
         width: 10,
         height: 10,
         borderRadius: 5,
-        backgroundColor: '#535aff',
+        backgroundColor: '#ffffff',
     },
     toggleText: {
         fontSize: 14,
@@ -509,10 +509,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 8,
         padding: 12,
-        backgroundColor: 'rgba(83, 90, 255, 0.1)',
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
         borderRadius: 8,
         borderWidth: 1,
-        borderColor: 'rgba(83, 90, 255, 0.3)',
+        borderColor: 'rgba(255, 255, 255, 0.12)',
         marginTop: 12,
     },
     infoText: {

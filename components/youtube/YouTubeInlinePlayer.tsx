@@ -71,7 +71,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   duration,
   seekTarget,
   playbackError,
-  currentQuality = 'Auto',
+  currentQuality = '480p',
   playbackSpeed = 1.0,
   isLooping = false,
   availableQualities = ['Auto', '1080p', '720p', '480p', '360p'],
@@ -88,7 +88,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   onPlaybackError,
   onRetry,
 }) => {
-  const [showControls, setShowControls] = useState(true);
+  const [showControls, setShowControls] = useState(false);
+  const [videoResizeMode, setVideoResizeMode] = useState<'cover' | 'contain'>('cover');
+  const [feedbackPill, setFeedbackPill] = useState<string | null>(null);
+  const feedbackTimerRef = useRef<any>(null);
   const [isSliding, setIsSliding] = useState(false);
   const [sliderPos, setSliderPos] = useState(0);
   const [useKSPlayer, setUseKSPlayer] = useState(Platform.OS === 'ios');
@@ -101,6 +104,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const hideTimerRef = useRef<any>(null);
   const videoRef = useRef<VideoRef>(null);
   const ksRef = useRef<KSPlayerRef>(null);
+
+  // Initially hide controls when a new video stream loads
+  useEffect(() => {
+    setShowControls(false);
+  }, [streamUrl]);
 
   useEffect(() => {
     console.log('[YouTubeInlinePlayer] 🎬 streamUrl:', streamUrl ? streamUrl.substring(0, 85) + '...' : 'null');
@@ -115,6 +123,69 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       setShowControls(false);
     }, 3500);
   }, []);
+
+  const handleToggleResizeMode = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setVideoResizeMode((prev) => {
+      const next = prev === 'cover' ? 'contain' : 'cover';
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      setFeedbackPill(next === 'cover' ? 'Fit to Screen' : 'Original (Contain)');
+      feedbackTimerRef.current = setTimeout(() => {
+        setFeedbackPill(null);
+      }, 1800);
+      return next;
+    });
+    scheduleControlsHide();
+  }, [scheduleControlsHide]);
+
+  const [isAutoplay, setIsAutoplay] = useState(true);
+  const [isCCOn, setIsCCOn] = useState(false);
+
+  const handleToggleAutoplay = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setIsAutoplay((prev) => {
+      const next = !prev;
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      setFeedbackPill(next ? 'Autoplay is on' : 'Autoplay is off');
+      feedbackTimerRef.current = setTimeout(() => {
+        setFeedbackPill(null);
+      }, 1800);
+      return next;
+    });
+    scheduleControlsHide();
+  }, [scheduleControlsHide]);
+
+  const handleToggleCC = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setIsCCOn((prev) => {
+      const next = !prev;
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      setFeedbackPill(next ? 'Subtitles turned on' : 'Subtitles turned off');
+      feedbackTimerRef.current = setTimeout(() => {
+        setFeedbackPill(null);
+      }, 1800);
+      return next;
+    });
+    scheduleControlsHide();
+  }, [scheduleControlsHide]);
+
+  const handleCastPress = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    setFeedbackPill('Searching for cast devices...');
+    feedbackTimerRef.current = setTimeout(() => {
+      setFeedbackPill(null);
+    }, 1800);
+    scheduleControlsHide();
+  }, [scheduleControlsHide]);
 
   const handleToggleControls = useCallback(() => {
     setShowControls((prev) => {
@@ -172,7 +243,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
             paused={!isPlaying}
             rate={playbackSpeed}
-            resizeMode="contain"
+            resizeMode={videoResizeMode}
             style={StyleSheet.absoluteFill}
             onProgress={(e) => {
               if (!isSliding) {
@@ -204,7 +275,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             source={{ uri: streamUrl }}
             paused={!isPlaying}
             rate={playbackSpeed}
-            resizeMode="contain"
+            resizeMode={videoResizeMode}
             style={StyleSheet.absoluteFill}
             controls={false}
             playInBackground={false}
@@ -270,12 +341,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   </TouchableOpacity>
                 )}
               </View>
-            ) : (
-              <>
-                <ActivityIndicator size="large" color="#ff0000" />
-                <Text style={styles.loadingText}>Loading video stream...</Text>
-              </>
-            )}
+            ) : null}
           </View>
         </View>
       )}
@@ -306,10 +372,23 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
 
 
+      {/* Visual Feedback Pill for Aspect Ratio */}
+      {feedbackPill ? (
+        <View style={styles.gestureFeedbackPill} pointerEvents="none">
+          <Ionicons
+            name={videoResizeMode === 'cover' ? 'expand' : 'contract'}
+            size={14}
+            color="#ffffff"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.gestureFeedbackText}>{feedbackPill}</Text>
+        </View>
+      ) : null}
+
       {/* Controls Overlay */}
       {showControls && (
         <View style={styles.controlsOverlay} pointerEvents="box-none">
-          {/* Top Bar: Minimize Chevron, Theater Pill & Quality Tag */}
+          {/* Top Bar: Real YouTube Icons (Chevron Down, Autoplay, Cast, CC, Screen Fit, Settings) */}
           <View style={styles.topBar}>
             <TouchableOpacity
               style={styles.iconButton}
@@ -317,28 +396,66 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               activeOpacity={0.7}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <Ionicons name="chevron-down" size={28} color="#ffffff" />
+              <Ionicons name="chevron-down" size={26} color="#ffffff" />
             </TouchableOpacity>
 
             <View style={styles.topBarRight}>
-              {/* Quality Resolution Badge (Tapping opens Quality selection) */}
+              {/* Autoplay Toggle Switch */}
               <TouchableOpacity
-                style={styles.qualityBadge}
-                onPress={() => {
-                  setSettingsSubView('quality');
-                  setSettingsModalVisible(true);
-                }}
+                style={[styles.autoplayToggleTrack, isAutoplay && styles.autoplayToggleTrackOn]}
+                onPress={handleToggleAutoplay}
+                activeOpacity={0.8}
+                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+              >
+                <View style={[styles.autoplayToggleThumb, isAutoplay && styles.autoplayToggleThumbOn]}>
+                  <Ionicons
+                    name={isAutoplay ? 'play' : 'pause'}
+                    size={8}
+                    color="#000000"
+                    style={isAutoplay ? { marginLeft: 1 } : undefined}
+                  />
+                </View>
+              </TouchableOpacity>
+
+              {/* Cast Icon */}
+              <TouchableOpacity
+                style={styles.topIconBtn}
+                onPress={handleCastPress}
                 activeOpacity={0.7}
                 hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
               >
-                <Text style={styles.qualityBadgeText}>
-                  {currentQuality === 'Auto' ? 'HD' : currentQuality}
-                </Text>
+                <Ionicons name="tv-outline" size={20} color="#ffffff" />
               </TouchableOpacity>
 
-              {/* Settings Gear Button (Tapping opens Settings menu) */}
+              {/* Closed Captions (CC) Icon */}
               <TouchableOpacity
-                style={styles.settingsGearBtn}
+                style={styles.topIconBtn}
+                onPress={handleToggleCC}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+              >
+                <View style={[styles.ccIconBadge, isCCOn && styles.ccIconBadgeActive]}>
+                  <Text style={[styles.ccIconText, isCCOn && styles.ccIconTextActive]}>CC</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Screen Fit / Zoom Toggle Button */}
+              <TouchableOpacity
+                style={styles.topIconBtn}
+                onPress={handleToggleResizeMode}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+              >
+                <Ionicons
+                  name={videoResizeMode === 'cover' ? 'contract-outline' : 'scan-outline'}
+                  size={19}
+                  color="#ffffff"
+                />
+              </TouchableOpacity>
+
+              {/* Settings Gear Button */}
+              <TouchableOpacity
+                style={styles.topIconBtn}
                 onPress={() => {
                   setSettingsSubView('main');
                   setSettingsModalVisible(true);
@@ -346,24 +463,25 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 activeOpacity={0.7}
                 hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
               >
-                <Ionicons name="settings-outline" size={20} color="#ffffff" />
+                <Ionicons name="settings-sharp" size={20} color="#ffffff" />
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Center Playback Controls */}
+          {/* Center Playback Controls: Real YouTube Circular Controls */}
           <View style={styles.centerControls} pointerEvents="box-none">
+            {/* Previous Track / Skip Backward */}
             <TouchableOpacity
-              style={styles.skipButton}
+              style={styles.centerSkipBtn}
               onPress={() => handleSkip(-10)}
               activeOpacity={0.7}
             >
-              <Ionicons name="play-back" size={26} color="#ffffff" />
-              <Text style={styles.skipText}>10</Text>
+              <Ionicons name="play-skip-back" size={22} color="#ffffff" />
             </TouchableOpacity>
 
+            {/* Play / Pause Large Center Circle */}
             <TouchableOpacity
-              style={styles.playPauseButton}
+              style={styles.centerPlayPauseBtn}
               onPress={() => {
                 onTogglePlay();
                 scheduleControlsHide();
@@ -375,76 +493,96 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               ) : (
                 <Ionicons
                   name={isPlaying ? 'pause' : 'play'}
-                  size={34}
+                  size={32}
                   color="#ffffff"
                   style={{ marginLeft: isPlaying ? 0 : 3 }}
                 />
               )}
             </TouchableOpacity>
 
+            {/* Next Track / Skip Forward */}
             <TouchableOpacity
-              style={styles.skipButton}
+              style={styles.centerSkipBtn}
               onPress={() => handleSkip(10)}
               activeOpacity={0.7}
             >
-              <Ionicons name="play-forward" size={26} color="#ffffff" />
-              <Text style={styles.skipText}>10</Text>
+              <Ionicons name="play-skip-forward" size={22} color="#ffffff" />
             </TouchableOpacity>
           </View>
 
-          {/* Bottom Bar: Scrubber, Timestamps & Fullscreen Icon */}
-          <View style={styles.bottomBar}>
-            <View style={styles.sliderContainer}>
-              <Slider
-                style={styles.slider}
-                minimumValue={0}
-                maximumValue={1}
-                value={progressPct}
-                onValueChange={(val) => {
-                  setIsSliding(true);
-                  setSliderPos(val);
-                }}
-                onSlidingComplete={(val) => {
-                  setIsSliding(false);
-                  onSeek(val * (duration || 1));
-                  scheduleControlsHide();
-                }}
-                minimumTrackTintColor="#ff0000"
-                maximumTrackTintColor="rgba(255, 255, 255, 0.35)"
-                thumbTintColor="#ff0000"
-                thumbSize={14}
-                trackHeight={3}
-              />
-            </View>
+          {/* Bottom Bar: Real YouTube Time Pill, Chapter Pill & Fullscreen Icon */}
+          <View style={styles.bottomMetaRow}>
+            <View style={styles.bottomLeftPills}>
+              {/* Time Pill */}
+              <View style={styles.timePill}>
+                <Text style={styles.timePillText}>
+                  {formatTime(isSliding ? sliderPos * duration : currentTime)} / {formatTime(duration)}
+                </Text>
+              </View>
 
-            <View style={styles.bottomMetaRow}>
-              <Text style={styles.timeText}>
-                {formatTime(isSliding ? sliderPos * duration : currentTime)} / {formatTime(duration)}
-              </Text>
-
+              {/* Chapter / Quality Pill */}
               <TouchableOpacity
-                style={styles.fullscreenButton}
-                onPress={onFullScreen}
+                style={styles.chapterPill}
+                onPress={() => {
+                  setSettingsSubView('quality');
+                  setSettingsModalVisible(true);
+                }}
                 activeOpacity={0.7}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name="scan-outline" size={20} color="#ffffff" />
+                <Text style={styles.chapterPillText} numberOfLines={1}>
+                  {currentQuality || '480p'}
+                </Text>
+                <Ionicons name="chevron-forward" size={11} color="rgba(255, 255, 255, 0.7)" />
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              style={styles.fullscreenButton}
+              onPress={onFullScreen}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="scan-outline" size={20} color="#ffffff" />
+            </TouchableOpacity>
           </View>
         </View>
       )}
 
-      {/* Real YouTube Slim Bottom Scrub Line (shown when controls are hidden) */}
-      {!showControls && duration > 0 && (
-        <View style={styles.slimScrubTrack} pointerEvents="none">
-          <View
-            style={[
-              styles.slimScrubFill,
-              { width: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%` },
-            ]}
-          />
-        </View>
+      {/* ONLY ONE Single Progress Bar at Bottom Position */}
+      {duration > 0 && (
+        showControls ? (
+          <View style={styles.bottomScrubberContainer}>
+            <Slider
+              style={styles.bottomSlider}
+              minimumValue={0}
+              maximumValue={1}
+              value={progressPct}
+              onValueChange={(val) => {
+                setIsSliding(true);
+                setSliderPos(val);
+              }}
+              onSlidingComplete={(val) => {
+                setIsSliding(false);
+                onSeek(val * (duration || 1));
+                scheduleControlsHide();
+              }}
+              minimumTrackTintColor="#ff0000"
+              maximumTrackTintColor="rgba(255, 255, 255, 0.35)"
+              thumbTintColor="#ff0000"
+              thumbSize={12}
+              trackHeight={3}
+            />
+          </View>
+        ) : (
+          <View style={styles.slimScrubTrack} pointerEvents="none">
+            <View
+              style={[
+                styles.slimScrubFill,
+                { width: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%` },
+              ]}
+            />
+          </View>
+        )
       )}
 
       {/* Player Settings Bottom Sheet Modal */}
@@ -509,6 +647,24 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                       {playbackSpeed === 1.0 ? 'Normal' : `${playbackSpeed}x`}
                     </Text>
                     <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
+                  </View>
+                </TouchableOpacity>
+
+                {/* Screen Fit / Aspect Ratio Option */}
+                <TouchableOpacity
+                  style={styles.settingsRow}
+                  onPress={handleToggleResizeMode}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.settingsRowLeft}>
+                    <Ionicons name="scan-outline" size={20} color="#ffffff" />
+                    <Text style={styles.settingsRowLabel}>Screen fit</Text>
+                  </View>
+                  <View style={styles.settingsRowRight}>
+                    <Text style={[styles.settingsRowValue, videoResizeMode === 'cover' && { color: '#535aff', fontWeight: '700' }]}>
+                      {videoResizeMode === 'cover' ? 'Fit to Screen (Fill)' : 'Original (Fit)'}
+                    </Text>
+                    <Ionicons name="swap-horizontal" size={16} color="rgba(255, 255, 255, 0.45)" />
                   </View>
                 </TouchableOpacity>
 
@@ -663,7 +819,63 @@ const styles = StyleSheet.create({
   topBarRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
+  },
+  topIconBtn: {
+    padding: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  autoplayToggleTrack: {
+    width: 32,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  autoplayToggleTrackOn: {
+    backgroundColor: '#ffffff',
+  },
+  autoplayToggleThumb: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  autoplayToggleThumbOn: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#0f0f0f',
+  },
+  ccIconBadge: {
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+  },
+  ccIconBadgeActive: {
+    borderColor: '#ffffff',
+    backgroundColor: '#ffffff',
+  },
+  ccIconText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#ffffff',
+    lineHeight: 10,
+  },
+  ccIconTextActive: {
+    color: '#000000',
+  },
+  fitModeBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   gestureFeedbackPill: {
     position: 'absolute',
@@ -744,9 +956,11 @@ const styles = StyleSheet.create({
   },
   controlsOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.42)',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     justifyContent: 'space-between',
-    padding: 12,
+    paddingTop: 10,
+    paddingHorizontal: 12,
+    paddingBottom: 6,
   },
   topBar: {
     flexDirection: 'row',
@@ -756,75 +970,87 @@ const styles = StyleSheet.create({
   iconButton: {
     padding: 4,
   },
-  qualityBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  qualityBadgeText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
   centerControls: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 36,
+    gap: 32,
   },
-  skipButton: {
+  centerSkipBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 8,
   },
-  skipText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: -2,
-  },
-  playPauseButton: {
+  centerPlayPauseBtn: {
     width: 60,
     height: 60,
     borderRadius: 30,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  bottomBar: {
-    width: '100%',
-  },
-  sliderContainer: {
-    height: 20,
-    justifyContent: 'center',
-  },
-  slider: {
-    width: '100%',
-    height: 20,
   },
   bottomMetaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 2,
+    marginBottom: 4,
   },
-  timeText: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 11,
-    fontWeight: '500',
+  bottomLeftPills: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  timePill: {
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  timePillText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
-  fullscreenButton: {
-    padding: 4,
+  chapterPill: {
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: 160,
   },
-  settingsGearBtn: {
-    width: 30,
-    height: 30,
+  chapterPillText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  fullscreenButton: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  bottomScrubberContainer: {
+    position: 'absolute',
+    bottom: -8,
+    left: 0,
+    right: 0,
+    height: 20,
+    justifyContent: 'center',
+    zIndex: 30,
+  },
+  bottomSlider: {
+    width: '100%',
+    height: 20,
   },
   settingsBackdrop: {
     flex: 1,

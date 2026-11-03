@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, usePathname } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
@@ -161,12 +162,12 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         );
       },
       onPanResponderRelease: async (_evt, gestureState) => {
-        // Swipe left (dx < -60) or swipe down (dy > 60) minimizes to miniplayer
+        // Swipe left (dx < -60) or swipe down (dy > 60) closes player
         if (gestureState.dx < -60 || gestureState.dy > 60) {
           if (await isHapticsSupported()) {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           }
-          minimize();
+          close();
         }
       },
     })
@@ -175,6 +176,8 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // Related videos state
   const [relatedVideos, setRelatedVideos] = useState<YouTubeVideoItem[]>([]);
   const [loadingRelated, setLoadingRelated] = useState(false);
+  const [shortsVideos, setShortsVideos] = useState<YouTubeVideoItem[]>([]);
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
 
   // Download modal state
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
@@ -231,8 +234,24 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       setCommentsList(DEFAULT_COMMENTS);
       setActiveDownloadItem(null);
 
-      // Fetch related recommendations
+      // Fetch related recommendations and shorts
       fetchRelated(currentVideo.channel || currentVideo.title);
+      youTubeService
+        .getShortsFeed(5000)
+        .then((res) => {
+          if (res.videos.length > 0) {
+            setShortsVideos(res.videos.slice(0, 4));
+          }
+        })
+        .catch(() => {});
+      youTubeService
+        .getAuthStatus()
+        .then((st) => {
+          if (st.authenticated && st.user?.avatar) {
+            setUserAvatar(st.user.avatar);
+          }
+        })
+        .catch(() => {});
     }
   }, [currentVideo?.id]);
 
@@ -408,64 +427,9 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // While fullscreen player is active, suppress the portrait overlay
   if (pathname === '/stream/player') return null;
 
-  // ── Render Floating Mini Player Bar when Minimized ─────────────────────────
+  // Mini player removed completely
   if (isMinimized) {
-    return (
-      <View style={styles.miniPlayerContainer} pointerEvents="box-none">
-        <TouchableOpacity
-          style={styles.miniPlayerBar}
-          activeOpacity={0.9}
-          onPress={expand}
-        >
-          {/* Mini 16:9 Thumbnail Preview */}
-          <View style={styles.miniThumbWrap}>
-            <Image
-              source={{ uri: currentVideo.thumbnail }}
-              style={styles.miniThumb}
-              resizeMode="cover"
-            />
-          </View>
-
-          {/* Mini Video Info */}
-          <View style={styles.miniInfo}>
-            <Text style={styles.miniTitle} numberOfLines={1}>
-              {currentVideo.title}
-            </Text>
-            <Text style={styles.miniChannel} numberOfLines={1}>
-              {currentVideo.channel}
-            </Text>
-          </View>
-
-          {/* Mini Play / Pause */}
-          <TouchableOpacity
-            style={styles.miniActionBtn}
-            onPress={(e) => {
-              e.stopPropagation();
-              togglePlay();
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons
-              name={isPlaying ? 'pause' : 'play'}
-              size={22}
-              color="#ffffff"
-            />
-          </TouchableOpacity>
-
-          {/* Mini Close Button */}
-          <TouchableOpacity
-            style={styles.miniActionBtn}
-            onPress={(e) => {
-              e.stopPropagation();
-              close();
-            }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="close" size={22} color="rgba(255, 255, 255, 0.75)" />
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </View>
-    );
+    return null;
   }
 
   // ── Render Full Real YouTube Watch Screen ──────────────────────────────────
@@ -486,7 +450,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             seekTarget={seekTarget}
             playbackError={playbackError}
             onTogglePlay={togglePlay}
-            onMinimize={minimize}
+            onMinimize={close}
             onFullScreen={handleFullScreen}
             onSeek={seekTo}
             onClearSeekTarget={clearSeekTarget}
@@ -563,143 +527,118 @@ const YouTubeWatchOverlayInner: React.FC = () => {
           )}
 
           {/* 2. Real YouTube Channel & Subscribe Row with Horizontal Action Buttons */}
-          <View style={styles.channelAndActionsRow}>
-            {/* Channel Avatar Circle */}
-            <View style={styles.channelAvatar}>
-              <Text style={styles.channelAvatarText}>
-                {(currentVideo.channel || 'Y')[0].toUpperCase()}
+          <View style={styles.channelRow}>
+            {/* Channel Avatar Circle & Channel Handle */}
+            <View style={styles.channelRowLeft}>
+              <View style={styles.channelAvatar}>
+                <Text style={styles.channelAvatarText}>
+                  {(currentVideo.channel || 'Y')[0].toUpperCase()}
+                </Text>
+              </View>
+              <Text style={styles.channelNameText} numberOfLines={1}>
+                {channelHandle}
               </Text>
+
+              {/* YouTube Subscribe / Bell Button */}
+              <TouchableOpacity
+                style={[styles.subscribeButton, isSubscribed && styles.subscribedButton]}
+                onPress={handleToggleSubscribe}
+                activeOpacity={0.8}
+              >
+                {isSubscribed ? (
+                  <View style={styles.subscribedBellWrap}>
+                    <Ionicons name="notifications" size={15} color="#ffffff" />
+                    <Ionicons name="chevron-down" size={12} color="#ffffff" style={{ marginLeft: 3 }} />
+                  </View>
+                ) : (
+                  <Text style={styles.subscribeButtonText}>Subscribe</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Action Pills in Horizontal Scroll */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.actionPillsScroll}
+            style={styles.actionsScrollView}
+          >
+            {/* Like / Dislike Split Pill */}
+            <View style={styles.likeDislikePill}>
+              <TouchableOpacity
+                style={styles.likeHalf}
+                onPress={handleLike}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={isLiked ? 'thumbs-up' : 'thumbs-up-outline'}
+                  size={17}
+                  color={isLiked ? '#535aff' : '#ffffff'}
+                />
+                <Text style={[styles.actionText, isLiked && { color: '#535aff' }]}>
+                  {isLiked ? '299' : '298'}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.actionDivider} />
+
+              <TouchableOpacity
+                style={styles.dislikeHalf}
+                onPress={handleDislike}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={isDisliked ? 'thumbs-down' : 'thumbs-down-outline'}
+                  size={17}
+                  color={isDisliked ? '#535aff' : '#ffffff'}
+                />
+              </TouchableOpacity>
             </View>
 
-            {/* Pure White YouTube Subscribe Button */}
+            {/* Share Pill */}
             <TouchableOpacity
-              style={[styles.subscribeButton, isSubscribed && styles.subscribedButton]}
-              onPress={handleToggleSubscribe}
-              activeOpacity={0.8}
+              style={styles.actionPill}
+              onPress={() => handleShare()}
+              activeOpacity={0.7}
             >
-              {isSubscribed && (
-                <Ionicons
-                  name="checkmark"
-                  size={14}
-                  color="#ffffff"
-                  style={{ marginRight: 4 }}
-                />
-              )}
-              <Text
-                style={[
-                  styles.subscribeButtonText,
-                  isSubscribed && styles.subscribedButtonText,
-                ]}
-              >
-                {isSubscribed ? 'Subscribed' : 'Subscribe'}
-              </Text>
+              <Ionicons name="arrow-redo-outline" size={17} color="#ffffff" />
+              <Text style={styles.actionText}>Share</Text>
             </TouchableOpacity>
 
-            {/* Action Pills in Horizontal Scroll */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.actionPillsScroll}
+            {/* Remix Pill (Sparkles) */}
+            <TouchableOpacity
+              style={styles.actionPill}
+              onPress={() => {
+                Alert.alert('Remix', 'YouTube Remix & Sound creation is ready for this video.');
+              }}
+              activeOpacity={0.7}
             >
-              {/* Like / Dislike Split Pill */}
-              <View style={styles.likeDislikePill}>
-                <TouchableOpacity
-                  style={styles.likeHalf}
-                  onPress={handleLike}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={isLiked ? 'thumbs-up' : 'thumbs-up-outline'}
-                    size={17}
-                    color={isLiked ? '#535aff' : '#ffffff'}
-                  />
-                  <Text style={[styles.actionText, isLiked && { color: '#535aff' }]}>
-                    {isLiked ? '4.5K' : '4.4K'}
-                  </Text>
-                </TouchableOpacity>
+              <Ionicons name="sparkles-outline" size={16} color="#ffffff" />
+              <Text style={styles.actionText}>Remix</Text>
+            </TouchableOpacity>
 
-                <View style={styles.actionDivider} />
+            {/* Download Pill */}
+            <TouchableOpacity
+              style={styles.actionPill}
+              onPress={() => {
+                if (currentVideo) handleOpenDownload(currentVideo);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-down-circle-outline" size={17} color="#ffffff" />
+              <Text style={styles.actionText}>Download</Text>
+            </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.dislikeHalf}
-                  onPress={handleDislike}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={isDisliked ? 'thumbs-down' : 'thumbs-down-outline'}
-                    size={17}
-                    color={isDisliked ? '#535aff' : '#ffffff'}
-                  />
-                </TouchableOpacity>
-              </View>
-
-              {/* Share Pill */}
-              <TouchableOpacity
-                style={styles.actionPill}
-                onPress={() => handleShare()}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="arrow-redo-outline" size={17} color="#ffffff" />
-                <Text style={styles.actionText}>Share</Text>
-              </TouchableOpacity>
-
-              {/* Remix Pill (Sparkles) */}
-              <TouchableOpacity
-                style={styles.actionPill}
-                onPress={() => {
-                  Alert.alert('Remix', 'YouTube Remix & Sound creation is ready for this video.');
-                }}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="sparkles-outline" size={16} color="#ffffff" />
-                <Text style={styles.actionText}>Remix</Text>
-              </TouchableOpacity>
-
-              {/* Download Pill */}
-              <TouchableOpacity
-                style={styles.actionPill}
-                onPress={() => {
-                  if (currentVideo) handleOpenDownload(currentVideo);
-                }}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="arrow-down-circle-outline" size={17} color="#ffffff" />
-                <Text style={styles.actionText}>Download</Text>
-              </TouchableOpacity>
-
-              {/* Save / Bookmark Pill */}
-              <TouchableOpacity
-                style={[styles.actionPill, isSaved && styles.actionPillActive]}
-                onPress={() => handleToggleSave()}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={isSaved ? 'bookmark' : 'bookmark-outline'}
-                  size={17}
-                  color={isSaved ? '#535aff' : '#ffffff'}
-                />
-                <Text style={[styles.actionText, isSaved && { color: '#535aff', fontWeight: '700' }]}>
-                  {isSaved ? 'Saved' : 'Save'}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Copy Link Pill */}
-              <TouchableOpacity
-                style={[styles.actionPill, isCopied && styles.actionPillActive]}
-                onPress={() => handleCopyLink()}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={isCopied ? 'checkmark' : 'copy-outline'}
-                  size={17}
-                  color={isCopied ? '#00e676' : '#ffffff'}
-                />
-                <Text style={[styles.actionText, isCopied && { color: '#00e676', fontWeight: '700' }]}>
-                  {isCopied ? 'Copied' : 'Copy link'}
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
+            {/* More Options Pill */}
+            <TouchableOpacity
+              style={styles.actionPillRound}
+              onPress={() => handleOpenItemOptions(currentVideo)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="ellipsis-horizontal" size={18} color="#ffffff" />
+            </TouchableOpacity>
+          </ScrollView>
 
           {/* 3. Real YouTube Comments Preview Card */}
           <TouchableOpacity
@@ -716,16 +655,68 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             </View>
 
             <View style={styles.commentsInputRow}>
-              <View style={styles.commentUserAvatar}>
-                <Ionicons name="person" size={13} color="#ffffff" />
-              </View>
+              {userAvatar ? (
+                <Image source={{ uri: userAvatar }} style={styles.commentAvatarImg} />
+              ) : (
+                <View style={styles.commentUserAvatar}>
+                  <Ionicons name="person" size={13} color="#ffffff" />
+                </View>
+              )}
               <View style={styles.mockCommentInput}>
                 <Text style={styles.mockCommentPlaceholder}>
-                  ✏️  Describe the vibe
+                  Comment...
                 </Text>
               </View>
             </View>
           </TouchableOpacity>
+
+          {/* 4. Real YouTube Shorts Shelf */}
+          {shortsVideos.length > 0 && (
+            <View style={styles.shortsShelfWrap}>
+              <View style={styles.shortsHeader}>
+                <View style={styles.shortsTitleRow}>
+                  <Ionicons name="logo-youtube" size={22} color="#ff0000" />
+                  <Text style={styles.shortsTitleText}>Shorts</Text>
+                </View>
+              </View>
+
+              <View style={styles.shortsGrid}>
+                {shortsVideos.slice(0, 2).map((item) => (
+                  <TouchableOpacity
+                    key={`short_${item.id}`}
+                    style={styles.shortCard}
+                    activeOpacity={0.9}
+                    onPress={() => playVideo(item)}
+                  >
+                    <Image source={{ uri: item.thumbnail }} style={styles.shortThumb} resizeMode="cover" />
+                    <LinearGradient
+                      colors={['transparent', 'rgba(0, 0, 0, 0.35)', 'rgba(0, 0, 0, 0.88)']}
+                      locations={[0, 0.5, 1]}
+                      style={styles.shortGradientBottom}
+                      pointerEvents="none"
+                    >
+                      <Text style={styles.shortVideoTitle} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      <Text style={styles.shortViewsText}>
+                        {item.views || '1.2M views'}
+                      </Text>
+                    </LinearGradient>
+                    <TouchableOpacity
+                      style={styles.shortDotsBtn}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleOpenItemOptions(item);
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="ellipsis-vertical" size={14} color="#ffffff" />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
 
           {/* 4. Real YouTube Up Next / Related Feed (Full-Width 16:9 Cards) */}
           <View style={styles.feedContainer}>
@@ -1137,6 +1128,30 @@ const styles = StyleSheet.create({
   },
 
   // ── Channel Row & Action Pills ─────────────────────────────────────────────
+  channelRow: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  channelRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  channelNameText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    maxWidth: 140,
+  },
+  subscribedBellWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionsScrollView: {
+    paddingHorizontal: 16,
+    marginVertical: 4,
+  },
   channelAndActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1216,6 +1231,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     gap: 6,
   },
+  actionPillRound: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   actionPillActive: {
     backgroundColor: 'rgba(83, 90, 255, 0.2)',
   },
@@ -1268,6 +1291,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  commentAvatarImg: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+  },
   mockCommentInput: {
     flex: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.07)',
@@ -1279,6 +1307,73 @@ const styles = StyleSheet.create({
   mockCommentPlaceholder: {
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.6)',
+  },
+
+  // ── Shorts Shelf Under Comments (Real YouTube Style) ───────────────────────
+  shortsShelfWrap: {
+    marginTop: 8,
+    marginBottom: 16,
+    paddingHorizontal: 16,
+  },
+  shortsHeader: {
+    marginBottom: 10,
+  },
+  shortsTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  shortsTitleText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+  shortsGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  shortCard: {
+    flex: 1,
+    aspectRatio: 9 / 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#1c1c1e',
+    position: 'relative',
+  },
+  shortThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  shortGradientBottom: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    paddingTop: 18,
+  },
+  shortVideoTitle: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  shortViewsText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 11,
+    marginTop: 3,
+  },
+  shortDotsBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // ── Up Next / Related Full-Width 16:9 Feed ─────────────────────────────────

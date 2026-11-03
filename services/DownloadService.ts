@@ -750,6 +750,65 @@ class DownloadManager {
     this.notifyListeners();
     this.persistDownloadsImmediately();
   }
+
+  // Clear all downloads (both TamilMV and YouTube)
+  async clearAllDownloads(): Promise<void> {
+    this.ensureLoaded();
+    for (const item of [...this.inMemoryDownloads]) {
+      this.stopTracking(item.id);
+      try {
+        const file = new File(item.fileUri);
+        if (file.exists) {
+          file.delete();
+        }
+      } catch (err) {
+        console.warn('[DownloadService] Error deleting file:', err);
+      }
+    }
+    this.inMemoryDownloads = [];
+    this.notifyListeners();
+    this.persistDownloadsImmediately();
+  }
+
+  // Clear only TamilMV torrent downloads
+  async clearTamilMVDownloads(): Promise<void> {
+    this.ensureLoaded();
+    const targets = this.inMemoryDownloads.filter((d) => !d.id.startsWith('yt_') && d.sourceType !== 'direct');
+    for (const item of targets) {
+      this.stopTracking(item.id);
+      try {
+        const file = new File(item.fileUri);
+        if (file.exists) {
+          file.delete();
+        }
+      } catch (err) {
+        console.warn('[DownloadService] Error deleting file:', err);
+      }
+    }
+    this.inMemoryDownloads = this.inMemoryDownloads.filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct');
+    this.notifyListeners();
+    this.persistDownloadsImmediately();
+  }
+
+  // Clear only YouTube downloads
+  async clearYouTubeDownloads(): Promise<void> {
+    this.ensureLoaded();
+    const targets = this.inMemoryDownloads.filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct');
+    for (const item of targets) {
+      this.stopTracking(item.id);
+      try {
+        const file = new File(item.fileUri);
+        if (file.exists) {
+          file.delete();
+        }
+      } catch (err) {
+        console.warn('[DownloadService] Error deleting file:', err);
+      }
+    }
+    this.inMemoryDownloads = this.inMemoryDownloads.filter((d) => !d.id.startsWith('yt_') && d.sourceType !== 'direct');
+    this.notifyListeners();
+    this.persistDownloadsImmediately();
+  }
 }
 
 export const downloadService = new DownloadManager();

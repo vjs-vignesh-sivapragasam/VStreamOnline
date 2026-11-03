@@ -149,7 +149,7 @@ const TmdbConfigScreen: React.FC = () => {
 
             <View style={styles.buttonRow}>
               <TouchableOpacity
-                style={[styles.testBtn, isTesting && styles.disabledBtn]}
+                style={[styles.testBtn, { backgroundColor: theme.primary + '18' }, isTesting && styles.disabledBtn]}
                 onPress={handleTestConnection}
                 disabled={isTesting}
                 activeOpacity={0.7}
@@ -170,7 +170,7 @@ const TmdbConfigScreen: React.FC = () => {
                       color={testResult === 'success' ? '#00e676' : theme.primary}
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={styles.testBtnText}>Test Connection</Text>
+                    <Text style={[styles.testBtnText, { color: theme.primaryLight || theme.primary }]}>Test Connection</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -190,7 +190,7 @@ const TmdbConfigScreen: React.FC = () => {
 
           {/* Save Button */}
           <TouchableOpacity
-            style={styles.saveBtn}
+            style={[styles.saveBtn, { backgroundColor: theme.primary }]}
             onPress={handleSave}
             activeOpacity={0.8}
           >
@@ -283,14 +283,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(83, 90, 255, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: 10,
     paddingVertical: 10,
   },
   testBtnText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#535aff',
+    color: '#ffffff',
   },
   resetBtn: {
     paddingHorizontal: 16,
