@@ -39518,6 +39518,8 @@ var server = import_http.default.createServer(async (req, res) => {
       res.end("Missing url param");
       return;
     }
+    req.on("error", () => {});
+    res.on("error", () => {});
     try {
       const isIos = targetUrl.includes("c=IOS");
       const baseUA = isIos
@@ -39543,21 +39545,28 @@ var server = import_http.default.createServer(async (req, res) => {
         if (upstream.headers.get("content-range")) resHeaders["Content-Range"] = upstream.headers.get("content-range");
         res.writeHead(upstream.status, resHeaders);
         if (req.method === "HEAD" || !upstream.body) {
-          res.end();
+          try { res.end(); } catch (_) {}
           return;
         }
         const reader = upstream.body.getReader();
         while (true) {
           if (req.destroyed || res.destroyed || res.writableEnded) {
-            try { reader.cancel(); } catch {}
+            try { reader.cancel(); } catch (_) {}
             break;
           }
           const { done, value } = await reader.read();
           if (done) break;
-          const ok = res.write(value);
-          if (!ok) await new Promise((resolve) => res.once("drain", resolve));
+          try {
+            const ok = res.write(value);
+            if (!ok) await new Promise((resolve) => res.once("drain", resolve));
+          } catch (_) {
+            try { reader.cancel(); } catch (_) {}
+            break;
+          }
         }
-        if (!res.writableEnded) res.end();
+        try {
+          if (!res.writableEnded && !res.destroyed) res.end();
+        } catch (_) {}
         return;
       }
 
@@ -39612,18 +39621,25 @@ var server = import_http.default.createServer(async (req, res) => {
             const reader = chunkRes.body.getReader();
             while (true) {
               if (req.destroyed || res.destroyed || res.writableEnded) {
-                try { reader.cancel(); } catch {}
+                try { reader.cancel(); } catch (_) {}
                 break;
               }
               const { done, value } = await reader.read();
               if (done) break;
-              const ok = res.write(value);
-              if (!ok) await new Promise((resolve) => res.once("drain", resolve));
+              try {
+                const ok = res.write(value);
+                if (!ok) await new Promise((resolve) => res.once("drain", resolve));
+              } catch (_) {
+                try { reader.cancel(); } catch (_) {}
+                break;
+              }
             }
           }
           start = end + 1;
         }
-        if (!res.writableEnded) res.end();
+        try {
+          if (!res.writableEnded && !res.destroyed) res.end();
+        } catch (_) {}
         return;
       }
 
@@ -39640,20 +39656,29 @@ var server = import_http.default.createServer(async (req, res) => {
         const reader = upstream.body.getReader();
         while (true) {
           if (req.destroyed || res.destroyed || res.writableEnded) {
-            try { reader.cancel(); } catch {}
+            try { reader.cancel(); } catch (_) {}
             break;
           }
           const { done, value } = await reader.read();
           if (done) break;
-          const ok = res.write(value);
-          if (!ok) await new Promise((resolve) => res.once("drain", resolve));
+          try {
+            const ok = res.write(value);
+            if (!ok) await new Promise((resolve) => res.once("drain", resolve));
+          } catch (_) {
+            try { reader.cancel(); } catch (_) {}
+            break;
+          }
         }
       }
-      if (!res.writableEnded) res.end();
+      try {
+        if (!res.writableEnded && !res.destroyed) res.end();
+      } catch (_) {}
     } catch (streamErr) {
-      console.warn("[yt-server] Proxy stream error:", streamErr.message);
-      if (!res.headersSent) res.writeHead(500);
-      res.end();
+      console.warn("[yt-server] Proxy stream error:", streamErr?.message || streamErr);
+      try {
+        if (!res.headersSent) res.writeHead(500);
+        if (!res.writableEnded && !res.destroyed) res.end();
+      } catch (_) {}
     }
     return;
   }
