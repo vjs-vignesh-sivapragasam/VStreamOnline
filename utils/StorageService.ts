@@ -150,7 +150,8 @@ export const StorageKeys = {
     MY_LIST_KEY: 'TMV_MY_LIST_KEY',
     TAMILMV_BASE_URL_KEY: 'TMV_TAMILMV_BASE_URL',
     DOWNLOADS_KEY: 'TMV_DOWNLOADS_KEY',
-    TMDB_API_KEY: 'TMV_TMDB_API_KEY'
+    TMDB_API_KEY: 'TMV_TMDB_API_KEY',
+    THEME_KEY: 'TMV_THEME_KEY'
 } as const;
 
 export const storageService = {

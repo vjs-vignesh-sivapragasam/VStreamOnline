@@ -3,7 +3,6 @@ import { Tabs } from 'expo-router';
 import CinemaBottomBar from '@/components/CinemaBottomBar';
 
 export default function TabLayout() {
-  console.log('[TABS_BOOT] 1. TabLayout rendering CinemaBottomBar component');
   return (
     <Tabs
       tabBar={(props) => <CinemaBottomBar {...props} />}
@@ -22,6 +21,13 @@ export default function TabLayout() {
         name="search"
         options={{
           title: 'Search',
+        }}
+      />
+
+      <Tabs.Screen
+        name="youtube"
+        options={{
+          title: 'YouTube',
         }}
       />
 

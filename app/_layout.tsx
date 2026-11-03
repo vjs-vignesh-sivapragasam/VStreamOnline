@@ -13,8 +13,9 @@ import { BlurView } from 'expo-blur';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 import { PlayerSelectionModal } from '@/components/PlayerSelectionModal';
 import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
-
-console.log('[APP_BOOT] 1. Root layout module loaded');
+import { YouTubePlayerProvider } from '@/contexts/YouTubePlayerContext';
+import { YouTubeWatchOverlay } from '@/components/youtube/YouTubeWatchOverlay';
+import { AppThemeProvider, useTheme } from '@/contexts/ThemeContext';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -32,8 +33,6 @@ SplashScreen.preventAutoHideAsync().catch((e) => {
 });
 
 export default function RootLayout() {
-  console.log('[APP_BOOT] 2. RootLayout rendering');
-
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
@@ -49,20 +48,20 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
-      console.log('[APP_BOOT] 3. Fonts loaded, hiding splash screen');
       SplashScreen.hideAsync().catch((e) => console.warn('[APP_BOOT] hideAsync warning:', e));
+      startEmbeddedNodeServer();
     }
   }, [loaded]);
 
   if (!loaded) {
-    console.log('[APP_BOOT] 2b. Fonts not loaded yet, returning null splash');
     return null;
   }
 
-  console.log('[APP_BOOT] 5. Mounting RootLayoutNav within AppCrashErrorBoundary');
   return (
     <AppCrashErrorBoundary>
-      <RootLayoutNav />
+      <AppThemeProvider>
+        <RootLayoutNav />
+      </AppThemeProvider>
     </AppCrashErrorBoundary>
   );
 }
@@ -80,161 +79,199 @@ const InvisibleHeaderBackground = () => (
 );
 
 function RootLayoutNav() {
+  const { theme: appTheme } = useTheme();
 
   const GlassDarkTheme: Theme = {
     ...DarkTheme,
     colors: {
       ...DarkTheme.colors,
+      primary: appTheme.primary,
       background: '#0a0a0a',
       card: 'rgba(18, 18, 18, 0.9)',
       border: 'rgba(255, 255, 255, 0.1)',
     }
   };
 
-  const theme = GlassDarkTheme;
+  const navTheme = GlassDarkTheme;
 
   return (
     <View style={styles.container}>
       {/* Global Background Gradient */}
       <LinearGradient
-        colors={['#000000', '#333333', '#666666']}
+        colors={appTheme.gradientColors}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.backgroundGradient}
       />
 
       <ActionSheetProvider>
-        <ThemeProvider value={theme}>
-          <Stack
-            screenOptions={{
-              headerStyle: styles.glassHeader,
-              headerBackground: HeaderBackground,
-              contentStyle: styles.screenContent,
-            }}
-          >
-            <Stack.Screen
-              name="(tabs)"
-              options={{
-                headerShown: false,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-                headerShadowVisible: false,
-                headerTitle: '',
-                headerTintColor: '#ffffff',
-                headerBackTitle: '',
-                title: 'Home',
-                contentStyle: { backgroundColor: 'transparent' } // Only tabs can be transparent
+        <ThemeProvider value={navTheme}>
+          <YouTubePlayerProvider>
+            <Stack
+              screenOptions={{
+                headerStyle: styles.glassHeader,
+                headerBackground: HeaderBackground,
+                contentStyle: styles.screenContent,
               }}
-            />
-            <Stack.Screen
-              name="browser"
-              options={{
-                headerShown: false,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-              }}
-            />
-            <Stack.Screen
-              name="torrent/details"
-              options={{
-                headerShown: true,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-                headerTitle: '',
-                headerTintColor: '#ffffff',
-                headerBackTitle: '',
-                headerShadowVisible: false,
-                headerStyle: {
-                  backgroundColor: 'transparent',
-                }
-              }}
-            />
-            <Stack.Screen
-              name="torrent/list"
-              options={{
-                headerShown: true,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-                headerTitle: '',
-                headerTintColor: '#ffffff',
-                headerBackTitle: '',
-                headerShadowVisible: false,
-                headerStyle: {
-                  backgroundColor: 'transparent',
-                }
-              }}
-            />
-            <Stack.Screen
-              name="torrent/series"
-              options={{
-                headerShown: true,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-                headerTitle: '',
-                headerTintColor: '#ffffff',
-                headerBackTitle: '',
-                headerShadowVisible: false,
-                headerStyle: {
-                  backgroundColor: 'transparent',
-                }
-              }}
-            />
-            <Stack.Screen
-              name="stream/player"
-              options={{
-                headerShown: false,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-                contentStyle: { backgroundColor: '#000000' },
-              }}
-            />
-            <Stack.Screen
-              name="settings/tamilmv"
-              options={{
-                headerShown: true,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-                headerTitle: '',
-                headerTintColor: '#ffffff',
-                headerBackTitle: '',
-                headerShadowVisible: false,
-                headerStyle: {
-                  backgroundColor: 'transparent',
-                }
-              }}
-            />
-            <Stack.Screen
-              name="settings/stremioserver"
-              options={{
-                headerShown: true,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-                headerTitle: '',
-                headerTintColor: '#ffffff',
-                headerBackTitle: '',
-                headerShadowVisible: false,
-                headerStyle: {
-                  backgroundColor: 'transparent',
-                }
-              }}
-            />
-            <Stack.Screen
-              name="settings/opensubtitles"
-              options={{
-                headerShown: true,
-                headerTransparent: true,
-                headerBackground: InvisibleHeaderBackground,
-                headerTitle: '',
-                headerTintColor: '#ffffff',
-                headerBackTitle: '',
-                headerShadowVisible: false,
-                headerStyle: {
-                  backgroundColor: 'transparent',
-                }
-              }}
-            />
-          </Stack>
-          <PlayerSelectionModal />
+            >
+              <Stack.Screen
+                name="(tabs)"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                  headerShadowVisible: false,
+                  headerTitle: '',
+                  headerTintColor: '#ffffff',
+                  headerBackTitle: '',
+                  title: 'Home',
+                  contentStyle: { backgroundColor: 'transparent' }
+                }}
+              />
+              <Stack.Screen
+                name="browser"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                }}
+              />
+              <Stack.Screen
+                name="torrent/details"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                }}
+              />
+              <Stack.Screen
+                name="torrent/list"
+                options={{
+                  headerShown: true,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                  headerTitle: '',
+                  headerTintColor: '#ffffff',
+                  headerBackTitle: '',
+                  headerShadowVisible: false,
+                  headerStyle: {
+                    backgroundColor: 'transparent',
+                  }
+                }}
+              />
+              <Stack.Screen
+                name="torrent/series"
+                options={{
+                  headerShown: true,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                  headerTitle: '',
+                  headerTintColor: '#ffffff',
+                  headerBackTitle: '',
+                  headerShadowVisible: false,
+                  headerStyle: {
+                    backgroundColor: 'transparent',
+                  }
+                }}
+              />
+              <Stack.Screen
+                name="stream/player"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                  contentStyle: { backgroundColor: '#000000' },
+                }}
+              />
+              <Stack.Screen
+                name="youtube/watch"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                }}
+              />
+              <Stack.Screen
+                name="youtube/downloads"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                }}
+              />
+              <Stack.Screen
+                name="settings/tamilmv"
+                options={{
+                  headerShown: true,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                  headerTitle: '',
+                  headerTintColor: '#ffffff',
+                  headerBackTitle: '',
+                  headerShadowVisible: false,
+                  headerStyle: {
+                    backgroundColor: 'transparent',
+                  }
+                }}
+              />
+              <Stack.Screen
+                name="settings/stremioserver"
+                options={{
+                  headerShown: true,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                  headerTitle: '',
+                  headerTintColor: '#ffffff',
+                  headerBackTitle: '',
+                  headerShadowVisible: false,
+                  headerStyle: {
+                    backgroundColor: 'transparent',
+                  }
+                }}
+              />
+              <Stack.Screen
+                name="settings/opensubtitles"
+                options={{
+                  headerShown: true,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                  headerTitle: '',
+                  headerTintColor: '#ffffff',
+                  headerBackTitle: '',
+                  headerShadowVisible: false,
+                  headerStyle: {
+                    backgroundColor: 'transparent',
+                  }
+                }}
+              />
+              <Stack.Screen
+                name="settings/theme"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                }}
+              />
+              <Stack.Screen
+                name="settings/about"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                }}
+              />
+              <Stack.Screen
+                name="settings/tmdb"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                }}
+              />
+            </Stack>
+            <PlayerSelectionModal />
+            <YouTubeWatchOverlay />
+          </YouTubePlayerProvider>
         </ThemeProvider>
       </ActionSheetProvider>
     </View>

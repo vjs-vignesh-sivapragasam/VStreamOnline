@@ -1,12 +1,11 @@
 // wrapper.js
-
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-// 1. Intercept process.exit so embedded Node.js NEVER terminates the Android app
+// 1. Intercept process.exit so embedded Node.js NEVER terminates the host app
 process.exit = function (code) {
-  console.error('[NODEJS-MOBILE] Prevented process.exit(' + code + ') from killing the app process!');
+  console.warn('[NODEJS-MOBILE] Prevented process.exit(' + code + ') from terminating the host app!');
 };
 
 // 2. Catch all unhandled exceptions so Node doesn't trigger default process termination
@@ -18,7 +17,7 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('[NODEJS-MOBILE-UNHANDLED-REJECTION]', reason);
 });
 
-// 3. Configure safe writable paths for Android (prevents read-only /tmp EROFS crash)
+// 3. Configure safe writable paths for embedded environment (prevents read-only /tmp EROFS crash)
 try {
   const baseDir = process.cwd();
   const appDataDir = path.join(baseDir, 'stremio-data');
@@ -29,24 +28,77 @@ try {
 
   process.env.APP_PATH = appDataDir;
   process.env.TMPDIR = tmpDir;
+  // Disable SSDP casting multicast to prevent EADDRNOTAVAIL crashes on local networks
+  process.env.CASTING_DISABLED = '1';
   os.tmpdir = () => tmpDir;
 } catch (e) {
   console.warn('[NODEJS-MOBILE] Could not initialize writable directories:', e);
 }
 
-// 4. Load bridge safely
+// 4. Free up port 11472 if occupied by a stale previous process on desktop/dev environment
+try {
+  let isMobile = false;
+  try {
+    require('rn-bridge');
+    isMobile = true;
+  } catch (e) {}
+
+  if (!isMobile) {
+    const { execSync } = require('child_process');
+    if (process.platform === 'win32') {
+      const netstatOutput = execSync('netstat -ano -p tcp', {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      for (const line of netstatOutput.split('\n')) {
+        if (line.includes(':11472') && line.includes('LISTENING')) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parseInt(parts[parts.length - 1], 10);
+          if (pid && pid !== process.pid) {
+            console.log(`[wrapper] Port 11472 is in use by stale PID ${pid}. Freeing port...`);
+            try {
+              execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+            } catch {}
+          }
+        }
+      }
+    } else {
+      try {
+        const pid = execSync('lsof -ti:11472', {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+        if (pid && parseInt(pid, 10) !== process.pid) {
+          console.log(`[wrapper] Port 11472 is in use by stale PID ${pid}. Freeing port...`);
+          execSync(`kill -9 ${pid}`, { stdio: 'ignore' });
+        }
+      } catch {}
+    }
+  }
+} catch (err) {}
+
+// 5. Load bridge safely
 try {
   require('rn-bridge');
   console.log('[NODEJS-MOBILE] rn-bridge initialized');
 } catch (e) {
-  console.error('[NODEJS-MOBILE] Error loading rn-bridge:', e);
+  // Ignored if not running in nodejs-mobile
 }
 
-// 4. Load streaming server safely
+// 6. Start YouTube streaming engine safely
+try {
+  console.log('[NODEJS-MOBILE] Loading embedded yt-engine.bundle.js...');
+  require('./yt-engine.bundle.js');
+  console.log('[NODEJS-MOBILE] yt-engine initialized successfully');
+} catch (e) {
+  console.warn('[NODEJS-MOBILE] Could not start yt-engine:', e);
+}
+
+// 7. Start Stremio streaming server safely
 try {
   console.log('[NODEJS-MOBILE] Loading embedded server.js...');
   require('./server.js');
   console.log('[NODEJS-MOBILE] server.js initialized successfully');
 } catch (e) {
-  console.error('[NODEJS-MOBILE] Error loading server.js:', e);
+  console.warn('[NODEJS-MOBILE] Could not start server.js:', e);
 }

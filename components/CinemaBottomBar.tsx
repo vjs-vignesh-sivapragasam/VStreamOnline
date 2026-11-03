@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
+import { useTheme } from '@/contexts/ThemeContext';
 
 interface TabItemConfig {
   name: string;
@@ -32,6 +33,12 @@ const TAB_CONFIGS: Record<string, TabItemConfig> = {
     label: 'Search',
     activeIcon: 'search',
     inactiveIcon: 'search-outline',
+  },
+  youtube: {
+    name: 'youtube',
+    label: 'YouTube',
+    activeIcon: 'logo-youtube',
+    inactiveIcon: 'logo-youtube',
   },
   library: {
     name: 'library',
@@ -73,6 +80,7 @@ export default function CinemaBottomBar({
   navigateToTab,
   insets: propInsets,
 }: CinemaBottomBarProps) {
+  const { theme } = useTheme();
   const safeAreaInsets = useSafeAreaInsets();
   const insets = propInsets || safeAreaInsets;
   const bottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 10 : 8);
@@ -91,11 +99,11 @@ export default function CinemaBottomBar({
       {/* Top Ambient Glow Line */}
       <LinearGradient
         colors={[
-          'rgba(83, 90, 255, 0.02)',
-          'rgba(83, 90, 255, 0.50)',
+          'rgba(0, 0, 0, 0)',
+          theme.indicator,
           'rgba(255, 255, 255, 0.22)',
-          'rgba(83, 90, 255, 0.50)',
-          'rgba(83, 90, 255, 0.02)',
+          theme.indicator,
+          'rgba(0, 0, 0, 0)',
         ]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
@@ -155,7 +163,15 @@ export default function CinemaBottomBar({
               {/* Active Top Micro-Beam Indicator */}
               <View style={styles.indicatorContainer}>
                 {isFocused ? (
-                  <View style={styles.activeBeam} />
+                  <View
+                    style={[
+                      styles.activeBeam,
+                      {
+                        backgroundColor: theme.primary,
+                        shadowColor: theme.glow,
+                      },
+                    ]}
+                  />
                 ) : (
                   <View style={styles.inactiveBeam} />
                 )}
@@ -165,13 +181,19 @@ export default function CinemaBottomBar({
               <View
                 style={[
                   styles.iconCapsule,
-                  isFocused && styles.iconCapsuleActive,
+                  isFocused && [
+                    styles.iconCapsuleActive,
+                    {
+                      backgroundColor: theme.iconBg,
+                      borderColor: theme.cardBorder,
+                    },
+                  ],
                 ]}
               >
                 <Ionicons
                   name={isFocused ? config.activeIcon : config.inactiveIcon}
                   size={21}
-                  color={isFocused ? '#535aff' : '#71717A'}
+                  color={isFocused ? theme.primary : '#71717A'}
                 />
               </View>
 
@@ -179,7 +201,9 @@ export default function CinemaBottomBar({
               <Text
                 style={[
                   styles.tabLabel,
-                  isFocused ? styles.tabLabelActive : styles.tabLabelInactive,
+                  isFocused
+                    ? [styles.tabLabelActive, { color: theme.primaryLight || theme.primary }]
+                    : styles.tabLabelInactive,
                 ]}
                 numberOfLines={1}
               >
@@ -253,8 +277,6 @@ const styles = StyleSheet.create({
     width: 22,
     height: 2.5,
     borderRadius: 2,
-    backgroundColor: '#535aff',
-    shadowColor: '#535aff',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.9,
     shadowRadius: 6,
@@ -274,8 +296,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconCapsuleActive: {
-    backgroundColor: 'rgba(83, 90, 255, 0.16)',
-    borderColor: 'rgba(83, 90, 255, 0.32)',
     borderWidth: 1,
   },
   tabLabel: {
@@ -284,7 +304,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   tabLabelActive: {
-    color: '#ffffff',
     fontWeight: '700',
   },
   tabLabelInactive: {
