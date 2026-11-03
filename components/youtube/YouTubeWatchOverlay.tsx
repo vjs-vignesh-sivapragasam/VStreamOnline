@@ -439,6 +439,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         {/* Top 16:9 Video Player */}
         <View {...swipePanResponder.panHandlers}>
           <YouTubeInlinePlayer
+            videoId={currentVideo.id}
             title={currentVideo.title}
             channel={currentVideo.channel}
             streamUrl={streamUrl}

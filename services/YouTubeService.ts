@@ -87,6 +87,7 @@ export interface YouTubeAuthStartResponse {
 }
 
 const YT_SUBSCRIPTIONS_KEY = 'yt_local_subscriptions';
+const STREMIO_ENGINE_PORT = 11470;
 const YT_ENGINE_PORT = 11472;
 
 function formatBytes(bytes?: number): string {
@@ -145,16 +146,18 @@ export function extractYouTubeVideoId(input: string): string | null {
 export function getEngineCandidates(): string[] {
   const candidates: string[] = [];
 
-  // 1. Developer PC LAN IP (critical for iPhone on Wi-Fi during development)
+  // 1. Localhost loopback (Embedded Stremio server on 11470 and YouTube engine on 11472)
+  candidates.push(`http://127.0.0.1:${STREMIO_ENGINE_PORT}`);
+  candidates.push(`http://127.0.0.1:${YT_ENGINE_PORT}`);
+
+  // 2. Developer PC LAN IP (for development and Expo Go)
   const devIp = getDevHostIp();
   if (devIp) {
+    candidates.push(`http://${devIp}:${STREMIO_ENGINE_PORT}`);
     candidates.push(`http://${devIp}:${YT_ENGINE_PORT}`);
   }
 
-  // 2. Localhost loopback (Android emulator or native custom binary with embedded nodejs-mobile)
-  candidates.push(`http://127.0.0.1:${YT_ENGINE_PORT}`);
-
-  // 3. User configured streaming server in Settings (if custom IP is set)
+  // 3. User configured streaming server in Settings (if custom Stremio server IP is set)
   try {
     const raw = storageService.getItem(StorageKeys.SERVERS_KEY);
     if (raw) {
@@ -162,16 +165,19 @@ export function getEngineCandidates(): string[] {
       const active = servers.find((s) => s.current);
       if (active?.serverUrl) {
         const urlObj = new URL(active.serverUrl);
-        const serverCandidate = `${urlObj.protocol}//${urlObj.hostname}:${YT_ENGINE_PORT}`;
-        if (!candidates.includes(serverCandidate)) {
-          candidates.push(serverCandidate);
-        }
+        const host = `${urlObj.protocol}//${urlObj.hostname}`;
+        const port = urlObj.port ? urlObj.port : '11470';
+        const stremioCustom = `${host}:${port}`;
+        const ytCustom = `${host}:${YT_ENGINE_PORT}`;
+        if (!candidates.includes(stremioCustom)) candidates.push(stremioCustom);
+        if (!candidates.includes(ytCustom)) candidates.push(ytCustom);
       }
     }
   } catch {}
 
   // 4. Android emulator host
-  if (Platform.OS === 'android' && !candidates.includes(`http://10.0.2.2:${YT_ENGINE_PORT}`)) {
+  if (Platform.OS === 'android') {
+    candidates.push(`http://10.0.2.2:${STREMIO_ENGINE_PORT}`);
     candidates.push(`http://10.0.2.2:${YT_ENGINE_PORT}`);
   }
 
@@ -186,7 +192,7 @@ class YouTubeService {
    * Resolves the active base URL for the YouTube engine.
    * Checks loopback, developer LAN IP, and custom server settings.
    */
-  async resolveActiveBaseUrl(timeoutMs = 1500): Promise<string> {
+  async resolveActiveBaseUrl(timeoutMs = 1500): Promise<string | null> {
     const now = Date.now();
     if (this.activeBaseUrl && now - this.lastPingTime < 10000) {
       return this.activeBaseUrl;
@@ -211,8 +217,9 @@ class YouTubeService {
       } catch {}
     }
 
-    // Default to the first candidate if none responded
-    return candidates[0] || `http://127.0.0.1:${YT_ENGINE_PORT}`;
+    // Return null if no engine is reachable (triggers clean serverless mode)
+    this.activeBaseUrl = null;
+    return null;
   }
 
   /**
@@ -501,104 +508,90 @@ class YouTubeService {
    * Fetches full video stream formats for playback and download
    */
   async getVideoDetails(videoId: string): Promise<YouTubeVideoDetails> {
-    const candidates = getEngineCandidates();
-    let lastError: Error | null = null;
+    let baseUrl = await this.resolveActiveBaseUrl(1500);
 
-    console.log(`[YouTubeService] 🔍 Requesting video details for videoId: "${videoId}"`);
-    console.log('[YouTubeService] 📋 Candidate URLs:', candidates);
-
-    for (const baseUrl of candidates) {
-      // Allow up to 2 attempts per candidate with 12s timeout to accommodate cold Innertube extraction
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          console.log(`[YouTubeService] 📡 Trying (attempt ${attempt}): ${baseUrl}/yt/info?v=${encodeURIComponent(videoId)}`);
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 12000);
-
-          const res = await fetch(`${baseUrl}/yt/info?v=${encodeURIComponent(videoId)}`, {
-            signal: controller.signal,
-          }).finally(() => clearTimeout(timer));
-
-          console.log(`[YouTubeService] 📥 Response status from ${baseUrl}: ${res.status}`);
-
-          if (!res.ok) {
-            const errJson = await res.json().catch(() => ({}));
-            throw new Error(errJson.error || `Server responded with status ${res.status}`);
-          }
-
-          const data = await res.json();
-          this.activeBaseUrl = baseUrl;
-
-          console.log(`[YouTubeService] ✅ Successfully fetched info for "${data.title}" from ${baseUrl}`);
-          console.log(
-            `[YouTubeService] 📦 Formats available: Progressive: ${data.formats?.progressive?.length || 0}, VideoAdaptive: ${data.formats?.videoAdaptive?.length || 0}, AudioAdaptive: ${data.formats?.audioAdaptive?.length || 0}`
-          );
-
-          const mapFormat = (f: any): YouTubeFormatOption => {
-            const directUrl = f.url || '';
-            const proxyUrl = directUrl ? `${baseUrl}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}` : undefined;
-            const isAudio = f.type === 'audio' || (f.hasAudio && !f.hasVideo);
-            return {
-              itag: f.itag,
-              quality: f.quality || (isAudio ? '128 kbps' : 'Standard'),
-              container: isAudio ? 'mp3' : (f.container || 'mp4'),
-              mimeType: f.mimeType || (isAudio ? 'audio/mp4' : 'video/mp4'),
-              url: directUrl,
-              proxyUrl,
-              contentLength: f.contentLength ? Number(f.contentLength) : undefined,
-              sizeFormatted: formatBytes(f.contentLength ? Number(f.contentLength) : undefined),
-              hasAudio: !!f.hasAudio,
-              hasVideo: !!f.hasVideo,
-              type: isAudio ? 'audio' : (f.type || 'video'),
-            };
-          };
-
-          const progressiveFormats = (data.formats?.progressive || []).map(mapFormat);
-          const videoAdaptiveFormats = (data.formats?.videoAdaptive || []).map(mapFormat);
-          let audioAdaptiveFormats = (data.formats?.audioAdaptive || []).map(mapFormat);
-
-          if (audioAdaptiveFormats.length === 0 && progressiveFormats.length > 0) {
-            audioAdaptiveFormats = progressiveFormats.map((f: YouTubeFormatOption) => ({
-              ...f,
-              type: 'audio' as const,
-              container: 'mp3',
-              quality: '128 kbps',
-            }));
-          }
-
-          return {
-            id: data.id,
-            title: data.title || 'YouTube Video',
-            channel: data.channel || 'YouTube',
-            thumbnail: data.thumbnail || `https://i.ytimg.com/vi/${data.id}/hqdefault.jpg`,
-            duration: data.duration,
-            views: data.views,
-            formats: {
-              progressive: progressiveFormats,
-              videoAdaptive: videoAdaptiveFormats,
-              audioAdaptive: audioAdaptiveFormats,
-            },
-          };
-        } catch (err: any) {
-          console.warn(`[YouTubeService] ⚠️ Candidate ${baseUrl} attempt ${attempt} failed:`, err?.message || err);
-          lastError = err;
-          if (attempt === 1) {
-            await new Promise((r) => setTimeout(r, 500));
-          }
-        }
-      }
+    // If initial ping didn't connect, give embedded local engine (Stremio / nodejs-mobile) 1s to finish booting
+    if (!baseUrl && Platform.OS !== 'web') {
+      await new Promise((r) => setTimeout(r, 1000));
+      baseUrl = await this.resolveActiveBaseUrl(2000);
     }
 
-    const devIp = getDevHostIp();
-    const hint = devIp
-      ? `Ensure 'npm run server' is running on your computer (${devIp}) on the same Wi-Fi network.`
-      : "Ensure 'npm run server' is running.";
+    if (!baseUrl) {
+      const devIp = getDevHostIp();
+      const hint = devIp
+        ? `Please ensure the embedded Stremio engine is running or run 'npm run server' on your computer (${devIp}).`
+        : `Streaming engine not available. Please verify the Stremio server is running.`;
+      throw new Error(hint);
+    }
 
-    console.warn(`[YouTubeService] ⚠️ All candidates failed to fetch details for ${videoId}! Last error:`, lastError?.message || lastError);
+    try {
+      console.log(`[YouTubeService] 📡 Fetching video details from ${baseUrl}/yt/info?v=${encodeURIComponent(videoId)}`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
 
-    throw new Error(
-      `Cannot connect to YouTube streaming engine. ${hint} (${lastError?.message || 'Connection refused'})`
-    );
+      const res = await fetch(`${baseUrl}/yt/info?v=${encodeURIComponent(videoId)}`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server responded with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      this.activeBaseUrl = baseUrl;
+
+      console.log(`[YouTubeService] ✅ Successfully fetched info for "${data.title}" from ${baseUrl}`);
+
+      const mapFormat = (f: any): YouTubeFormatOption => {
+        const directUrl = f.url || '';
+        const proxyUrl = directUrl ? `${baseUrl}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}` : undefined;
+        const isAudio = f.type === 'audio' || (f.hasAudio && !f.hasVideo);
+        return {
+          itag: f.itag,
+          quality: f.quality || (isAudio ? '128 kbps' : 'Standard'),
+          container: isAudio ? 'mp3' : (f.container || 'mp4'),
+          mimeType: f.mimeType || (isAudio ? 'audio/mp4' : 'video/mp4'),
+          url: directUrl,
+          proxyUrl,
+          contentLength: f.contentLength ? Number(f.contentLength) : undefined,
+          sizeFormatted: formatBytes(f.contentLength ? Number(f.contentLength) : undefined),
+          hasAudio: !!f.hasAudio,
+          hasVideo: !!f.hasVideo,
+          type: isAudio ? 'audio' : (f.type || 'video'),
+        };
+      };
+
+      const progressiveFormats = (data.formats?.progressive || []).map(mapFormat);
+      const videoAdaptiveFormats = (data.formats?.videoAdaptive || []).map(mapFormat);
+      let audioAdaptiveFormats = (data.formats?.audioAdaptive || []).map(mapFormat);
+
+      if (audioAdaptiveFormats.length === 0 && progressiveFormats.length > 0) {
+        audioAdaptiveFormats = progressiveFormats.map((f: YouTubeFormatOption) => ({
+          ...f,
+          type: 'audio' as const,
+          container: 'mp3',
+          quality: '128 kbps',
+        }));
+      }
+
+      return {
+        id: data.id,
+        title: data.title || 'YouTube Video',
+        channel: data.channel || 'YouTube',
+        thumbnail: data.thumbnail || `https://i.ytimg.com/vi/${data.id}/hqdefault.jpg`,
+        duration: data.duration,
+        views: data.views,
+        formats: {
+          progressive: progressiveFormats,
+          videoAdaptive: videoAdaptiveFormats,
+          audioAdaptive: audioAdaptiveFormats,
+        },
+      };
+    } catch (err: any) {
+      console.warn(`[YouTubeService] Error fetching video details from ${baseUrl}:`, err?.message || err);
+      throw err;
+    }
   }
 
   getActiveBaseUrl(): string {
@@ -666,9 +659,11 @@ class YouTubeService {
 
   // ── YouTube Google Account / SSO ──────────────────────────────────────────
 
-  async getAuthStatus(timeoutMs = 2500): Promise<YouTubeAuthStatus> {
+  async getAuthStatus(timeoutMs = 1000): Promise<YouTubeAuthStatus> {
     try {
       const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      if (!baseUrl) return { authenticated: false };
+
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(`${baseUrl}/yt/auth/status`, {
@@ -783,31 +778,34 @@ class YouTubeService {
 
   async getShortsFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
     try {
-      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(`${baseUrl}/yt/feed/shorts`, {
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timer));
+      const baseUrl = await this.resolveActiveBaseUrl(1000);
+      if (baseUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(`${baseUrl}/yt/feed/shorts`, {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
 
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          videos: (data.results || []).map((v: any) => ({
-            id: v.id,
-            title: v.title,
-            channel: v.channel,
-            thumbnail: v.thumbnail,
-            duration: v.duration,
-            views: v.views,
-            published: v.published,
-            isShort: true,
-          })),
-        };
+        if (res.ok) {
+          const data = await res.json();
+          return {
+            videos: (data.results || []).map((v: any) => ({
+              id: v.id,
+              title: v.title,
+              channel: v.channel,
+              thumbnail: v.thumbnail,
+              duration: v.duration,
+              views: v.views,
+              published: v.published,
+              isShort: true,
+            })),
+          };
+        }
       }
-      return { videos: [] };
+
+      // Serverless fallback: load shorts directly via web scraping
+      return await this.searchViaWebWithContinuation('shorts');
     } catch (err: any) {
-      console.warn('[YouTubeService] getShortsFeed error:', err);
       return { videos: [] };
     }
   }

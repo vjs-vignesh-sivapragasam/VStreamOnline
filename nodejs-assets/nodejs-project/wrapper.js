@@ -85,13 +85,32 @@ try {
 }
 
 // 6. Start YouTube streaming engine safely
+let ytHandler = null;
 try {
-  require('./yt-engine.bundle.js');
+  const ytModule = require('./yt-engine.bundle.js');
+  if (ytModule && ytModule.server) {
+    ytHandler = ytModule.server.listeners('request')[0];
+  }
 } catch (e) {
   console.warn('[NODEJS-MOBILE] Could not start yt-engine:', e);
 }
 
-// 7. Start Stremio streaming server safely
+// 7. Route /yt/* requests directly through Stremio server (port 11470)
+// This allows YouTube video playback directly via the Stremio server!
+const http = require('http');
+const originalCreateServer = http.createServer;
+http.createServer = function (requestListener) {
+  return originalCreateServer.call(this, (req, res) => {
+    if (ytHandler && req.url && req.url.startsWith('/yt/')) {
+      return ytHandler(req, res);
+    }
+    if (requestListener) {
+      return requestListener(req, res);
+    }
+  });
+};
+
+// 8. Start Stremio streaming server safely
 try {
   require('./server.js');
 } catch (e) {

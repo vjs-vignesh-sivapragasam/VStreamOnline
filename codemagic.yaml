@@ -150,6 +150,17 @@ workflows:
             exit 1
           fi
 
+          # 3b. Embed nodejs-project & builtin_modules for embedded Stremio & YouTube engine on device
+          echo "📦 Embedding nodejs-project & builtin_modules into Payload/$APP_BUNDLE..."
+          if [ -d "../nodejs-assets/nodejs-project" ]; then
+            cp -R "../nodejs-assets/nodejs-project" "build/Payload/$APP_BUNDLE/"
+            echo "✅ nodejs-project embedded successfully"
+          fi
+          if [ -d "../node_modules/nodejs-mobile-react-native/install/resources/nodejs-modules/builtin_modules" ]; then
+            cp -R "../node_modules/nodejs-mobile-react-native/install/resources/nodejs-modules/builtin_modules" "build/Payload/$APP_BUNDLE/"
+            echo "✅ builtin_modules embedded successfully"
+          fi
+
           IPA_NAME="${APP_NAME}_v${APP_VERSION}"
           echo "📦 Packaging IPA: $IPA_NAME.ipa"
 
@@ -320,6 +331,17 @@ workflows:
           if [ ! -d "build/Payload/$APP_BUNDLE" ]; then
             echo "❌ Error: Failed to copy app bundle into build/Payload!"
             exit 1
+          fi
+
+          # Embed nodejs-project & builtin_modules for embedded Stremio & YouTube engine on device
+          echo "📦 Embedding nodejs-project & builtin_modules into Payload/$APP_BUNDLE..."
+          if [ -d "../nodejs-assets/nodejs-project" ]; then
+            cp -R "../nodejs-assets/nodejs-project" "build/Payload/$APP_BUNDLE/"
+            echo "✅ nodejs-project embedded successfully"
+          fi
+          if [ -d "../node_modules/nodejs-mobile-react-native/install/resources/nodejs-modules/builtin_modules" ]; then
+            cp -R "../node_modules/nodejs-mobile-react-native/install/resources/nodejs-modules/builtin_modules" "build/Payload/$APP_BUNDLE/"
+            echo "✅ builtin_modules embedded successfully"
           fi
 
           IPA_NAME="${APP_NAME}_Dev_v${APP_VERSION}"

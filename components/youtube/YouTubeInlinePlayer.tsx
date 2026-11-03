@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksp
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 
 export interface YouTubeInlinePlayerProps {
+  videoId?: string;
   title?: string;
   channel?: string;
   streamUrl: string | null;
@@ -61,6 +62,7 @@ function formatTime(seconds: number): string {
 }
 
 export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
+  videoId,
   title,
   channel,
   streamUrl,
@@ -104,7 +106,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const hideTimerRef = useRef<any>(null);
   const videoRef = useRef<VideoRef>(null);
   const ksRef = useRef<KSPlayerRef>(null);
-
   // Initially hide controls when a new video stream loads
   useEffect(() => {
     setShowControls(false);
@@ -204,10 +205,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     };
   }, [isPlaying, showControls, isSliding, scheduleControlsHide]);
 
-  // Handle native seek target
+  // Handle seek target (native player)
   useEffect(() => {
     if (seekTarget !== null) {
-      console.log('[YouTubeInlinePlayer] ⏩ Seeking native player to:', seekTarget);
+      console.log('[YouTubeInlinePlayer] ⏩ Seeking player to:', seekTarget);
       if (useKSPlayer) {
         ksRef.current?.seek(seekTarget);
       } else {
@@ -232,15 +233,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Native Video Engine */}
       {streamUrl ? (
         useKSPlayer ? (
           <KSPlayerView
             ref={ksRef}
             url={streamUrl}
-
-
-
             paused={!isPlaying}
             rate={playbackSpeed}
             resizeMode={videoResizeMode}
@@ -262,7 +259,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             onError={(e) => {
               console.error('[YouTubeInlinePlayer] ❌ KSPlayer onError fired:', JSON.stringify(e));
               setIsBuffering(false);
-              // Auto-fallback from KSPlayer to react-native-video (Android only)
               if (Platform.OS !== 'ios') {
                 setUseKSPlayer(false);
               }
@@ -327,6 +323,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             <View style={[StyleSheet.absoluteFill, { backgroundColor: '#141416' }]} />
           )}
           <View style={[StyleSheet.absoluteFill, styles.loadingBackdrop]}>
+            {isBuffering && !playbackError && (
+              <ActivityIndicator size="large" color="#ffffff" />
+            )}
             {playbackError ? (
               <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle-outline" size={36} color="#ff4444" />
@@ -385,7 +384,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         </View>
       ) : null}
 
-      {/* Controls Overlay */}
+      {/* Controls Overlay (native player only) */}
       {showControls && (
         <View style={styles.controlsOverlay} pointerEvents="box-none">
           {/* Top Bar: Real YouTube Icons (Chevron Down, Autoplay, Cast, CC, Screen Fit, Settings) */}
