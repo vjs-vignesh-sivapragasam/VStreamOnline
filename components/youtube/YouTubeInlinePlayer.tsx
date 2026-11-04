@@ -63,6 +63,211 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 }
 
+
+const INJECTED_CSS_BEFORE_LOAD = `
+  (function() {
+    const css = \`
+      /* Hide all YouTube mobile header, topbar, search, 3 dots, and open app buttons */
+      #header,
+      ytm-header,
+      header,
+      ytm-mobile-topbar-renderer,
+      .mobile-topbar-header,
+      .ghost-header,
+      #header-bar,
+      ytm-pivot-bar-renderer,
+      ytm-searchbox,
+      
+      /* Hide duplicate title below video & metadata header */
+      ytm-slim-video-metadata-renderer,
+      .slim-video-metadata-header,
+      .slim-video-information-holder,
+      .watch-below-the-player,
+      #related,
+      ytm-item-section-renderer,
+      ytm-comment-section-renderer,
+      ytm-engagement-panel-section-list-renderer,
+      .ytm-autonav-bar,
+      .fullscreen-overlay,
+      #full-screen-content-id,
+
+      /* Hide all Open App prompts, banners, bottom sheets */
+      ytm-open-app-button,
+      .open-in-app-dialog,
+      .yt-spec-button-shape-next--call-to-action,
+      button[aria-label*="App" i],
+      button[aria-label*="open" i],
+      a[href*="app" i],
+      ytm-promoted-sparkles-web-renderer,
+      ytm-bottom-sheet-renderer,
+      .upsell-dialog,
+      ytm-upsell-dialog-renderer,
+
+      /* Hide title overlay, cards, and clutter inside player */
+      .ytp-chrome-top,
+      .ytp-title,
+      .ytp-title-link,
+      .ytp-title-channel,
+      .ytp-share-button,
+      .ytp-show-cards-title,
+      .ytp-pause-overlay,
+      .ytp-expand-pause-overlay,
+      .ytp-impression-link,
+      .ytp-cards-teaser,
+      .ytp-ce-element,
+      .ytp-paid-content-overlay {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden !important;
+        pointer-events: none !important;
+      }
+
+      /* Clean full-bleed container styling */
+      html, body, ytm-app, #app {
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        background-color: #000000 !important;
+        width: 100% !important;
+        height: 100% !important;
+      }
+
+      /* Lock video player container to fill the entire WebView frame */
+      #player-container-id,
+      .player-container,
+      #player,
+      .player-size,
+      .player-api,
+      ytm-media-item,
+      ytm-player,
+      .player-placeholder-wrapper {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: 100vw !important;
+        max-height: 100vh !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #000000 !important;
+        z-index: 999999 !important;
+      }
+
+      #player-control-container,
+      .player-control-container,
+      .html5-video-player {
+        width: 100% !important;
+        height: 100% !important;
+      }
+
+      video,
+      .html5-main-video {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: contain !important;
+        background-color: #000000 !important;
+      }
+    \`;
+
+    function injectStyle() {
+      const parent = document.head || document.documentElement;
+      if (parent) {
+        let style = document.getElementById('agy-clean-yt-style');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'agy-clean-yt-style';
+          style.type = 'text/css';
+          style.appendChild(document.createTextNode(css));
+          parent.appendChild(style);
+        }
+        return true;
+      }
+      return false;
+    }
+
+    if (!injectStyle()) {
+      document.addEventListener('DOMContentLoaded', injectStyle);
+    }
+  })();
+  true;
+`;
+
+const INJECTED_JS_AFTER_LOAD = `
+  (function() {
+    // 1. Auto-play and configure high quality (480p / 720p)
+    function configurePlayer() {
+      const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+      if (player) {
+        try {
+          if (typeof player.setPlaybackQualityRange === 'function') {
+            player.setPlaybackQualityRange('large', 'hd720');
+          }
+          if (typeof player.setPlaybackQuality === 'function') {
+            player.setPlaybackQuality('large');
+          }
+          const qualities = player.getAvailableQualityLevels ? player.getAvailableQualityLevels() : [];
+          if (qualities && qualities.length > 0) {
+            const preferred = qualities.find(q => q === 'large' || q === 'hd720' || q === 'medium') || qualities[0];
+            if (preferred && typeof player.setPlaybackQuality === 'function') {
+              player.setPlaybackQuality(preferred);
+            }
+          }
+          if (typeof player.playVideo === 'function') {
+            player.playVideo();
+          }
+        } catch (e) {}
+      }
+
+      const v = document.querySelector('video');
+      if (v) {
+        if (v.paused) {
+          v.play().catch(() => {});
+        }
+      }
+
+      const playBtn = document.querySelector('.ytp-large-play-button, .player-control-play-pause-icon, ytm-single-hero-image');
+      if (playBtn && document.querySelector('video')?.paused) {
+        try { playBtn.click(); } catch (e) {}
+      }
+    }
+
+    // 2. Hide and remove any unwanted dialogs or elements that YouTube mounts late
+    function cleanupDom() {
+      const dialogs = document.querySelectorAll('.open-in-app-dialog, ytm-upsell-dialog-renderer, .dialog-buttons button, ytm-open-app-button');
+      dialogs.forEach(d => {
+        try { d.remove(); } catch(e) {}
+      });
+    }
+
+    configurePlayer();
+    cleanupDom();
+
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts++;
+      configurePlayer();
+      cleanupDom();
+      if (attempts > 15) clearInterval(interval);
+    }, 400);
+
+    const observer = new MutationObserver(() => {
+      cleanupDom();
+    });
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+  })();
+  true;
+`;
+
 export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   videoId,
   title,
@@ -107,6 +312,17 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   }, [videoId]);
 
   // Seamless auto-fallback: if direct stream fails (e.g. 403 or engine starting), immediately play via web player
+  
+  useEffect(() => {
+    if (!streamUrl && videoId && !useWebFallback) {
+      const timer = setTimeout(() => {
+        console.log('[YouTubeInlinePlayer] ⏱️ Engine stream pending, seamlessly playing via clean Web Player');
+        setUseWebFallback(true);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [streamUrl, videoId, useWebFallback]);
+
   useEffect(() => {
     if (playbackError && videoId) {
       console.log('[YouTubeInlinePlayer] 🔄 Error encountered, seamlessly auto-playing via Web Player:', playbackError);
@@ -274,13 +490,13 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
-  if (useWebFallback && videoId) {
+  if ((useWebFallback || (playbackError && !streamUrl)) && videoId) {
     return (
       <View style={styles.container}>
         <WebView
           key={videoId}
           source={{
-            uri: `https://m.youtube.com/watch?v=${videoId}`,
+            uri: `https://m.youtube.com/watch?v=${videoId}&autoplay=1&playsinline=1&vq=large`,
           }}
           style={StyleSheet.absoluteFill}
           allowsInlineMediaPlayback={true}
@@ -288,29 +504,31 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           javaScriptEnabled={true}
           domStorageEnabled={true}
           allowsFullscreenVideo={true}
-          userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+          scrollEnabled={false}
+          bounces={false}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          overScrollMode="never"
+          injectedJavaScriptBeforeContentLoaded={INJECTED_CSS_BEFORE_LOAD}
+          injectedJavaScript={INJECTED_JS_AFTER_LOAD}
+          userAgent={
+            Platform.OS === 'ios'
+              ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+              : 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+          }
+          onShouldStartLoadWithRequest={(request) => {
+            if (
+              request.url.startsWith('intent://') ||
+              request.url.startsWith('vnd.youtube') ||
+              request.url.includes('itunes.apple.com') ||
+              request.url.includes('play.google.com')
+            ) {
+              return false;
+            }
+            return true;
+          }}
           onLoadEnd={() => setIsBuffering(false)}
         />
-        <View style={styles.webPlayerHeaderPill}>
-          <TouchableOpacity
-            style={styles.switchPlayerPill}
-            onPress={handleOpenYouTubeApp}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="open-outline" size={12} color="#ffffff" style={{ marginRight: 4 }} />
-            <Text style={styles.switchPlayerText}>Open App</Text>
-          </TouchableOpacity>
-          {streamUrl ? (
-            <TouchableOpacity
-              style={[styles.switchPlayerPill, { marginLeft: 8 }]}
-              onPress={() => setUseWebFallback(false)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="refresh" size={12} color="#ffffff" style={{ marginRight: 4 }} />
-              <Text style={styles.switchPlayerText}>Native Player</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
       </View>
     );
   }
@@ -345,6 +563,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               console.error('[YouTubeInlinePlayer] ❌ KSPlayer onError fired:', JSON.stringify(e));
               setIsBuffering(false);
               setUseKSPlayer(false);
+              setUseWebFallback(true);
               onPlaybackError?.(e?.error?.message || 'KSPlayer playback error');
             }}
           />
@@ -397,6 +616,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 return;
               }
               const errStr = e?.error?.errorString || 'Video stream could not be opened';
+              setUseWebFallback(true);
               onPlaybackError?.(errStr);
             }}
           />
