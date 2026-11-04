@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { StorageKeys, storageService } from '@/utils/StorageService';
+import { ensureEmbeddedServerRunning } from '@/utils/StremioServerManager';
 
 export interface YouTubeVideoItem {
   id: string;
@@ -217,7 +218,11 @@ class YouTubeService {
       } catch {}
     }
 
-    // Return null if no engine is reachable (triggers clean serverless mode)
+    // On mobile, fallback directly to the embedded Stremio engine (same port 11470 as TamilMV)
+    if (Platform.OS !== 'web') {
+      return `http://127.0.0.1:${STREMIO_ENGINE_PORT}`;
+    }
+
     this.activeBaseUrl = null;
     return null;
   }
@@ -511,24 +516,30 @@ class YouTubeService {
     let lastError: any = null;
     const maxRetries = 3;
 
+    // Ensure the embedded Stremio engine (which also handles YouTube on 11470) is running on device
+    if (Platform.OS !== 'web') {
+      ensureEmbeddedServerRunning().catch(() => {});
+    }
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       let baseUrl = await this.resolveActiveBaseUrl(attempt === 1 ? 1500 : 2500);
 
       // If initial ping didn't connect, give embedded local engine (Stremio / nodejs-mobile) time to finish booting
       if (!baseUrl && Platform.OS !== 'web') {
-        await new Promise((r) => setTimeout(r, 1000 * attempt));
+        await new Promise((r) => setTimeout(r, 800 * attempt));
         baseUrl = await this.resolveActiveBaseUrl(2000);
+      }
+
+      // Default to internal Stremio server on device (exact same port 11470 as TamilMV)
+      if (!baseUrl && Platform.OS !== 'web') {
+        baseUrl = `http://127.0.0.1:${STREMIO_ENGINE_PORT}`;
       }
 
       if (!baseUrl) {
         if (attempt < maxRetries) {
           continue;
         }
-        const devIp = getDevHostIp();
-        const hint = devIp
-          ? `Streaming engine not reachable. If testing via Expo Go/Metro on iPhone, run 'npm run server' in a terminal on your computer (${devIp}). In production builds, the engine runs locally inside the app.`
-          : `Streaming engine not available. Please verify the Stremio server is running.`;
-        throw new Error(hint);
+        baseUrl = `http://127.0.0.1:${STREMIO_ENGINE_PORT}`;
       }
 
       try {
