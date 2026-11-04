@@ -133,6 +133,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
     updateProgress,
     setIsBuffering,
     playVideo,
+    playShort,
     handlePlayerError,
     retryStream,
     currentQuality,
@@ -150,21 +151,14 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  // Go back to Home Screen on deliberate swipe left
-  const handleGoBackHome = useCallback(async () => {
-    console.log('[YouTubeWatchOverlay] 👈 Swipe left detected -> Returning to Home Screen');
+  // Go back / minimize to previous YouTube screen (does not exit to home screen)
+  const handleGoBackPrevious = useCallback(async () => {
+    console.log('[YouTubeWatchOverlay] 👈 Going back to previous screen (minimizing watch overlay)');
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-    close();
-    try {
-      router.replace('/(tabs)');
-    } catch {
-      try {
-        router.navigate('/(tabs)');
-      } catch {}
-    }
-  }, [close, router]);
+    minimize();
+  }, [minimize]);
 
   // Screen-wide swipe gesture: swipe left anywhere on screen to return to home screen
   const screenPanResponder = useRef(
@@ -172,17 +166,23 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       onStartShouldSetPanResponder: () => false,
       onStartShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        // Deliberate horizontal swipe left (dx < -45) or swipe right (dx > 55)
+        // Deliberate horizontal swipe (dx < -45 or dx > 55) or vertical swipe down (dy > 50)
         const isHorizontalSwipe =
           (gestureState.dx < -45 || gestureState.dx > 55) &&
           Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5;
-        return isHorizontalSwipe;
+        const isSwipeDown =
+          gestureState.dy > 50 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3;
+        return isHorizontalSwipe || isSwipeDown;
       },
       onPanResponderTerminationRequest: () => false,
       onShouldBlockNativeResponder: () => true,
       onPanResponderRelease: async (_evt, gestureState) => {
-        if (gestureState.dx < -45 || gestureState.dx > 55) {
-          handleGoBackHome();
+        if (
+          (gestureState.dy > 50 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3) ||
+          gestureState.dx < -45 ||
+          gestureState.dx > 55
+        ) {
+          handleGoBackPrevious();
         }
       },
     })
@@ -444,14 +444,77 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // While fullscreen player is active, suppress the portrait overlay
   if (pathname === '/stream/player') return null;
 
-  // Mini player removed completely
+  const bottomTabBarHeight = Platform.OS === 'ios' ? 49 + insets.bottom : 56 + insets.bottom;
+
+  // ── Render Floating Mini Player Bar when Minimized ─────────────────────────
   if (isMinimized) {
-    return null;
+    return (
+      <View
+        style={[
+          styles.miniPlayerContainer,
+          { bottom: bottomTabBarHeight + 8 },
+        ]}
+        pointerEvents="box-none"
+      >
+        <TouchableOpacity
+          style={styles.miniPlayerBar}
+          activeOpacity={0.9}
+          onPress={expand}
+        >
+          {/* Mini 16:9 Thumbnail Preview */}
+          <View style={styles.miniThumbWrap}>
+            <Image
+              source={{ uri: currentVideo.thumbnail }}
+              style={styles.miniThumb}
+              resizeMode="cover"
+            />
+          </View>
+
+          {/* Mini Video Info */}
+          <View style={styles.miniInfo}>
+            <Text style={styles.miniTitle} numberOfLines={1}>
+              {currentVideo.title}
+            </Text>
+            <Text style={styles.miniChannel} numberOfLines={1}>
+              {currentVideo.channel}
+            </Text>
+          </View>
+
+          {/* Mini Play / Pause */}
+          <TouchableOpacity
+            style={styles.miniActionBtn}
+            onPress={(e) => {
+              e.stopPropagation();
+              togglePlay();
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons
+              name={isPlaying ? 'pause' : 'play'}
+              size={22}
+              color="#ffffff"
+            />
+          </TouchableOpacity>
+
+          {/* Mini Close Button */}
+          <TouchableOpacity
+            style={styles.miniActionBtn}
+            onPress={(e) => {
+              e.stopPropagation();
+              close();
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={22} color="rgba(255, 255, 255, 0.75)" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   // ── Render Full Real YouTube Watch Screen ──────────────────────────────────
   return (
-    <View style={styles.fullWatchOverlay} {...screenPanResponder.panHandlers}>
+    <View style={[styles.fullWatchOverlay, { bottom: bottomTabBarHeight }]} {...screenPanResponder.panHandlers}>
       <SafeAreaView style={styles.safeArea} edges={screenFitMode === 'hero' ? [] : ['top']}>
         {/* Top 16:9 Video Player */}
         <View {...screenPanResponder.panHandlers}>
@@ -468,8 +531,8 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             seekTarget={seekTarget}
             playbackError={playbackError}
             onTogglePlay={togglePlay}
-            onMinimize={handleGoBackHome}
-            onSwipeExit={handleGoBackHome}
+            onMinimize={handleGoBackPrevious}
+            onSwipeExit={handleGoBackPrevious}
             onFullScreen={handleFullScreen}
             onSeek={seekTo}
             onClearSeekTarget={clearSeekTarget}
@@ -705,7 +768,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
                     key={`short_${item.id}`}
                     style={styles.shortCard}
                     activeOpacity={0.9}
-                    onPress={() => playVideo(item)}
+                    onPress={() => playShort(item, shortsVideos)}
                   >
                     <Image source={{ uri: item.thumbnail }} style={styles.shortThumb} resizeMode="cover" />
                     <LinearGradient
@@ -1055,7 +1118,10 @@ const YouTubeWatchOverlayInner: React.FC = () => {
 
 const styles = StyleSheet.create({
   fullWatchOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     backgroundColor: '#0a0a0c',
     zIndex: 99999,
   },

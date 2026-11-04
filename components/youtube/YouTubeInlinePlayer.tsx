@@ -483,7 +483,17 @@ const INJECTED_CLEAN_PLAYER_JS = `
         var dX = e.changedTouches[0].clientX - swipeStartX;
         var dY = e.changedTouches[0].clientY - swipeStartY;
         var dTime = Date.now() - swipeStartTime;
-        // Detect deliberate horizontal swipe left (dX < -45) or swipe right (dX > 60)
+        // 1. Detect deliberate vertical swipe down (dY > 45) to minimize video
+        if (dTime < 800 && dY > 45 && dY > Math.abs(dX) * 1.2) {
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'SWIPE_DOWN_MINIMIZE'
+            }));
+          }
+          return;
+        }
+
+        // 2. Detect deliberate horizontal swipe left (dX < -45) or swipe right (dX > 60)
         if (dTime < 800 && Math.abs(dX) > 45 && Math.abs(dX) > Math.abs(dY) * 1.3) {
           if (dX < -45 || dX > 60) {
             if (window.ReactNativeWebView) {
@@ -752,7 +762,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
       attachVideoListeners();
       setupBackgroundKeepAlive();
 
-      // Fallback: If YouTube attempts to render its settings popup/bottom sheet, remove it and open native modal
+      // Clean up any web popup/bottom sheet YouTube attempts to render in the background
       var popups = document.querySelectorAll(
         '.ytp-popup, .ytp-settings-menu, ytm-bottom-sheet-renderer, ' +
         '.ytm-menu-item-section-renderer, ytm-menu-popup-renderer, .ytp-panel-menu, ytm-menu-renderer'
@@ -762,14 +772,6 @@ const INJECTED_CLEAN_PLAYER_JS = `
           p.style.setProperty('display', 'none', 'important');
           try { p.remove(); } catch(err) {}
         });
-        if (vid && window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'OPEN_SETTINGS',
-            currentTime: vid.currentTime || 0,
-            duration: vid.duration || 0,
-            isPlaying: !vid.paused
-          }));
-        }
       }
     });
     if (document.body) {
@@ -1199,6 +1201,19 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   return (
     <View style={[styles.container, isHero && { aspectRatio: undefined, height: heroHeight }]}>
+      {/* Top-Left Floating Back Arrow Button (Always accessible to minimize / go back to previous screen) */}
+      <TouchableOpacity
+        style={[
+          styles.floatingBackBtn,
+          isHero && { top: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 6 },
+        ]}
+        onPress={onMinimize}
+        activeOpacity={0.7}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      >
+        <Ionicons name="arrow-back" size={20} color="#ffffff" />
+      </TouchableOpacity>
+
       {isWebActive ? (
         <WebView
           ref={webViewRef}
@@ -1266,6 +1281,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 }
                 if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
                 onProgress(data.currentTime || 0, data.duration || 0);
+              } else if (data.type === 'SWIPE_DOWN_MINIMIZE') {
+                onMinimize();
               } else if (data.type === 'SWIPE_EXIT') {
                 if (onSwipeExit) {
                   onSwipeExit();
@@ -2005,6 +2022,25 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
 
 const styles = StyleSheet.create({
+  floatingBackBtn: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0, 0, 0, 0.58)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    elevation: 5,
+  },
   slimScrubTrack: {
     position: 'absolute',
     bottom: 0,

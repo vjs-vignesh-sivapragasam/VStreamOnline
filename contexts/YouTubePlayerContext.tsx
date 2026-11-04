@@ -43,6 +43,12 @@ export interface YouTubePlayerContextType {
   setPlaybackError: (error: string | null) => void;
   handlePlayerError: (error: string) => void;
   retryStream: () => void;
+  isShortsVisible: boolean;
+  activeShortIndex: number;
+  shortsList: ActiveYouTubeVideo[];
+  playShort: (short: ActiveYouTubeVideo, feed?: ActiveYouTubeVideo[]) => void;
+  closeShorts: () => void;
+  setActiveShortIndex: (index: number) => void;
 }
 
 const YouTubePlayerContext = createContext<YouTubePlayerContextType | null>(null);
@@ -61,6 +67,9 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   const [currentQuality, setCurrentQuality] = useState<string>('480p');
   const [playbackSpeed, setPlaybackSpeedState] = useState<number>(1.0);
   const [isLooping, setIsLooping] = useState<boolean>(false);
+  const [isShortsVisible, setIsShortsVisible] = useState(false);
+  const [activeShortIndex, setActiveShortIndex] = useState(0);
+  const [shortsList, setShortsList] = useState<ActiveYouTubeVideo[]>([]);
 
   const activeVideoIdRef = useRef<string | null>(null);
   const fallbackCountRef = useRef<number>(0);
@@ -275,9 +284,23 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   }, []);
 
   const minimize = useCallback(() => {
-    console.log('[YouTubePlayer] 🔽 minimize called -> closing player (miniplayer removed)');
-    close();
-  }, [close]);
+    console.log('[YouTubePlayer] 🔽 minimize called -> switching to floating miniplayer');
+    setIsMinimized(true);
+  }, []);
+
+  const playShort = useCallback((short: ActiveYouTubeVideo, feed?: ActiveYouTubeVideo[]) => {
+    console.log('[YouTubePlayer] 📱 playShort requested:', short.id, short.title);
+    pauseVideo();
+    const list = feed && feed.length > 0 ? feed : [short];
+    setShortsList(list);
+    const targetIdx = list.findIndex((s) => s.id === short.id);
+    setActiveShortIndex(targetIdx >= 0 ? targetIdx : 0);
+    setIsShortsVisible(true);
+  }, [pauseVideo]);
+
+  const closeShorts = useCallback(() => {
+    setIsShortsVisible(false);
+  }, []);
 
   const availableQualities = useMemo(() => {
     const qualities = new Set<string>();
@@ -435,6 +458,12 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
         setPlaybackError,
         handlePlayerError,
         retryStream,
+        isShortsVisible,
+        activeShortIndex,
+        shortsList,
+        playShort,
+        closeShorts,
+        setActiveShortIndex,
       }}
     >
       {children}

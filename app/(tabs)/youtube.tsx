@@ -295,7 +295,7 @@ export default function YouTubeScreen() {
   const { theme } = useTheme();
   const [authStatus, setAuthStatus] = useState<YouTubeAuthStatus>({ authenticated: false });
   const [isAuthModalVisible, setIsAuthModalVisible] = useState(false);
-  const { playVideo: playInYouTubeWatch } = useYouTubePlayer();
+  const { playVideo: playInYouTubeWatch, playShort } = useYouTubePlayer();
   const flatListRef = useRef<FlatList>(null);
 
   /**
