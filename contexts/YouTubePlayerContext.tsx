@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { youTubeService, YouTubeVideoDetails, YouTubeVideoItem } from '@/services/YouTubeService';
+import { dataConsumptionService } from '@/services/DataConsumptionService';
 
 export interface ActiveYouTubeVideo {
   id: string;
@@ -73,11 +74,13 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
 
   const activeVideoIdRef = useRef<string | null>(null);
   const fallbackCountRef = useRef<number>(0);
+  const lastTrackTimeRef = useRef<number>(0);
 
   const playVideo = useCallback(async (video: ActiveYouTubeVideo) => {
     console.log(`[YouTubePlayer] ▶️ playVideo requested for ID: "${video.id}", Title: "${video.title}"`);
     activeVideoIdRef.current = video.id;
     fallbackCountRef.current = 0;
+    lastTrackTimeRef.current = 0;
     setCurrentVideo(video);
     setVideoDetails(null);
     setStreamUrl(null);
@@ -417,12 +420,21 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     setSeekTarget(null);
   }, []);
 
-  const updateProgress = useCallback((cur: number, dur: number) => {
+    const updateProgress = useCallback((cur: number, dur: number) => {
     setCurrentTime(cur);
     if (dur > 0) {
       setDuration(dur);
     }
-  }, []);
+
+    // Track streaming data consumption incrementally (~every 4-5s)
+    const delta = cur - lastTrackTimeRef.current;
+    if (delta >= 4 && delta < 30) {
+      lastTrackTimeRef.current = cur;
+      dataConsumptionService.trackStreamingSeconds(delta, currentQuality);
+    } else if (delta < 0 || delta >= 30) {
+      lastTrackTimeRef.current = cur;
+    }
+  }, [currentQuality]);
 
   return (
     <YouTubePlayerContext.Provider

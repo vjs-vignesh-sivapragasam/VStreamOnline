@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, Pressable, View, ScrollView, Modal, TouchableOpacity } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { StatusBar, Text } from '@/components/Themed';
@@ -13,6 +13,7 @@ import { BlurView } from 'expo-blur';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
+import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
 
 const SettingsScreen = () => {
   const router = useRouter();
@@ -22,6 +23,20 @@ const SettingsScreen = () => {
   // Modals for Theme Selection & Storage Cleanup
   const [themeModalVisible, setThemeModalVisible] = useState(false);
   const [storageModalVisible, setStorageModalVisible] = useState(false);
+  const [dataStats, setDataStats] = useState<DataConsumptionStats | null>(null);
+
+  const loadDataStats = useCallback(async () => {
+    try {
+      const stats = await dataConsumptionService.getDataConsumptionStats();
+      setDataStats(stats);
+    } catch (err) {
+      console.warn('[Settings] Failed to load data consumption stats:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDataStats();
+  }, [loadDataStats, storageModalVisible]);
 
   const sourceList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { title: 'TamilMV Source', route: '/settings/tamilmv', icon: 'globe-outline' },
@@ -150,14 +165,20 @@ const SettingsScreen = () => {
           </View>
         </View>
 
-        {/* Storage & Data Cleanup Section */}
+                {/* Storage & Data Cleanup Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>STORAGE & DATA CLEANUP</Text>
+          <Text style={styles.sectionHeader}>STORAGE & DATA CONSUMPTION</Text>
           <View style={styles.settingsGroup}>
             <SettingItem
               title="Storage & Data Cleanup"
               icon="server-outline"
-              subtitle="Clear cache & downloads"
+              subtitle={
+                dataStats
+                  ? `Today: ${dataStats.todayFormatted} • Overall: ${dataStats.overallFormatted}`
+                  : 'Clear cache, downloads & data tracking'
+              }
+              badgeText={dataStats ? `Today: ${dataStats.todayFormatted}` : undefined}
+              badgeColor="#30d158"
               onPress={async () => {
                 if (await isHapticsSupported()) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -301,7 +322,7 @@ const SettingsScreen = () => {
               contentContainerStyle={styles.popupScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              <StorageCleanupCard />
+              <StorageCleanupCard onStatsChange={loadDataStats} />
             </ScrollView>
           </BlurView>
         </View>

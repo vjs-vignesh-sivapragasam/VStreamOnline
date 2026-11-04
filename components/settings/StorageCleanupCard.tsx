@@ -12,20 +12,31 @@ import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import { useTheme } from '@/contexts/ThemeContext';
 import { storageCleanupService, StorageStats } from '@/services/StorageCleanupService';
+import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
 
-export const StorageCleanupCard: React.FC = () => {
+export interface StorageCleanupCardProps {
+  onStatsChange?: () => void;
+}
+
+export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsChange }) => {
   const { theme } = useTheme();
   const [stats, setStats] = useState<StorageStats | null>(null);
+  const [dataStats, setDataStats] = useState<DataConsumptionStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
       setIsLoading(true);
-      const data = await storageCleanupService.getStorageStats();
-      setStats(data);
+      const [storageData, consumptionData] = await Promise.all([
+        storageCleanupService.getStorageStats(),
+        dataConsumptionService.getDataConsumptionStats(),
+      ]);
+      setStats(storageData);
+      setDataStats(consumptionData);
+      onStatsChange?.();
     } catch (err) {
-      console.warn('[StorageCleanupCard] Error loading storage stats:', err);
+      console.warn('[StorageCleanupCard] Error loading stats:', err);
     } finally {
       setIsLoading(false);
     }
@@ -167,6 +178,28 @@ export const StorageCleanupCard: React.FC = () => {
     );
   };
 
+  const handleResetDataTracking = () => {
+    Alert.alert(
+      'Reset Data Usage Tracking',
+      'This will reset today and overall streaming data consumption counters back to 0 B.\n\nOffline downloads and cache will NOT be deleted. Do you want to proceed?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset Tracking',
+          style: 'destructive',
+          onPress: async () => {
+            await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+            setActionInProgress('resetData');
+            await dataConsumptionService.resetAll();
+            await loadStats();
+            setActionInProgress(null);
+            Alert.alert('Done', 'Data consumption counters have been reset.');
+          },
+        },
+      ]
+    );
+  };
+
   // 4. Deep Clean / Clear Everything Action
   const handleClearEverything = () => {
     Alert.alert(
@@ -181,6 +214,7 @@ export const StorageCleanupCard: React.FC = () => {
             await triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
             setActionInProgress('everything');
             const res = await storageCleanupService.clearEverything();
+            await dataConsumptionService.resetAll();
             await loadStats();
             setActionInProgress(null);
             Alert.alert(
@@ -203,17 +237,25 @@ export const StorageCleanupCard: React.FC = () => {
     ? storageCleanupService.formatBytes(stats.cacheBytes)
     : '0 B';
 
+  // Calculate percentages for data consumption segment bar
+  const totalTraffic = (dataStats?.overallTotalBytes || 1);
+  const streamPct = Math.max(5, Math.min(85, Math.round(((dataStats?.overallStreamBytes || 0) / totalTraffic) * 100)));
+  const downloadPct = Math.max(5, Math.min(85, Math.round(((dataStats?.overallDownloadBytes || 0) / totalTraffic) * 100)));
+  const cachePct = Math.max(2, 100 - streamPct - downloadPct);
+
   return (
     <View style={styles.cardContainer}>
-      {/* Top Header Row with Refresh */}
-      <View style={styles.headerRow}>
-        <View style={styles.headerLeft}>
-          <View style={[styles.headerIconBox, { backgroundColor: theme.primary + '1F' }]}>
-            <Ionicons name="pie-chart-outline" size={20} color={theme.primary} />
+      {/* ── 1. Top Section: Data Consumption Analytics ──────────────────────── */}
+      <View style={styles.sectionHeaderRow}>
+        <View style={styles.sectionHeaderLeft}>
+          <View style={[styles.headerIconBox, { backgroundColor: '#30d1581F' }]}>
+            <Ionicons name="cellular-outline" size={20} color="#30d158" />
           </View>
           <View>
-            <Text style={styles.headerTitle}>Storage & Memory Usage</Text>
-            <Text style={styles.headerSubtitle}>Manage offline media, cache & lists</Text>
+            <Text style={styles.headerTitle}>Data Consumption Analytics</Text>
+            <Text style={styles.headerSubtitle}>
+              Today's usage vs overall app throughput
+            </Text>
           </View>
         </View>
 
@@ -232,10 +274,139 @@ export const StorageCleanupCard: React.FC = () => {
         </TouchableOpacity>
       </View>
 
+      {/* Two Prominent KPI Cards: Today vs Overall */}
+      <View style={styles.kpiCardsRow}>
+        {/* Card 1: Today's Consumption */}
+        <View style={[styles.kpiCard, styles.todayCard]}>
+          <View style={styles.kpiTopRow}>
+            <View style={styles.kpiTagWrap}>
+              <View style={[styles.kpiTagDot, { backgroundColor: '#30d158' }]} />
+              <Text style={styles.kpiTagText}>CONSUMED TODAY</Text>
+            </View>
+            <Ionicons name="today-outline" size={15} color="#30d158" />
+          </View>
+
+          <Text style={styles.kpiMainValue}>
+            {dataStats?.todayFormatted || '0 B'}
+          </Text>
+
+          <View style={styles.kpiDivider} />
+
+          <View style={styles.kpiDetailRow}>
+            <View style={styles.kpiDetailItem}>
+              <Text style={styles.kpiDetailLabel}>Streaming</Text>
+              <Text style={styles.kpiDetailVal}>
+                {dataStats ? dataConsumptionService.formatBytes(dataStats.todayStreamBytes) : '0 B'}
+              </Text>
+            </View>
+            <View style={styles.kpiDetailItem}>
+              <Text style={styles.kpiDetailLabel}>Downloads</Text>
+              <Text style={styles.kpiDetailVal}>
+                {dataStats ? dataConsumptionService.formatBytes(dataStats.todayDownloadBytes) : '0 B'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.kpiPlaybackRow}>
+            <Ionicons name="time-outline" size={12} color="rgba(255, 255, 255, 0.55)" />
+            <Text style={styles.kpiPlaybackText}>
+              ~{dataStats?.todayStreamMinutes || 0} mins watched today
+            </Text>
+          </View>
+        </View>
+
+        {/* Card 2: Overall App Consumption */}
+        <View style={[styles.kpiCard, styles.overallCard, { borderColor: theme.primary + '33' }]}>
+          <View style={styles.kpiTopRow}>
+            <View style={styles.kpiTagWrap}>
+              <View style={[styles.kpiTagDot, { backgroundColor: theme.primary }]} />
+              <Text style={styles.kpiTagText}>OVERALL (ALL TIME)</Text>
+            </View>
+            <Ionicons name="globe-outline" size={15} color={theme.primary} />
+          </View>
+
+          <Text style={[styles.kpiMainValue, { color: theme.primaryLight || theme.primary }]}>
+            {dataStats?.overallFormatted || '0 B'}
+          </Text>
+
+          <View style={styles.kpiDivider} />
+
+          <View style={styles.kpiDetailRow}>
+            <View style={styles.kpiDetailItem}>
+              <Text style={styles.kpiDetailLabel}>All Streams</Text>
+              <Text style={styles.kpiDetailVal}>
+                {dataStats ? dataConsumptionService.formatBytes(dataStats.overallStreamBytes) : '0 B'}
+              </Text>
+            </View>
+            <View style={styles.kpiDetailItem}>
+              <Text style={styles.kpiDetailLabel}>Disk Storage</Text>
+              <Text style={styles.kpiDetailVal}>{totalUsedFormatted}</Text>
+            </View>
+          </View>
+
+          <View style={styles.kpiPlaybackRow}>
+            <Ionicons name="play-circle-outline" size={12} color="rgba(255, 255, 255, 0.55)" />
+            <Text style={styles.kpiPlaybackText}>
+              ~{dataStats?.overallStreamMinutes || 0} mins total streamed
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Segmented Traffic Distribution Bar */}
+      <View style={styles.distributionContainer}>
+        <View style={styles.distributionHeader}>
+          <Text style={styles.distributionTitle}>Traffic Distribution Breakdown</Text>
+          <Text style={styles.distributionSub}>All-time network throughput</Text>
+        </View>
+
+        <View style={styles.segmentTrack}>
+          <View style={[styles.segmentFill, { width: `${streamPct}%`, backgroundColor: theme.primary }]} />
+          <View style={[styles.segmentFill, { width: `${downloadPct}%`, backgroundColor: '#30d158' }]} />
+          <View style={[styles.segmentFill, { width: `${cachePct}%`, backgroundColor: '#ff9f0a' }]} />
+        </View>
+
+        <View style={styles.segmentLegendRow}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: theme.primary }]} />
+            <Text style={styles.legendText}>
+              Streaming ({dataStats ? dataConsumptionService.formatBytes(dataStats.overallStreamBytes) : '0 B'})
+            </Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#30d158' }]} />
+            <Text style={styles.legendText}>
+              Downloads ({dataStats ? dataConsumptionService.formatBytes(dataStats.overallDownloadBytes) : '0 B'})
+            </Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#ff9f0a' }]} />
+            <Text style={styles.legendText}>
+              Cache ({cacheFormatted})
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* ── 2. Device Storage & Local Disk Memory ────────────────────────────── */}
+      <View style={styles.storageSectionDivider} />
+
+      <View style={styles.sectionHeaderRow}>
+        <View style={styles.sectionHeaderLeft}>
+          <View style={[styles.headerIconBox, { backgroundColor: theme.primary + '1F' }]}>
+            <Ionicons name="pie-chart-outline" size={20} color={theme.primary} />
+          </View>
+          <View>
+            <Text style={styles.headerTitle}>Device Storage & Memory Cleanup</Text>
+            <Text style={styles.headerSubtitle}>Manage offline media, cache & lists</Text>
+          </View>
+        </View>
+      </View>
+
       {/* Storage Summary Big Pill */}
       <View style={[styles.storageBanner, { borderColor: theme.primary + '33', backgroundColor: theme.primary + '0D' }]}>
         <View style={styles.storageBannerLeft}>
-          <Text style={styles.storageBannerLabel}>TOTAL DATA CONSUMED</Text>
+          <Text style={styles.storageBannerLabel}>TOTAL DISK STORAGE USED</Text>
           <Text style={[styles.storageBannerValue, { color: theme.primaryLight || theme.primary }]}>
             {totalUsedFormatted}
           </Text>
@@ -279,7 +450,7 @@ export const StorageCleanupCard: React.FC = () => {
         </View>
       </View>
 
-      {/* Action Buttons Grid */}
+      {/* ── 3. Action Buttons Grid ─────────────────────────────────────────── */}
       <View style={styles.actionsContainer}>
         {/* 1. Clear All Downloads Button */}
         <TouchableOpacity
@@ -344,14 +515,33 @@ export const StorageCleanupCard: React.FC = () => {
           <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
         </TouchableOpacity>
 
+                {/* Reset Data Tracking Button */}
+        <TouchableOpacity
+          style={[styles.actionBtn, { borderColor: '#30d1583A', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}
+          onPress={handleResetDataTracking}
+          disabled={actionInProgress !== null}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.actionIconWrap, { backgroundColor: '#30d15818' }]}>
+            {actionInProgress === 'resetData' ? (
+              <ActivityIndicator size="small" color="#30d158" />
+            ) : (
+              <Ionicons name="refresh-circle-outline" size={18} color="#30d158" />
+            )}
+          </View>
+          <View style={styles.actionTextWrap}>
+            <Text style={styles.actionBtnTitle}>Reset Data Consumption Counters</Text>
+            <Text style={styles.actionBtnSub}>Reset today & overall streaming throughput counters</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
+        </TouchableOpacity>
+
         {/* 4. Master Deep Clean Button */}
         <TouchableOpacity
           style={[
             styles.deepCleanBtn,
-            {
-              backgroundColor: theme.primary,
-              shadowColor: theme.primary,
-            },
+            { backgroundColor: '#e50914' },
+            actionInProgress === 'everything' && { opacity: 0.7 },
           ]}
           onPress={handleClearEverything}
           disabled={actionInProgress !== null}
@@ -362,9 +552,7 @@ export const StorageCleanupCard: React.FC = () => {
           ) : (
             <Ionicons name="sparkles" size={16} color="#ffffff" style={{ marginRight: 8 }} />
           )}
-          <Text style={styles.deepCleanBtnText}>
-            {actionInProgress === 'everything' ? 'Cleaning All Storage...' : 'Deep Clean & Free Everything'}
-          </Text>
+          <Text style={styles.deepCleanBtnText}>Deep Clean (Wipe All App Data)</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -373,19 +561,19 @@ export const StorageCleanupCard: React.FC = () => {
 
 const styles = StyleSheet.create({
   cardContainer: {
-    backgroundColor: '#101012',
+    backgroundColor: 'rgba(18, 18, 20, 0.98)',
+    borderRadius: 16,
     padding: 16,
-    borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  headerRow: {
+  sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 14,
   },
-  headerLeft: {
+  sectionHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -413,6 +601,152 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
+
+  // ── Dual KPI Stat Cards (Today vs Overall) ─────────────────────────────────
+  kpiCardsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+  },
+  kpiCard: {
+    flex: 1,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+  },
+  todayCard: {
+    backgroundColor: 'rgba(48, 209, 88, 0.07)',
+    borderColor: 'rgba(48, 209, 88, 0.28)',
+  },
+  overallCard: {
+    backgroundColor: 'rgba(83, 90, 255, 0.07)',
+  },
+  kpiTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  kpiTagWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  kpiTagDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  kpiTagText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#8E8E93',
+    letterSpacing: 0.5,
+  },
+  kpiMainValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#30d158',
+    letterSpacing: -0.5,
+    marginVertical: 2,
+  },
+  kpiDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    marginVertical: 8,
+  },
+  kpiDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  kpiDetailItem: {
+    gap: 2,
+  },
+  kpiDetailLabel: {
+    fontSize: 10,
+    color: '#8E8E93',
+  },
+  kpiDetailVal: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  kpiPlaybackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  kpiPlaybackText: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontWeight: '500',
+  },
+
+  // ── Traffic Distribution Segment Bar ───────────────────────────────────────
+  distributionContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    marginBottom: 14,
+  },
+  distributionHeader: {
+    marginBottom: 8,
+  },
+  distributionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  distributionSub: {
+    fontSize: 10,
+    color: '#8E8E93',
+    marginTop: 1,
+  },
+  segmentTrack: {
+    flexDirection: 'row',
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginVertical: 8,
+  },
+  segmentFill: {
+    height: '100%',
+  },
+  segmentLegendRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 4,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  legendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  legendText: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.75)',
+  },
+
+  storageSectionDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginVertical: 14,
+  },
+
+  // ── Storage Banner ─────────────────────────────────────────────────────────
   storageBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -455,6 +789,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#D1D1D6',
   },
+
+  // ── Breakdown Grid ─────────────────────────────────────────────────────────
   breakdownGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -481,6 +817,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#ffffff',
   },
+
+  // ── Action Buttons ─────────────────────────────────────────────────────────
   actionsContainer: {
     gap: 8,
   },
