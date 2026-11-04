@@ -96,12 +96,24 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const feedbackTimerRef = useRef<any>(null);
   const [isSliding, setIsSliding] = useState(false);
   const [sliderPos, setSliderPos] = useState(0);
-  const [useKSPlayer, setUseKSPlayer] = useState(Platform.OS === 'ios');
+  // Default to react-native-video (AVPlayer on iOS, ExoPlayer on Android) for native MP4 streaming
+  const [useKSPlayer, setUseKSPlayer] = useState(false);
 
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [settingsSubView, setSettingsSubView] = useState<'main' | 'quality' | 'speed'>('main');
 
   const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+  const playerHeaders: Record<string, string> = useMemo(() => {
+    const headers: Record<string, string> = {};
+    if (streamUrl?.includes('googlevideo.com')) {
+      headers['User-Agent'] = Platform.OS === 'ios'
+        ? 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)'
+        : 'com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US)';
+      headers['Accept'] = '*/*';
+    }
+    return headers;
+  }, [streamUrl]);
 
   const hideTimerRef = useRef<any>(null);
   const videoRef = useRef<VideoRef>(null);
@@ -234,10 +246,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   return (
     <View style={styles.container}>
       {streamUrl ? (
-        useKSPlayer ? (
+        useKSPlayer && isKSPlayerAvailable() ? (
           <KSPlayerView
             ref={ksRef}
             url={streamUrl}
+            headers={playerHeaders}
             paused={!isPlaying}
             rate={playbackSpeed}
             resizeMode={videoResizeMode}
@@ -259,16 +272,17 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             onError={(e) => {
               console.error('[YouTubeInlinePlayer] ❌ KSPlayer onError fired:', JSON.stringify(e));
               setIsBuffering(false);
-              if (Platform.OS !== 'ios') {
-                setUseKSPlayer(false);
-              }
+              setUseKSPlayer(false);
               onPlaybackError?.(e?.error?.message || 'KSPlayer playback error');
             }}
           />
-        ) : isRCTVideoAvailable() ? (
+        ) : (
           <Video
             ref={videoRef}
-            source={{ uri: streamUrl }}
+            source={{
+              uri: streamUrl,
+              headers: playerHeaders,
+            }}
             paused={!isPlaying}
             rate={playbackSpeed}
             resizeMode={videoResizeMode}
@@ -276,6 +290,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             controls={false}
             playInBackground={false}
             playWhenInactive={false}
+            ignoreSilentSwitch="ignore"
             progressUpdateInterval={250}
             onProgress={(e) => {
               if (!isSliding) {
@@ -304,16 +319,15 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             onError={(e) => {
               console.error('[YouTubeInlinePlayer] ❌ react-native-video onError fired:', JSON.stringify(e));
               setIsBuffering(false);
+              if (isKSPlayerAvailable() && !useKSPlayer) {
+                console.log('[YouTubeInlinePlayer] 🔄 Falling back to KSPlayer...');
+                setUseKSPlayer(true);
+                return;
+              }
               const errStr = e?.error?.errorString || 'Video stream could not be opened';
               onPlaybackError?.(errStr);
             }}
           />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000000' }]}>
-            <Text style={{ color: '#ffffff', textAlign: 'center', paddingHorizontal: 20 }}>
-              Native video player is initializing...
-            </Text>
-          </View>
         )
       ) : (
         <View style={StyleSheet.absoluteFill}>

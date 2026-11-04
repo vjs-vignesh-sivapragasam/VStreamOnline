@@ -532,6 +532,17 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         setIsPaused(false);
     }, [playerState]);
 
+    const playerHeaders: Record<string, string> = useMemo(() => {
+        const headers: Record<string, string> = {};
+        if (videoUrl?.includes('googlevideo.com')) {
+            headers['User-Agent'] = Platform.OS === 'ios'
+                ? 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)'
+                : 'com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US)';
+            headers['Accept'] = '*/*';
+        }
+        return headers;
+    }, [videoUrl]);
+
     if (videoError) {
         return <ErrorDisplay error={videoError} onBack={handleBack} onRetry={handleRetry} />;
     }
@@ -541,7 +552,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             <KSPlayerView
                 ref={videoRef}
                 url={videoUrl}
-                headers={{}}
+                headers={playerHeaders}
                 paused={isPaused}
                 muted={settings.isMuted}
                 rate={settings.playbackSpeed}

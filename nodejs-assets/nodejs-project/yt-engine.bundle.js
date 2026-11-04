@@ -39005,7 +39005,7 @@ async function isUrlPlayable(url) {
   }
 }
 async function resolveVideoWithClients(videoId) {
-  const clientTypes = ["TV", "IOS", "MWEB", "ANDROID", "VR"];
+  const clientTypes = ["ANDROID", "IOS", "MWEB", "TV", "VR"];
   let lastInfo = null;
   let bestCandidate = null;
   for (const cType of clientTypes) {

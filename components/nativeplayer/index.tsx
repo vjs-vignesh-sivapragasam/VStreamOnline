@@ -540,6 +540,22 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         );
     }
 
+    const videoSource = useMemo(() => {
+        if (!videoUrl) return undefined;
+        if (videoUrl.includes('googlevideo.com')) {
+            return {
+                uri: videoUrl,
+                headers: {
+                    'User-Agent': Platform.OS === 'ios'
+                        ? 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)'
+                        : 'com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US)',
+                    'Accept': '*/*',
+                },
+            };
+        }
+        return { uri: videoUrl };
+    }, [videoUrl]);
+
     if (videoError) {
         return <ErrorDisplay error={videoError} onBack={handleBack} onRetry={handleRetry} />;
     }
@@ -548,12 +564,13 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         <View style={styles.container}>
             <Video
                 ref={videoRef}
-                source={{ uri: videoUrl }}
+                source={videoSource}
                 style={styles.video}
                 paused={isPaused}
                 muted={settings.isMuted}
                 rate={settings.playbackSpeed}
                 resizeMode={contentFit}
+                ignoreSilentSwitch="ignore"
                 onLoad={handleLoad}
                 onProgress={handleProgress}
                 onBuffer={handleBuffer}
