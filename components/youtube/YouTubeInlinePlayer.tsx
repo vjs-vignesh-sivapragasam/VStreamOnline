@@ -91,14 +91,23 @@ const INJECTED_CLEAN_PLAYER_JS = `
           padding: 0 !important;
         }
 
-        /* 2. Move player container from top: 48px to top: 0 and full width */
+        /* 2. Expand player container and player-size to 100% full height (remove 96px reduction) */
         .player-container,
         .player-container.sticky-player,
-        #player-container-id {
+        #player-container-id,
+        .player-size,
+        #player,
+        .player-container .player-size,
+        ytm-watch .player-size {
           top: 0 !important;
+          bottom: 0 !important;
           left: 0 !important;
           right: 0 !important;
           width: 100% !important;
+          height: 100% !important;
+          min-height: 100% !important;
+          max-height: 100% !important;
+          padding-bottom: 0 !important;
         }
 
         /* 3. Force video element to fill the inline player frame completely */
@@ -119,12 +128,33 @@ const INJECTED_CLEAN_PLAYER_JS = `
         .html5-video-player {
           position: absolute !important;
           top: 0 !important;
+          bottom: 0 !important;
           left: 0 !important;
+          right: 0 !important;
           width: 100% !important;
           height: 100% !important;
+          max-height: 100% !important;
         }
 
-        /* 4. Hide duplicate title & everything below the video */
+        .ytp-chrome-bottom {
+          bottom: 0 !important;
+          width: 100% !important;
+        }
+
+        /* 4. Hide duplicate/secondary progress bar to leave only a single scrubber */
+        .ytm-progress-bar,
+        ytm-progress-bar,
+        .player-control-overlay .progress-bar,
+        .player-control-container > .progress-bar,
+        .thin-scrubber {
+          display: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          height: 0 !important;
+          pointer-events: none !important;
+        }
+
+        /* 5. Hide duplicate title & everything below the video */
         ytm-slim-video-metadata-renderer,
         .slim-video-metadata-header,
         .slim-video-information-holder,
@@ -142,7 +172,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 5. Hide Tap to unmute & sound icons */
+        /* 6. Hide Tap to unmute & sound icons */
         .ytp-unmute,
         .ytp-unmute-inner,
         .ytp-unmute-box,
@@ -158,7 +188,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           pointer-events: none !important;
         }
 
-        /* 6. Hide Open App buttons, dialogs, promos */
+        /* 7. Hide Open App buttons, dialogs, promos */
         ytm-open-app-button,
         .open-in-app-dialog,
         .upsell-dialog,
@@ -172,7 +202,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 7. Clean 16:9 container frame without page scrolling */
+        /* 8. Clean 16:9 container frame without page scrolling */
         html, body {
           margin: 0 !important;
           padding: 0 !important;
@@ -186,6 +216,28 @@ const INJECTED_CLEAN_PLAYER_JS = `
     injectStyle();
 
     function forceFullVideoAndPlay() {
+      // 1. Expand all container elements to full 100% height
+      var containers = [
+        '#player-container-id',
+        '.player-container',
+        '.player-size',
+        '#player',
+        '.html5-video-player',
+        '.html5-video-container'
+      ];
+      containers.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+          el.style.setProperty('height', '100%', 'important');
+          el.style.setProperty('min-height', '100%', 'important');
+          el.style.setProperty('max-height', '100%', 'important');
+          el.style.setProperty('padding-bottom', '0px', 'important');
+          el.style.setProperty('top', '0px', 'important');
+          el.style.setProperty('bottom', '0px', 'important');
+          el.style.setProperty('width', '100%', 'important');
+        });
+      });
+
+      // 2. Expand video element to cover entire 16:9 container
       var v = document.querySelector('video');
       if (v) {
         v.muted = false;
@@ -198,13 +250,21 @@ const INJECTED_CLEAN_PLAYER_JS = `
           v.play().catch(function() {});
         }
       }
-      var vContainer = document.querySelector('.html5-video-container');
-      if (vContainer) {
-        vContainer.style.setProperty('top', '0px', 'important');
-        vContainer.style.setProperty('left', '0px', 'important');
-        vContainer.style.setProperty('width', '100%', 'important');
-        vContainer.style.setProperty('height', '100%', 'important');
+
+      // 3. Position scrubber at the bottom of the player
+      var chromeBottom = document.querySelector('.ytp-chrome-bottom');
+      if (chromeBottom) {
+        chromeBottom.style.setProperty('bottom', '0px', 'important');
+        chromeBottom.style.setProperty('width', '100%', 'important');
       }
+
+      // 4. Hide duplicate secondary progress bar
+      var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar');
+      secondaryBars.forEach(function(el) {
+        el.style.setProperty('display', 'none', 'important');
+      });
+
+      // 5. Sound & quality configuration
       var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
       if (player) {
         try {
@@ -249,6 +309,10 @@ const INJECTED_CLEAN_PLAYER_JS = `
       if (unmute) {
         try { unmute.click(); unmute.remove(); } catch(e) {}
       }
+      var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar');
+      secondaryBars.forEach(function(el) {
+        el.style.setProperty('display', 'none', 'important');
+      });
       var vid = document.querySelector('video');
       if (vid && vid.style.objectFit !== 'cover') {
         vid.style.setProperty('top', '0px', 'important');
