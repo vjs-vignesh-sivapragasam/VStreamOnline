@@ -16,7 +16,7 @@ import {
   Pressable,
   PanResponder,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, usePathname } from 'expo-router';
@@ -28,7 +28,7 @@ import { youTubeService, YouTubeVideoItem, YouTubeVideoDetails, YouTubeFormatOpt
 import { youTubeListService } from '@/services/YouTubeListService';
 import { downloadService } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
-import { YouTubeInlinePlayer } from '@/components/youtube/YouTubeInlinePlayer';
+import { YouTubeInlinePlayer, ScreenFitMode } from '@/components/youtube/YouTubeInlinePlayer';
 import BottomSpacing from '@/components/BottomSpacing';
 
 interface VideoComment {
@@ -197,6 +197,8 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // Download modal state
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [activeDownloadItem, setActiveDownloadItem] = useState<YouTubeVideoItem | null>(null);
+  const insets = useSafeAreaInsets();
+  const [screenFitMode, setScreenFitMode] = useState<ScreenFitMode>('cover');
   const [modalVideoDetails, setModalVideoDetails] = useState<YouTubeVideoDetails | null>(null);
   const [isLoadingModalDetails, setIsLoadingModalDetails] = useState(false);
 
@@ -450,7 +452,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // ── Render Full Real YouTube Watch Screen ──────────────────────────────────
   return (
     <View style={styles.fullWatchOverlay} {...screenPanResponder.panHandlers}>
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <SafeAreaView style={styles.safeArea} edges={screenFitMode === 'hero' ? [] : ['top']}>
         {/* Top 16:9 Video Player */}
         <View {...screenPanResponder.panHandlers}>
           <YouTubeInlinePlayer

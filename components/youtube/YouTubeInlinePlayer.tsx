@@ -11,6 +11,7 @@ import {
   Pressable,
   ScrollView,
   Linking,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Video, { VideoRef, ResizeMode } from 'react-native-video';
@@ -21,9 +22,17 @@ import { useKeepAwake } from 'expo-keep-awake';
 import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksplayer/KSPlayerView';
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 import { WebView } from 'react-native-webview';
+import { LinearGradient } from 'expo-linear-gradient';
 import { youTubeService } from '@/services/YouTubeService';
 
+const { width } = Dimensions.get('window');
+
+export type ScreenFitMode = 'cover' | 'contain' | 'hero';
+
 export interface YouTubeInlinePlayerProps {
+  screenFitMode?: ScreenFitMode;
+  onScreenFitChange?: (mode: ScreenFitMode) => void;
+  topInset?: number;
   videoId?: string;
   title?: string;
   channel?: string;
@@ -720,10 +729,21 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   onPlaybackError,
   onRetry,
   onSwipeExit,
+  screenFitMode,
+  onScreenFitChange,
+  topInset,
 }) => {
   useKeepAwake('YOUTUBE_PLAYER_PLAYBACK');
+  useEffect(() => {
+    if (screenFitMode) {
+      setVideoResizeMode(screenFitMode);
+      setWebResizeMode(screenFitMode);
+    }
+  }, [screenFitMode]);
+
+
   const [showControls, setShowControls] = useState(false);
-  const [videoResizeMode, setVideoResizeMode] = useState<'cover' | 'contain'>('cover');
+  const [videoResizeMode, setVideoResizeMode] = useState<ScreenFitMode>(screenFitMode || 'cover');
   const [feedbackPill, setFeedbackPill] = useState<string | null>(null);
   const feedbackTimerRef = useRef<any>(null);
   const [isSliding, setIsSliding] = useState(false);
@@ -788,7 +808,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [webQuality, setWebQuality] = useState('Auto');
   const [webSpeed, setWebSpeed] = useState(1.0);
   const [webLoop, setWebLoop] = useState(false);
-  const [webResizeMode, setWebResizeMode] = useState<'cover' | 'contain'>('cover');
+  const [webResizeMode, setWebResizeMode] = useState<ScreenFitMode>(screenFitMode || 'cover');
   const [modalSliderPos, setModalSliderPos] = useState<number | null>(null);
 
   const isWebActive = (useWebFallback || (playbackError && !streamUrl)) && !!videoId;
@@ -1092,10 +1112,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     [currentTime, duration, onSeek, scheduleControlsHide]
   );
 
+  const isHero = effectiveResizeMode === 'hero';
+  const heroHeight = Math.round(width * 0.72) + (topInset || (Platform.OS === 'ios' ? 47 : 0));
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isHero && { aspectRatio: undefined, height: heroHeight }]}>
       {isWebActive ? (
         <WebView
           ref={webViewRef}
@@ -1193,7 +1215,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             headers={playerHeaders}
             paused={!isPlaying}
             rate={playbackSpeed}
-            resizeMode={videoResizeMode}
+            resizeMode={videoResizeMode === 'contain' ? 'contain' : 'cover'}
             style={StyleSheet.absoluteFill}
             onProgress={(e) => {
               if (!isSliding) {
@@ -1226,7 +1248,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             }}
             paused={!isPlaying}
             rate={playbackSpeed}
-            resizeMode={videoResizeMode}
+            resizeMode={videoResizeMode === 'contain' ? 'contain' : 'cover'}
             style={StyleSheet.absoluteFill}
             controls={false}
             playInBackground={false}
@@ -1364,7 +1386,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       {showControls && (
         <View style={styles.controlsOverlay} pointerEvents="box-none">
           {/* Top Bar: Real YouTube Icons (Chevron Down, Autoplay, Cast, CC, Screen Fit, Settings) */}
-          <View style={styles.topBar}>
+          <View style={[styles.topBar, isHero && { paddingTop: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 4 }]}>
             <TouchableOpacity
               style={styles.iconButton}
               onPress={onMinimize}
@@ -1738,12 +1760,35 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   activeOpacity={0.7}
                 >
                   <View style={styles.settingsRowLeft}>
-                    <Ionicons name="scan-outline" size={20} color="#ffffff" />
+                    <Ionicons
+                      name={
+                        effectiveResizeMode === 'hero'
+                          ? 'film-outline'
+                          : effectiveResizeMode === 'cover'
+                          ? 'expand-outline'
+                          : 'scan-outline'
+                      }
+                      size={20}
+                      color={effectiveResizeMode === 'hero' ? '#E50914' : '#ffffff'}
+                    />
                     <Text style={styles.settingsRowLabel}>Screen fit</Text>
                   </View>
                   <View style={styles.settingsRowRight}>
-                    <Text style={[styles.settingsRowValue, effectiveResizeMode === 'cover' && { color: '#535aff', fontWeight: '700' }]}>
-                      {effectiveResizeMode === 'cover' ? 'Fit to Screen (Fill)' : 'Original (Fit)'}
+                    <Text
+                      style={[
+                        styles.settingsRowValue,
+                        effectiveResizeMode === 'hero'
+                          ? { color: '#E50914', fontWeight: '700' }
+                          : effectiveResizeMode === 'cover'
+                          ? { color: '#535aff', fontWeight: '700' }
+                          : undefined,
+                      ]}
+                    >
+                      {effectiveResizeMode === 'hero'
+                        ? 'Netflix Hero Banner'
+                        : effectiveResizeMode === 'cover'
+                        ? 'Fit to Screen (Fill)'
+                        : 'Original (Fit)'}
                     </Text>
                     <Ionicons name="swap-horizontal" size={16} color="rgba(255, 255, 255, 0.45)" />
                   </View>
@@ -1907,6 +1952,21 @@ const styles = StyleSheet.create({
     padding: 4,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  heroTopGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 15,
+  },
+  heroBottomGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 56,
+    zIndex: 15,
   },
   autoplayToggleTrack: {
     width: 32,
