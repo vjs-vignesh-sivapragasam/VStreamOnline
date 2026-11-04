@@ -91,14 +91,40 @@ const INJECTED_CLEAN_PLAYER_JS = `
           padding: 0 !important;
         }
 
-        /* 2. Move player container from top: 48px to top: 0 */
+        /* 2. Move player container from top: 48px to top: 0 and full width */
         .player-container,
         .player-container.sticky-player,
         #player-container-id {
           top: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          width: 100% !important;
         }
 
-        /* 3. Hide duplicate title & everything below the video */
+        /* 3. Force video element to fill the inline player frame completely */
+        video,
+        video.video-stream,
+        video.html5-main-video {
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-width: 100% !important;
+          max-height: 100% !important;
+          object-fit: cover !important;
+        }
+
+        .html5-video-container,
+        .html5-video-player {
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+        }
+
+        /* 4. Hide duplicate title & everything below the video */
         ytm-slim-video-metadata-renderer,
         .slim-video-metadata-header,
         .slim-video-information-holder,
@@ -116,7 +142,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 4. Hide Tap to unmute & sound icons */
+        /* 5. Hide Tap to unmute & sound icons */
         .ytp-unmute,
         .ytp-unmute-inner,
         .ytp-unmute-box,
@@ -132,7 +158,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           pointer-events: none !important;
         }
 
-        /* 5. Hide Open App buttons, dialogs, promos */
+        /* 6. Hide Open App buttons, dialogs, promos */
         ytm-open-app-button,
         .open-in-app-dialog,
         .upsell-dialog,
@@ -146,7 +172,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 6. Clean 16:9 container frame without page scrolling */
+        /* 7. Clean 16:9 container frame without page scrolling */
         html, body {
           margin: 0 !important;
           padding: 0 !important;
@@ -159,13 +185,25 @@ const INJECTED_CLEAN_PLAYER_JS = `
 
     injectStyle();
 
-    function unmuteAndPlay() {
+    function forceFullVideoAndPlay() {
       var v = document.querySelector('video');
       if (v) {
         v.muted = false;
+        v.style.setProperty('top', '0px', 'important');
+        v.style.setProperty('left', '0px', 'important');
+        v.style.setProperty('width', '100%', 'important');
+        v.style.setProperty('height', '100%', 'important');
+        v.style.setProperty('object-fit', 'cover', 'important');
         if (v.paused) {
           v.play().catch(function() {});
         }
+      }
+      var vContainer = document.querySelector('.html5-video-container');
+      if (vContainer) {
+        vContainer.style.setProperty('top', '0px', 'important');
+        vContainer.style.setProperty('left', '0px', 'important');
+        vContainer.style.setProperty('width', '100%', 'important');
+        vContainer.style.setProperty('height', '100%', 'important');
       }
       var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
       if (player) {
@@ -195,13 +233,13 @@ const INJECTED_CLEAN_PLAYER_JS = `
       }
     }
 
-    unmuteAndPlay();
+    forceFullVideoAndPlay();
 
     var count = 0;
     var timer = setInterval(function() {
       count++;
       injectStyle();
-      unmuteAndPlay();
+      forceFullVideoAndPlay();
       if (count > 25) clearInterval(timer);
     }, 200);
 
@@ -210,6 +248,14 @@ const INJECTED_CLEAN_PLAYER_JS = `
       var unmute = document.querySelector('.ytp-unmute, .ytp-unmute-inner, [class*="unmute"]');
       if (unmute) {
         try { unmute.click(); unmute.remove(); } catch(e) {}
+      }
+      var vid = document.querySelector('video');
+      if (vid && vid.style.objectFit !== 'cover') {
+        vid.style.setProperty('top', '0px', 'important');
+        vid.style.setProperty('left', '0px', 'important');
+        vid.style.setProperty('width', '100%', 'important');
+        vid.style.setProperty('height', '100%', 'important');
+        vid.style.setProperty('object-fit', 'cover', 'important');
       }
     });
     if (document.body) {
