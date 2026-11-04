@@ -87,8 +87,9 @@ function formatRemainingTime(currentSec: number, durationSec: number): string {
 const INJECTED_BEFORE_CONTENT_JS = `
   (function() {
     try {
-      // 1. Dark background to prevent white flash
-      var css = 'html, body, #player, .player-container, #player-container-id, .html5-video-player { background: #000000 !important; background-color: #000000 !important; }';
+      // 1. Dark background to prevent white flash + full width progress bar styles
+      var css = 'html, body, #player, .player-container, #player-container-id, .html5-video-player { background: #000000 !important; background-color: #000000 !important; } ' +
+        'yt-progress-bar, .watch-page-progress-bar, .ytPlayerProgressBarHost, .ytPlayerProgressBarHostLowerPlayer, .ytPlayerProgressBarHostBottomEdge, .ytPlayerProgressBarHostBottomInset, .ytPlayerProgressBarHostCustom, .ytPlayerProgressBarDragContainer, .ytPlayerProgressBarProgressBar, .ytPlayerProgressBarProgressBarInset, .ytChapteredProgressBarHost, .ytFocusedChapterProgressBarLineHost, .ytProgressBarLineHost, .yt-progress-bar-line, .yt-chaptered-progress-bar-line, .yt-focused-chapter-progress-bar-line, .ytp-chrome-bottom, .ytp-progress-bar-container, .ytp-progress-bar, .ytp-progress-list, [class*="ytPlayerProgressBarHost"], [class*="ytPlayerProgressBarProgressBar"], [class*="ytPlayerProgressBarDragContainer"], [class*="watch-page-progress-bar"] { left: 0px !important; right: 0px !important; margin-left: 0px !important; margin-right: 0px !important; padding-left: 0px !important; padding-right: 0px !important; width: 100% !important; max-width: 100% !important; min-width: 100% !important; box-sizing: border-box !important; }';
       var style = document.createElement('style');
       style.type = 'text/css';
       style.appendChild(document.createTextNode(css));
@@ -209,7 +210,65 @@ const INJECTED_CLEAN_PLAYER_JS = `
           max-height: 100% !important;
         }
 
-        /* 4. Full width progress bar without left/right gaps, positioned right at bottom */
+        /* 4. Full width progress bar without left/right gaps across all mobile and web YouTube variants */
+        yt-progress-bar,
+        .watch-page-progress-bar,
+        .ytPlayerProgressBarHost,
+        .ytPlayerProgressBarHostLowerPlayer,
+        .ytPlayerProgressBarHostBottomEdge,
+        .ytPlayerProgressBarHostBottomInset,
+        .ytPlayerProgressBarHostCustom,
+        .ytPlayerProgressBarDragContainer,
+        .ytPlayerProgressBarProgressBar,
+        .ytPlayerProgressBarProgressBarInset,
+        .ytChapteredProgressBarHost,
+        .ytFocusedChapterProgressBarLineHost,
+        .ytProgressBarLineHost,
+        .yt-progress-bar-line,
+        .yt-chaptered-progress-bar-line,
+        .yt-focused-chapter-progress-bar-line,
+        .ytp-chrome-bottom,
+        .ytp-progress-bar-container,
+        .ytp-progress-bar,
+        .ytp-progress-list,
+        .ytp-play-progress,
+        .ytp-load-progress,
+        .ytp-hover-progress,
+        [class*="ytPlayerProgressBarHost"],
+        [class*="ytPlayerProgressBarProgressBar"],
+        [class*="ytPlayerProgressBarDragContainer"],
+        [class*="watch-page-progress-bar"] {
+          left: 0px !important;
+          right: 0px !important;
+          margin-left: 0px !important;
+          margin-right: 0px !important;
+          padding-left: 0px !important;
+          padding-right: 0px !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          min-width: 100% !important;
+          box-sizing: border-box !important;
+        }
+
+        body[faux-fullscreen=true] .watch-page-progress-bar,
+        .fullscreen-controls-always-on .watch-page-progress-bar {
+          left: 0px !important;
+          right: 0px !important;
+        }
+
+        div:has(> yt-progress-bar),
+        div:has(> .watch-page-progress-bar),
+        div:has(> [class*="ytPlayerProgressBar"]) {
+          left: 0px !important;
+          right: 0px !important;
+          margin-left: 0px !important;
+          margin-right: 0px !important;
+          padding-left: 0px !important;
+          padding-right: 0px !important;
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+
         .ytp-chrome-bottom {
           bottom: 0 !important;
           left: 0 !important;
@@ -561,38 +620,52 @@ const INJECTED_CLEAN_PLAYER_JS = `
         }
       }
 
-      // 3. Make progress bar 100% full width (no left/right gap) and at bottom edge
-      var chromeBottom = document.querySelector('.ytp-chrome-bottom');
-      if (chromeBottom) {
-        chromeBottom.style.setProperty('bottom', '0px', 'important');
-        chromeBottom.style.setProperty('left', '0px', 'important');
-        chromeBottom.style.setProperty('right', '0px', 'important');
-        chromeBottom.style.setProperty('width', '100%', 'important');
-        chromeBottom.style.setProperty('padding-left', '0px', 'important');
-        chromeBottom.style.setProperty('padding-right', '0px', 'important');
-        chromeBottom.style.setProperty('margin-left', '0px', 'important');
-        chromeBottom.style.setProperty('margin-right', '0px', 'important');
-      }
-
-      var barContainer = document.querySelector('.ytp-progress-bar-container');
-      if (barContainer) {
-        barContainer.style.setProperty('position', 'absolute', 'important');
-        barContainer.style.setProperty('bottom', '0px', 'important');
-        barContainer.style.setProperty('left', '0px', 'important');
-        barContainer.style.setProperty('right', '0px', 'important');
-        barContainer.style.setProperty('width', '100%', 'important');
-        barContainer.style.setProperty('padding', '0px', 'important');
-        barContainer.style.setProperty('margin', '0px', 'important');
-      }
-
-      var bar = document.querySelector('.ytp-progress-bar');
-      if (bar) {
-        bar.style.setProperty('left', '0px', 'important');
-        bar.style.setProperty('right', '0px', 'important');
-        bar.style.setProperty('width', '100%', 'important');
-        bar.style.setProperty('padding', '0px', 'important');
-        bar.style.setProperty('margin', '0px', 'important');
-      }
+      // 3. Make all mobile & desktop progress bar elements 100% full width (0 left/right gap)
+      var pbSelectors = [
+        'yt-progress-bar',
+        '.watch-page-progress-bar',
+        '.ytPlayerProgressBarHost',
+        '.ytPlayerProgressBarHostLowerPlayer',
+        '.ytPlayerProgressBarHostBottomEdge',
+        '.ytPlayerProgressBarHostBottomInset',
+        '.ytPlayerProgressBarHostCustom',
+        '.ytPlayerProgressBarDragContainer',
+        '.ytPlayerProgressBarProgressBar',
+        '.ytPlayerProgressBarProgressBarInset',
+        '.ytChapteredProgressBarHost',
+        '.ytFocusedChapterProgressBarLineHost',
+        '.ytProgressBarLineHost',
+        '.yt-progress-bar-line',
+        '.yt-chaptered-progress-bar-line',
+        '.yt-focused-chapter-progress-bar-line',
+        '.ytp-chrome-bottom',
+        '.ytp-progress-bar-container',
+        '.ytp-progress-bar',
+        '.ytp-progress-list'
+      ];
+      pbSelectors.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+          el.style.setProperty('left', '0px', 'important');
+          el.style.setProperty('right', '0px', 'important');
+          el.style.setProperty('width', '100%', 'important');
+          el.style.setProperty('max-width', '100%', 'important');
+          el.style.setProperty('min-width', '100%', 'important');
+          el.style.setProperty('margin-left', '0px', 'important');
+          el.style.setProperty('margin-right', '0px', 'important');
+          el.style.setProperty('padding-left', '0px', 'important');
+          el.style.setProperty('padding-right', '0px', 'important');
+          el.style.setProperty('box-sizing', 'border-box', 'important');
+          if (el.parentElement && el.parentElement.tagName === 'DIV' && el.parentElement.offsetWidth < el.offsetWidth) {
+            el.parentElement.style.setProperty('left', '0px', 'important');
+            el.parentElement.style.setProperty('right', '0px', 'important');
+            el.parentElement.style.setProperty('width', '100%', 'important');
+            el.parentElement.style.setProperty('margin-left', '0px', 'important');
+            el.parentElement.style.setProperty('margin-right', '0px', 'important');
+            el.parentElement.style.setProperty('padding-left', '0px', 'important');
+            el.parentElement.style.setProperty('padding-right', '0px', 'important');
+          }
+        });
+      });
 
       // 4. Hide duplicate secondary progress bar
       var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar, .thin-scrubber');
@@ -660,14 +733,22 @@ const INJECTED_CLEAN_PLAYER_JS = `
         vid.style.setProperty('height', '100%', 'important');
         vid.style.setProperty('object-fit', 'cover', 'important');
       }
-      var barContainer = document.querySelector('.ytp-progress-bar-container');
-      if (barContainer && barContainer.style.width !== '100%') {
-        barContainer.style.setProperty('left', '0px', 'important');
-        barContainer.style.setProperty('right', '0px', 'important');
-        barContainer.style.setProperty('width', '100%', 'important');
-        barContainer.style.setProperty('margin', '0px', 'important');
-        barContainer.style.setProperty('padding', '0px', 'important');
-      }
+      pbSelectors.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+          if (el.style.left !== '0px' || el.style.width !== '100%') {
+            el.style.setProperty('left', '0px', 'important');
+            el.style.setProperty('right', '0px', 'important');
+            el.style.setProperty('width', '100%', 'important');
+            el.style.setProperty('max-width', '100%', 'important');
+            el.style.setProperty('min-width', '100%', 'important');
+            el.style.setProperty('margin-left', '0px', 'important');
+            el.style.setProperty('margin-right', '0px', 'important');
+            el.style.setProperty('padding-left', '0px', 'important');
+            el.style.setProperty('padding-right', '0px', 'important');
+            el.style.setProperty('box-sizing', 'border-box', 'important');
+          }
+        });
+      });
       attachVideoListeners();
       setupBackgroundKeepAlive();
 
@@ -2184,8 +2265,8 @@ const styles = StyleSheet.create({
   bottomScrubberContainer: {
     position: 'absolute',
     bottom: -8,
-    left: 0,
-    right: 0,
+    left: -6,
+    right: -6,
     height: 20,
     justifyContent: 'center',
     zIndex: 30,
