@@ -27,7 +27,13 @@ import { youTubeService } from '@/services/YouTubeService';
 
 const { width } = Dimensions.get('window');
 
-export type ScreenFitMode = 'cover' | 'contain' | 'hero';
+export type ScreenFitMode = 'cover' | 'hero' | 'stretch' | 'contain';
+
+export interface FeedbackPillData {
+  label: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+  mode?: ScreenFitMode;
+}
 
 export interface YouTubeInlinePlayerProps {
   screenFitMode?: ScreenFitMode;
@@ -827,7 +833,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   const [showControls, setShowControls] = useState(false);
   const [videoResizeMode, setVideoResizeMode] = useState<ScreenFitMode>(screenFitMode || 'cover');
-  const [feedbackPill, setFeedbackPill] = useState<string | null>(null);
+  const [feedbackPill, setFeedbackPill] = useState<FeedbackPillData | null>(null);
   const feedbackTimerRef = useRef<any>(null);
   const [isSliding, setIsSliding] = useState(false);
   const [sliderPos, setSliderPos] = useState(0);
@@ -882,7 +888,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   }, [videoId]);
 
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
-  const [settingsSubView, setSettingsSubView] = useState<'main' | 'quality' | 'speed'>('main');
+  const [settingsSubView, setSettingsSubView] = useState<'main' | 'quality' | 'speed' | 'screenfit'>('main');
 
   // Web player state for fallback mode
   const [webCurrentTime, setWebCurrentTime] = useState(0);
@@ -1068,44 +1074,73 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     }, 3500);
   }, []);
 
-  const handleToggleResizeMode = useCallback(async () => {
-    if (await isHapticsSupported()) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const cycleScreenFitMode = useCallback((current: ScreenFitMode): ScreenFitMode => {
+    switch (current) {
+      case 'cover':
+        return 'hero';
+      case 'hero':
+        return 'stretch';
+      case 'stretch':
+        return 'contain';
+      case 'contain':
+      default:
+        return 'cover';
     }
-    setVideoResizeMode((prev) => {
-      const next = prev === 'cover' ? 'contain' : 'cover';
-      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-      setFeedbackPill(next === 'cover' ? 'Fit to Screen' : 'Original (Contain)');
-      feedbackTimerRef.current = setTimeout(() => {
-        setFeedbackPill(null);
-      }, 1800);
-      return next;
-    });
-    scheduleControlsHide();
-  }, [scheduleControlsHide]);
+  }, []);
 
-  const handleToggleResizeModeFromModal = useCallback(async () => {
-    if (await isHapticsSupported()) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    if (isWebActive) {
-      setWebResizeMode((prev) => {
-        const next = prev === 'cover' ? 'contain' : 'cover';
+  const applyScreenFitMode = useCallback(
+    async (next: ScreenFitMode) => {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      setVideoResizeMode(next);
+      setWebResizeMode(next);
+      onScreenFitChange?.(next);
+
+      if (isWebActive) {
+        const fitCss = next === 'contain' ? 'contain' : next === 'stretch' ? 'fill' : 'cover';
         webViewRef.current?.injectJavaScript(`
           (function() {
             var v = document.querySelector('video');
             if (v) {
-              v.style.setProperty('object-fit', '${next}', 'important');
+              v.style.setProperty('object-fit', '${fitCss}', 'important');
             }
           })();
           true;
         `);
-        return next;
-      });
-    } else {
-      handleToggleResizeMode();
-    }
-  }, [isWebActive, handleToggleResizeMode]);
+      }
+
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      let label = 'Fit to Screen (Fill)';
+      let icon: keyof typeof Ionicons.glyphMap = 'expand-outline';
+      if (next === 'hero') {
+        label = 'Netflix Hero Banner';
+        icon = 'film';
+      } else if (next === 'stretch') {
+        label = 'Stretch to Screen (Stretch)';
+        icon = 'scan-outline';
+      } else if (next === 'contain') {
+        label = 'Original (Fit)';
+        icon = 'contract-outline';
+      }
+      setFeedbackPill({ label, icon, mode: next });
+      feedbackTimerRef.current = setTimeout(() => {
+        setFeedbackPill(null);
+      }, 1800);
+
+      scheduleControlsHide();
+    },
+    [isWebActive, onScreenFitChange, scheduleControlsHide]
+  );
+
+  const handleToggleResizeMode = useCallback(async () => {
+    const next = cycleScreenFitMode(effectiveResizeMode);
+    await applyScreenFitMode(next);
+  }, [effectiveResizeMode, cycleScreenFitMode, applyScreenFitMode]);
+
+  const handleToggleResizeModeFromModal = useCallback(async () => {
+    await handleToggleResizeMode();
+  }, [handleToggleResizeMode]);
 
   const [isAutoplay, setIsAutoplay] = useState(true);
   const [isCCOn, setIsCCOn] = useState(false);
@@ -1117,7 +1152,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     setIsAutoplay((prev) => {
       const next = !prev;
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-      setFeedbackPill(next ? 'Autoplay is on' : 'Autoplay is off');
+      setFeedbackPill({ label: next ? 'Autoplay is on' : 'Autoplay is off', icon: next ? 'play' : 'pause' });
       feedbackTimerRef.current = setTimeout(() => {
         setFeedbackPill(null);
       }, 1800);
@@ -1133,7 +1168,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     setIsCCOn((prev) => {
       const next = !prev;
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-      setFeedbackPill(next ? 'Subtitles turned on' : 'Subtitles turned off');
+      setFeedbackPill({ label: next ? 'Subtitles turned on' : 'Subtitles turned off', icon: 'chatbox-ellipses-outline' });
       feedbackTimerRef.current = setTimeout(() => {
         setFeedbackPill(null);
       }, 1800);
@@ -1147,7 +1182,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    setFeedbackPill('Searching for cast devices...');
+    setFeedbackPill({ label: 'Searching for cast devices...', icon: 'tv-outline' });
     feedbackTimerRef.current = setTimeout(() => {
       setFeedbackPill(null);
     }, 1800);
@@ -1196,7 +1231,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   );
 
   const isHero = effectiveResizeMode === 'hero';
-  const heroHeight = Math.round(width * 0.72) + (topInset || (Platform.OS === 'ios' ? 47 : 0));
+  const heroHeight = Math.round(width * 0.78) + (topInset || (Platform.OS === 'ios' ? 47 : 0));
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
   return (
@@ -1213,6 +1248,40 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       >
         <Ionicons name="arrow-back" size={20} color="#ffffff" />
       </TouchableOpacity>
+
+      {/* Netflix Hero Cinematic Gradients & Badge */}
+      {isHero ? (
+        <>
+          {/* Top Status Bar Gradient (covers notch/time/wifi header with high contrast) */}
+          <LinearGradient
+            colors={['rgba(0, 0, 0, 0.85)', 'rgba(0, 0, 0, 0.35)', 'transparent']}
+            style={[styles.heroTopGradient, { height: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 30 }]}
+            pointerEvents="none"
+          />
+          {/* Bottom Cinematic Gradient (seamlessly blends video into dark details) */}
+          <LinearGradient
+            colors={['transparent', 'rgba(10, 10, 12, 0.55)', '#0a0a0c']}
+            style={styles.heroBottomGradient}
+            pointerEvents="none"
+          />
+        </>
+      ) : null}
+
+      {/* Floating Netflix Hero Badge when playing in Hero mode without controls */}
+      {isHero && !showControls ? (
+        <View
+          style={[
+            styles.netflixHeroFloatingBadge,
+            { top: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 8 },
+          ]}
+          pointerEvents="none"
+        >
+          <View style={styles.netflixBadgeN}>
+            <Text style={styles.netflixBadgeNText}>N</Text>
+          </View>
+          <Text style={styles.netflixBadgeText}>HERO BANNER</Text>
+        </View>
+      ) : null}
 
       {isWebActive ? (
         <WebView
@@ -1313,7 +1382,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             headers={playerHeaders}
             paused={!isPlaying}
             rate={playbackSpeed}
-            resizeMode={videoResizeMode === 'contain' ? 'contain' : 'cover'}
+            resizeMode={videoResizeMode === 'contain' ? 'contain' : videoResizeMode === 'stretch' ? 'stretch' : 'cover'}
             style={StyleSheet.absoluteFill}
             onProgress={(e) => {
               if (!isSliding) {
@@ -1346,7 +1415,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             }}
             paused={!isPlaying}
             rate={playbackSpeed}
-            resizeMode={videoResizeMode === 'contain' ? 'contain' : 'cover'}
+            resizeMode={videoResizeMode === 'contain' ? 'contain' : videoResizeMode === 'stretch' ? 'stretch' : 'cover'}
             style={StyleSheet.absoluteFill}
             controls={false}
             playInBackground={false}
@@ -1469,14 +1538,39 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
       {/* Visual Feedback Pill for Aspect Ratio */}
       {feedbackPill ? (
-        <View style={styles.gestureFeedbackPill} pointerEvents="none">
-          <Ionicons
-            name={videoResizeMode === 'cover' ? 'expand' : 'contract'}
-            size={14}
-            color="#ffffff"
-            style={{ marginRight: 6 }}
-          />
-          <Text style={styles.gestureFeedbackText}>{feedbackPill}</Text>
+        <View
+          style={[
+            styles.gestureFeedbackPill,
+            feedbackPill.mode === 'hero' && styles.heroFeedbackPill,
+          ]}
+          pointerEvents="none"
+        >
+          {feedbackPill.mode === 'hero' ? (
+            <View style={styles.netflixBadgeN}>
+              <Text style={styles.netflixBadgeNText}>N</Text>
+            </View>
+          ) : (
+            <Ionicons
+              name={feedbackPill.icon || 'information-circle'}
+              size={15}
+              color={
+                feedbackPill.mode === 'stretch'
+                  ? '#30d158'
+                  : feedbackPill.mode === 'cover'
+                  ? '#535aff'
+                  : '#ffffff'
+              }
+              style={{ marginRight: 6 }}
+            />
+          )}
+          <Text
+            style={[
+              styles.gestureFeedbackText,
+              feedbackPill.mode === 'hero' && { color: '#ffffff', fontWeight: '800' },
+            ]}
+          >
+            {feedbackPill.label}
+          </Text>
         </View>
       ) : null}
 
@@ -1541,11 +1635,23 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 activeOpacity={0.7}
                 hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
               >
-                <Ionicons
-                  name={videoResizeMode === 'cover' ? 'contract-outline' : 'scan-outline'}
-                  size={19}
-                  color="#ffffff"
-                />
+                {effectiveResizeMode === 'hero' ? (
+                  <View style={styles.heroTopIconWrap}>
+                    <Ionicons name="film" size={17} color="#E50914" />
+                  </View>
+                ) : (
+                  <Ionicons
+                    name={
+                      effectiveResizeMode === 'cover'
+                        ? 'expand-outline'
+                        : effectiveResizeMode === 'stretch'
+                        ? 'scan-outline'
+                        : 'contract-outline'
+                    }
+                    size={19}
+                    color={effectiveResizeMode === 'stretch' ? '#30d158' : '#ffffff'}
+                  />
+                )}
               </TouchableOpacity>
 
               {/* Settings Gear Button */}
@@ -1861,34 +1967,60 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                     <Ionicons
                       name={
                         effectiveResizeMode === 'hero'
-                          ? 'film-outline'
+                          ? 'film'
                           : effectiveResizeMode === 'cover'
                           ? 'expand-outline'
-                          : 'scan-outline'
+                          : effectiveResizeMode === 'stretch'
+                          ? 'scan-outline'
+                          : 'contract-outline'
                       }
                       size={20}
-                      color={effectiveResizeMode === 'hero' ? '#E50914' : '#ffffff'}
+                      color={
+                        effectiveResizeMode === 'hero'
+                          ? '#E50914'
+                          : effectiveResizeMode === 'stretch'
+                          ? '#30d158'
+                          : effectiveResizeMode === 'cover'
+                          ? '#535aff'
+                          : '#ffffff'
+                      }
                     />
                     <Text style={styles.settingsRowLabel}>Screen fit</Text>
                   </View>
                   <View style={styles.settingsRowRight}>
-                    <Text
-                      style={[
-                        styles.settingsRowValue,
-                        effectiveResizeMode === 'hero'
-                          ? { color: '#E50914', fontWeight: '700' }
-                          : effectiveResizeMode === 'cover'
-                          ? { color: '#535aff', fontWeight: '700' }
-                          : undefined,
-                      ]}
+                    {effectiveResizeMode === 'hero' ? (
+                      <View style={styles.netflixMiniBadge}>
+                        <Text style={styles.netflixMiniBadgeN}>N</Text>
+                        <Text style={styles.netflixMiniBadgeText}>Netflix Hero Banner</Text>
+                      </View>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.settingsRowValue,
+                          effectiveResizeMode === 'cover'
+                            ? { color: '#535aff', fontWeight: '700' }
+                            : effectiveResizeMode === 'stretch'
+                            ? { color: '#30d158', fontWeight: '700' }
+                            : undefined,
+                        ]}
+                      >
+                        {effectiveResizeMode === 'cover'
+                          ? 'Fit to Screen (Fill)'
+                          : effectiveResizeMode === 'stretch'
+                          ? 'Stretch to Screen'
+                          : 'Original (Fit)'}
+                      </Text>
+                    )}
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        setSettingsSubView('screenfit');
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{ marginLeft: 6 }}
                     >
-                      {effectiveResizeMode === 'hero'
-                        ? 'Netflix Hero Banner'
-                        : effectiveResizeMode === 'cover'
-                        ? 'Fit to Screen (Fill)'
-                        : 'Original (Fit)'}
-                    </Text>
-                    <Ionicons name="swap-horizontal" size={16} color="rgba(255, 255, 255, 0.45)" />
+                      <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
+                    </TouchableOpacity>
                   </View>
                 </TouchableOpacity>
 
@@ -1966,6 +2098,97 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               </View>
             )}
 
+            {/* 4. Screen Fit Sub-Menu */}
+            {settingsSubView === 'screenfit' && (
+              <View>
+                <View style={styles.settingsSubHeader}>
+                  <TouchableOpacity
+                    style={styles.backButton}
+                    onPress={() => setSettingsSubView('main')}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="arrow-back" size={20} color="#ffffff" />
+                  </TouchableOpacity>
+                  <View style={styles.subHeaderTitleWrap}>
+                    <Text style={styles.settingsTitle}>Screen fit & Aspect ratio</Text>
+                    <Text style={styles.settingsSubTitle}>Customize video framing and hero banner</Text>
+                  </View>
+                </View>
+
+                <View style={styles.settingsDivider} />
+
+                <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
+                  {[
+                    {
+                      id: 'cover' as ScreenFitMode,
+                      title: 'Fit to Screen (Fill)',
+                      desc: 'Fills display container, crops minor edges to preserve ratio',
+                      icon: 'expand-outline' as const,
+                      color: '#535aff',
+                    },
+                    {
+                      id: 'hero' as ScreenFitMode,
+                      title: 'Netflix Hero Banner',
+                      desc: 'Full-bleed cinematic banner covering top notch, time & wifi header',
+                      icon: 'film' as const,
+                      color: '#E50914',
+                      badge: 'NETFLIX HERO',
+                    },
+                    {
+                      id: 'stretch' as ScreenFitMode,
+                      title: 'Stretch to Screen (Stretch)',
+                      desc: 'Stretches video to fill complete width and height without crop',
+                      icon: 'scan-outline' as const,
+                      color: '#30d158',
+                    },
+                    {
+                      id: 'contain' as ScreenFitMode,
+                      title: 'Original (Fit)',
+                      desc: '16:9 standard view with black letterbox bars uncropped',
+                      icon: 'contract-outline' as const,
+                      color: '#ffffff',
+                    },
+                  ].map((item) => {
+                    const isSelected = effectiveResizeMode === item.id;
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[
+                          styles.screenFitOptionCard,
+                          isSelected && {
+                            borderColor: item.color,
+                            backgroundColor: item.color + '15',
+                          },
+                        ]}
+                        onPress={async () => {
+                          await applyScreenFitMode(item.id);
+                          setSettingsModalVisible(false);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.screenFitOptionIconWrap, { backgroundColor: item.color + '22' }]}>
+                          <Ionicons name={item.icon} size={20} color={item.color} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={[styles.optionItemText, isSelected && { color: '#ffffff', fontWeight: '700' }]}>
+                              {item.title}
+                            </Text>
+                            {item.badge ? (
+                              <View style={styles.netflixBadgePill}>
+                                <Text style={styles.netflixBadgePillText}>{item.badge}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <Text style={styles.screenFitOptionDesc}>{item.desc}</Text>
+                        </View>
+                        {isSelected && <Ionicons name="checkmark-circle" size={20} color={item.color} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
             {/* 3. Playback Speed Sub-Menu */}
             {settingsSubView === 'speed' && (
               <View>
@@ -2084,6 +2307,111 @@ const styles = StyleSheet.create({
     right: 0,
     height: 56,
     zIndex: 15,
+  },
+  heroTopIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: 'rgba(229, 9, 20, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 9, 20, 0.45)',
+  },
+  heroFeedbackPill: {
+    backgroundColor: 'rgba(18, 18, 20, 0.95)',
+    borderColor: '#E50914',
+    borderWidth: 1.2,
+  },
+  netflixHeroFloatingBadge: {
+    position: 'absolute',
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(229, 9, 20, 0.5)',
+    gap: 5,
+    zIndex: 15,
+  },
+  netflixBadgeN: {
+    width: 14,
+    height: 14,
+    borderRadius: 2,
+    backgroundColor: '#E50914',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  netflixBadgeNText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '900',
+    lineHeight: 12,
+  },
+  netflixBadgeText: {
+    color: '#E50914',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  netflixMiniBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(229, 9, 20, 0.15)',
+    paddingVertical: 2,
+    paddingHorizontal: 7,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(229, 9, 20, 0.4)',
+    gap: 5,
+  },
+  netflixMiniBadgeN: {
+    color: '#E50914',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  netflixMiniBadgeText: {
+    color: '#E50914',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  screenFitOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    marginBottom: 8,
+    gap: 12,
+  },
+  screenFitOptionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  screenFitOptionDesc: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.55)',
+    marginTop: 2,
+  },
+  netflixBadgePill: {
+    backgroundColor: '#E50914',
+    paddingVertical: 1,
+    paddingHorizontal: 5,
+    borderRadius: 4,
+  },
+  netflixBadgePillText: {
+    color: '#ffffff',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   autoplayToggleTrack: {
     width: 32,

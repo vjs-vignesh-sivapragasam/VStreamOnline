@@ -17,6 +17,7 @@ import {
   PanResponder,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, usePathname } from 'expo-router';
@@ -515,6 +516,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // ── Render Full Real YouTube Watch Screen ──────────────────────────────────
   return (
     <View style={[styles.fullWatchOverlay, { bottom: bottomTabBarHeight }]} {...screenPanResponder.panHandlers}>
+      <StatusBar style="light" />
       <SafeAreaView style={styles.safeArea} edges={screenFitMode === 'hero' ? [] : ['top']}>
         {/* Top 16:9 Video Player */}
         <View {...screenPanResponder.panHandlers}>
@@ -530,6 +532,9 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             duration={duration}
             seekTarget={seekTarget}
             playbackError={playbackError}
+            screenFitMode={screenFitMode}
+            onScreenFitChange={setScreenFitMode}
+            topInset={insets.top}
             onTogglePlay={togglePlay}
             onMinimize={handleGoBackPrevious}
             onSwipeExit={handleGoBackPrevious}
