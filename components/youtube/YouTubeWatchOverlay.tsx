@@ -150,24 +150,39 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  // Swipe left or swipe down on video player to return/minimize like real YouTube
-  const swipePanResponder = useRef(
+  // Go back to Home Screen on deliberate swipe left
+  const handleGoBackHome = useCallback(async () => {
+    console.log('[YouTubeWatchOverlay] 👈 Swipe left detected -> Returning to Home Screen');
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    close();
+    try {
+      router.replace('/(tabs)');
+    } catch {
+      try {
+        router.navigate('/(tabs)');
+      } catch {}
+    }
+  }, [close, router]);
+
+  // Screen-wide swipe gesture: swipe left anywhere on screen to return to home screen
+  const screenPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        // Trigger only on clear deliberate swipes on the player area
-        return (
-          (Math.abs(gestureState.dx) > 50 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5) ||
-          (gestureState.dy > 50 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5)
-        );
+        // Deliberate horizontal swipe left (dx < -45) or swipe right (dx > 55)
+        const isHorizontalSwipe =
+          (gestureState.dx < -45 || gestureState.dx > 55) &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5;
+        return isHorizontalSwipe;
       },
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
       onPanResponderRelease: async (_evt, gestureState) => {
-        // Swipe left (dx < -60) or swipe down (dy > 60) closes player
-        if (gestureState.dx < -60 || gestureState.dy > 60) {
-          if (await isHapticsSupported()) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          }
-          close();
+        if (gestureState.dx < -45 || gestureState.dx > 55) {
+          handleGoBackHome();
         }
       },
     })
@@ -434,10 +449,10 @@ const YouTubeWatchOverlayInner: React.FC = () => {
 
   // ── Render Full Real YouTube Watch Screen ──────────────────────────────────
   return (
-    <View style={styles.fullWatchOverlay}>
+    <View style={styles.fullWatchOverlay} {...screenPanResponder.panHandlers}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         {/* Top 16:9 Video Player */}
-        <View {...swipePanResponder.panHandlers}>
+        <View {...screenPanResponder.panHandlers}>
           <YouTubeInlinePlayer
             videoId={currentVideo.id}
             title={currentVideo.title}
@@ -451,7 +466,8 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             seekTarget={seekTarget}
             playbackError={playbackError}
             onTogglePlay={togglePlay}
-            onMinimize={close}
+            onMinimize={handleGoBackHome}
+            onSwipeExit={handleGoBackHome}
             onFullScreen={handleFullScreen}
             onSeek={seekTo}
             onClearSeekTarget={clearSeekTarget}

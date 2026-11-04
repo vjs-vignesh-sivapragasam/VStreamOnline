@@ -49,6 +49,7 @@ export interface YouTubeInlinePlayerProps {
   setIsBuffering: (buffering: boolean) => void;
   onPlaybackError?: (error: string) => void;
   onRetry?: () => void;
+  onSwipeExit?: () => void;
 }
 
 function formatTime(seconds: number): string {
@@ -364,6 +365,39 @@ const INJECTED_CLEAN_PLAYER_JS = `
     document.addEventListener('touchend', handleSettingsIntercept, true);
     document.addEventListener('pointerup', handleSettingsIntercept, true);
 
+    // Swipe left / right gesture on video to go back to home screen
+    var swipeStartX = 0;
+    var swipeStartY = 0;
+    var swipeStartTime = 0;
+
+    window.addEventListener('touchstart', function(e) {
+      if (e.touches && e.touches.length === 1) {
+        swipeStartX = e.touches[0].clientX;
+        swipeStartY = e.touches[0].clientY;
+        swipeStartTime = Date.now();
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', function(e) {
+      if (e.changedTouches && e.changedTouches.length === 1) {
+        var dX = e.changedTouches[0].clientX - swipeStartX;
+        var dY = e.changedTouches[0].clientY - swipeStartY;
+        var dTime = Date.now() - swipeStartTime;
+        // Detect deliberate horizontal swipe left (dX < -45) or swipe right (dX > 60)
+        if (dTime < 800 && Math.abs(dX) > 45 && Math.abs(dX) > Math.abs(dY) * 1.3) {
+          if (dX < -45 || dX > 60) {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'SWIPE_EXIT',
+                direction: dX < 0 ? 'left' : 'right'
+              }));
+            }
+          }
+        }
+      }
+    }, { passive: true });
+
+
     function attachVideoListeners() {
       var v = document.querySelector('video');
       if (v && !v._hasAgyProgressListeners) {
@@ -597,6 +631,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   setIsBuffering,
   onPlaybackError,
   onRetry,
+  onSwipeExit,
 }) => {
   const [showControls, setShowControls] = useState(false);
   const [videoResizeMode, setVideoResizeMode] = useState<'cover' | 'contain'>('cover');
@@ -1036,6 +1071,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 }
                 if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
                 onProgress(data.currentTime || 0, data.duration || 0);
+              } else if (data.type === 'SWIPE_EXIT') {
+                if (onSwipeExit) {
+                  onSwipeExit();
+                } else {
+                  onMinimize();
+                }
               } else if (data.type === 'PLAY_STATE') {
                 if (typeof data.isPlaying === 'boolean') {
                   setWebIsPlaying(data.isPlaying);
