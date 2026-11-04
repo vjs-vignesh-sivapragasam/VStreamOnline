@@ -526,7 +526,7 @@ class YouTubeService {
         }
         const devIp = getDevHostIp();
         const hint = devIp
-          ? `Please ensure the embedded Stremio engine is running or run 'npm run server' on your computer (${devIp}).`
+          ? `Streaming engine not reachable. If testing via Expo Go/Metro on iPhone, run 'npm run server' in a terminal on your computer (${devIp}). In production builds, the engine runs locally inside the app.`
           : `Streaming engine not available. Please verify the Stremio server is running.`;
         throw new Error(hint);
       }
