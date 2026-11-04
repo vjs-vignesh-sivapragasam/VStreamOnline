@@ -212,7 +212,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
 
       setIsLoadingModalDetails(true);
       try {
-        const details = await youTubeService.getVideoDetails(item.id);
+        const details = await youTubeService.getVideoDetails(item.id, item);
         setModalVideoDetails(details);
       } catch (err) {
         console.warn('[YouTubeWatchOverlay] Could not fetch download formats:', err);

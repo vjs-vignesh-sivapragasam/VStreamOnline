@@ -21,6 +21,7 @@ import { useKeepAwake } from 'expo-keep-awake';
 import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksplayer/KSPlayerView';
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 import { WebView } from 'react-native-webview';
+import { youTubeService } from '@/services/YouTubeService';
 
 export interface YouTubeInlinePlayerProps {
   videoId?: string;
@@ -496,6 +497,21 @@ const INJECTED_CLEAN_PLAYER_JS = `
             }));
           }
         });
+
+        function reportStreamReady() {
+          var s = v.currentSrc || v.src;
+          if (s && window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'STREAM_SOURCE_READY',
+              streamUrl: s,
+              duration: v.duration || 0
+            }));
+          }
+        }
+        v.addEventListener('loadedmetadata', reportStreamReady);
+        v.addEventListener('canplay', reportStreamReady);
+        v.addEventListener('playing', reportStreamReady);
+        reportStreamReady();
       }
     }
 
@@ -1152,6 +1168,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   onSwipeExit();
                 } else {
                   onMinimize();
+                }
+              } else if (data.type === 'STREAM_SOURCE_READY') {
+                if (data.streamUrl && videoId) {
+                  youTubeService.setLiveStreamInfo(videoId, data.streamUrl, data.duration);
                 }
               } else if (data.type === 'PLAY_STATE') {
                 if (typeof data.isPlaying === 'boolean') {
