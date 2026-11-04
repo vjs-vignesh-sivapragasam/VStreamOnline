@@ -10,6 +10,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Video, { VideoRef, ResizeMode } from 'react-native-video';
@@ -99,12 +100,27 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [sliderPos, setSliderPos] = useState(0);
   // Default to react-native-video (AVPlayer on iOS, ExoPlayer on Android) for native MP4 streaming
   const [useKSPlayer, setUseKSPlayer] = useState(false);
-  const isLive = !!(title && (title.includes('LIVE') || title.includes('Live') || title.includes('🔴')));
-  const [useWebFallback, setUseWebFallback] = useState(isLive);
+  const [useWebFallback, setUseWebFallback] = useState(false);
 
   useEffect(() => {
-    setUseWebFallback(isLive);
-  }, [videoId, isLive]);
+    setUseWebFallback(false);
+  }, [videoId]);
+
+  const handleOpenYouTubeApp = useCallback(async () => {
+    if (!videoId) return;
+    const appUrl = `vnd.youtube://${videoId}`;
+    const webUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    try {
+      const canOpen = await Linking.canOpenURL(appUrl);
+      if (canOpen) {
+        await Linking.openURL(appUrl);
+      } else {
+        await Linking.openURL(webUrl);
+      }
+    } catch {
+      await Linking.openURL(webUrl);
+    }
+  }, [videoId]);
 
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [settingsSubView, setSettingsSubView] = useState<'main' | 'quality' | 'speed'>('main');
@@ -256,27 +272,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         <WebView
           key={videoId}
           source={{
-            html: `
-              <!DOCTYPE html>
-              <html>
-                <head>
-                  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                  <style>
-                    * { margin: 0; padding: 0; box-sizing: border-box; }
-                    body, html { width: 100%; height: 100%; background: #000; overflow: hidden; }
-                    iframe { width: 100%; height: 100%; border: none; }
-                  </style>
-                </head>
-                <body>
-                  <iframe
-                    src="https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&playsinline=1&modestbranding=1&rel=0&enablejsapi=1"
-                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-                    allowfullscreen>
-                  </iframe>
-                </body>
-              </html>
-            `,
-            baseUrl: 'https://www.youtube.com',
+            uri: `https://m.youtube.com/watch?v=${videoId}`,
           }}
           style={StyleSheet.absoluteFill}
           allowsInlineMediaPlayback={true}
@@ -287,16 +283,26 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
           onLoadEnd={() => setIsBuffering(false)}
         />
-        {streamUrl ? (
+        <View style={styles.webPlayerHeaderPill}>
           <TouchableOpacity
             style={styles.switchPlayerPill}
-            onPress={() => setUseWebFallback(false)}
+            onPress={handleOpenYouTubeApp}
             activeOpacity={0.8}
           >
-            <Ionicons name="refresh" size={12} color="#ffffff" style={{ marginRight: 4 }} />
-            <Text style={styles.switchPlayerText}>Switch to Native Player</Text>
+            <Ionicons name="open-outline" size={12} color="#ffffff" style={{ marginRight: 4 }} />
+            <Text style={styles.switchPlayerText}>Open App</Text>
           </TouchableOpacity>
-        ) : null}
+          {streamUrl ? (
+            <TouchableOpacity
+              style={[styles.switchPlayerPill, { marginLeft: 8 }]}
+              onPress={() => setUseWebFallback(false)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="refresh" size={12} color="#ffffff" style={{ marginRight: 4 }} />
+              <Text style={styles.switchPlayerText}>Native Player</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
     );
   }
@@ -406,19 +412,29 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   {playbackError}
                 </Text>
                 {videoId ? (
-                  <TouchableOpacity
-                    style={[styles.retryButton, { backgroundColor: '#FF0000', marginTop: 8, paddingHorizontal: 16 }]}
-                    onPress={() => setUseWebFallback(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="play-circle" size={18} color="#ffffff" style={{ marginRight: 6 }} />
-                    <Text style={styles.retryButtonText}>Play with Web Player (No Server Needed)</Text>
-                  </TouchableOpacity>
+                  <View style={{ width: '100%', alignItems: 'center', marginTop: 10 }}>
+                    <TouchableOpacity
+                      style={[styles.retryButton, { backgroundColor: '#FF0000', paddingHorizontal: 16 }]}
+                      onPress={handleOpenYouTubeApp}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="logo-youtube" size={18} color="#ffffff" style={{ marginRight: 6 }} />
+                      <Text style={styles.retryButtonText}>Watch in YouTube App (1-Tap)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.retryButton, { backgroundColor: 'rgba(255, 255, 255, 0.15)', marginTop: 8, paddingHorizontal: 16 }]}
+                      onPress={() => setUseWebFallback(true)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="globe-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                      <Text style={styles.retryButtonText}>Play in Mobile Web Player</Text>
+                    </TouchableOpacity>
+                  </View>
                 ) : null}
                 {onRetry && (
-                  <TouchableOpacity style={[styles.retryButton, { marginTop: 8 }]} onPress={onRetry} activeOpacity={0.8}>
-                    <Ionicons name="refresh" size={15} color="#ffffff" style={{ marginRight: 6 }} />
-                    <Text style={styles.retryButtonText}>Retry Stream</Text>
+                  <TouchableOpacity style={[styles.retryButton, { marginTop: 8, backgroundColor: 'transparent' }]} onPress={onRetry} activeOpacity={0.8}>
+                    <Ionicons name="refresh" size={14} color="#8E8E93" style={{ marginRight: 4 }} />
+                    <Text style={[styles.retryButtonText, { color: '#8E8E93', fontSize: 12 }]}>Retry Local Engine Connection</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -1244,6 +1260,14 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  webPlayerHeaderPill: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 99,
   },
   switchPlayerPill: {
     position: 'absolute',
