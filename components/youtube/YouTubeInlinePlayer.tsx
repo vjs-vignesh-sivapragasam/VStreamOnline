@@ -68,57 +68,119 @@ function formatTime(seconds: number): string {
 const INJECTED_CLEAN_PLAYER_JS = `
   (function() {
     function injectStyle() {
-      if (document.getElementById('clean-yt-style')) return;
-      const style = document.createElement('style');
-      style.id = 'clean-yt-style';
+      var existing = document.getElementById('agy-clean-yt-style');
+      if (existing) return;
+      var style = document.createElement('style');
+      style.id = 'agy-clean-yt-style';
       style.textContent = \`
-        /* Hide YouTube mobile top bar: logo, search, menu, open app */
-        #header,
+        /* 1. Hide entire YouTube mobile top header (logo, search, 3 dots, open app) */
+        ytm-mobile-topbar-renderer,
         ytm-header,
+        ytm-header-bar,
+        #header,
         header,
         .mobile-topbar-header,
         .ghost-header {
           display: none !important;
           visibility: hidden !important;
           height: 0 !important;
+          min-height: 0 !important;
+          max-height: 0 !important;
           overflow: hidden !important;
+          margin: 0 !important;
+          padding: 0 !important;
         }
 
-        /* Hide duplicate title banner below the video */
+        /* 2. Hide duplicate title & everything below the video */
         ytm-slim-video-metadata-renderer,
         .slim-video-metadata-header,
         .slim-video-information-holder,
+        ytm-slim-owner-renderer,
         .watch-below-the-player,
         #related,
         ytm-item-section-renderer,
         ytm-comment-section-renderer,
         ytm-pivot-bar-renderer,
-        ytm-engagement-panel-section-list-renderer {
+        ytm-engagement-panel-section-list-renderer,
+        .ytm-autonav-bar {
           display: none !important;
           visibility: hidden !important;
           height: 0 !important;
           overflow: hidden !important;
         }
 
-        /* Hide Open App buttons, dialogs, promos */
+        /* 3. Hide Tap to unmute & sound icons */
+        .ytp-unmute,
+        .ytp-unmute-inner,
+        .ytp-unmute-box,
+        .ytp-unmute-icon,
+        [class*="unmute"],
+        .player-control-overlay .unmute-button,
+        .ytm-unmute-button,
+        button[aria-label*="unmute" i],
+        button[aria-label*="sound" i] {
+          display: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+
+        /* 4. Hide Open App buttons, dialogs, promos */
         ytm-open-app-button,
         .open-in-app-dialog,
         .upsell-dialog,
         ytm-upsell-dialog-renderer,
         ytm-promoted-sparkles-web-renderer,
-        ytm-bottom-sheet-renderer {
+        ytm-bottom-sheet-renderer,
+        .yt-spec-button-shape-next--call-to-action {
           display: none !important;
           visibility: hidden !important;
           height: 0 !important;
           overflow: hidden !important;
         }
 
-        /* Clean 16:9 container without scrolling */
-        html, body {
+        /* 5. Pure 16:9 full-fill video container */
+        html, body, ytm-app, #app {
           margin: 0 !important;
           padding: 0 !important;
           overflow: hidden !important;
           background-color: #000000 !important;
+          width: 100% !important;
+          height: 100% !important;
+        }
+
+        #player-container-id,
+        .player-container,
+        #player,
+        .player-size,
+        .player-api,
+        ytm-watch .player-size {
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          padding-bottom: 0 !important;
+          margin: 0 !important;
+          background-color: #000000 !important;
+        }
+
+        video,
+        .html5-main-video {
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: contain !important;
+          background-color: #000000 !important;
+        }
+
+        #player-control-container,
+        .player-control-container,
+        .html5-video-player {
+          width: 100% !important;
+          height: 100% !important;
         }
       \`;
       (document.head || document.documentElement).appendChild(style);
@@ -126,10 +188,19 @@ const INJECTED_CLEAN_PLAYER_JS = `
 
     injectStyle();
 
-    function setupQualityAndPlay() {
-      const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+    function unmuteAndPlay() {
+      var v = document.querySelector('video');
+      if (v) {
+        v.muted = false;
+        if (v.paused) {
+          v.play().catch(function() {});
+        }
+      }
+      var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
       if (player) {
         try {
+          if (typeof player.unMute === 'function') player.unMute();
+          if (typeof player.setVolume === 'function') player.setVolume(100);
           if (typeof player.setPlaybackQualityRange === 'function') {
             player.setPlaybackQualityRange('large', 'hd720');
           }
@@ -139,27 +210,40 @@ const INJECTED_CLEAN_PLAYER_JS = `
           if (typeof player.playVideo === 'function') {
             player.playVideo();
           }
-        } catch (e) {}
+        } catch(e) {}
       }
-      const v = document.querySelector('video');
-      if (v && v.paused) {
-        v.play().catch(() => {});
+
+      var unmuteBtn = document.querySelector('.ytp-unmute, .ytp-unmute-inner, [class*="unmute"], button[aria-label*="unmute" i]');
+      if (unmuteBtn) {
+        try { unmuteBtn.click(); } catch(e) {}
       }
-      const playBtn = document.querySelector('.ytp-large-play-button, .player-control-play-pause-icon');
-      if (playBtn && document.querySelector('video')?.paused) {
+
+      var playBtn = document.querySelector('.ytp-large-play-button, .player-control-play-pause-icon');
+      if (playBtn && document.querySelector('video') && document.querySelector('video').paused) {
         try { playBtn.click(); } catch(e) {}
       }
     }
 
-    setupQualityAndPlay();
+    unmuteAndPlay();
 
-    let count = 0;
-    const interval = setInterval(function() {
+    var count = 0;
+    var timer = setInterval(function() {
       count++;
       injectStyle();
-      setupQualityAndPlay();
-      if (count > 10) clearInterval(interval);
-    }, 400);
+      unmuteAndPlay();
+      if (count > 25) clearInterval(timer);
+    }, 200);
+
+    var observer = new MutationObserver(function() {
+      injectStyle();
+      var unmute = document.querySelector('.ytp-unmute, .ytp-unmute-inner, [class*="unmute"]');
+      if (unmute) {
+        try { unmute.click(); unmute.remove(); } catch(e) {}
+      }
+    });
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
   })();
   true;
 `;
@@ -261,6 +345,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const hideTimerRef = useRef<any>(null);
   const videoRef = useRef<VideoRef>(null);
   const ksRef = useRef<KSPlayerRef>(null);
+  const webViewRef = useRef<any>(null);
   // Initially hide controls when a new video stream loads
   useEffect(() => {
     setShowControls(false);
@@ -390,6 +475,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     return (
       <View style={styles.container}>
         <WebView
+          ref={webViewRef}
           key={videoId}
           source={{
             uri: `https://m.youtube.com/watch?v=${videoId}`,
@@ -410,8 +496,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
               : 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
           }
+          onLoadProgress={({ nativeEvent }) => {
+            if (nativeEvent.progress > 0.2) {
+              webViewRef.current?.injectJavaScript(INJECTED_CLEAN_PLAYER_JS);
+            }
+          }}
           onShouldStartLoadWithRequest={(request) => {
-            // Only block app switching / store URLs; never block web traffic
             if (
               request.url.startsWith('vnd.youtube') ||
               request.url.startsWith('intent://') ||
@@ -421,7 +511,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             }
             return true;
           }}
-          onLoadEnd={() => setIsBuffering(false)}
+          onLoadEnd={() => {
+            setIsBuffering(false);
+            webViewRef.current?.injectJavaScript(INJECTED_CLEAN_PLAYER_JS);
+          }}
         />
       </View>
     );
