@@ -17,6 +17,7 @@ import Video, { VideoRef, ResizeMode } from 'react-native-video';
 import Slider from '@react-native-assets/slider';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
+import { useKeepAwake } from 'expo-keep-awake';
 import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksplayer/KSPlayerView';
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 import { WebView } from 'react-native-webview';
@@ -76,6 +77,7 @@ function formatRemainingTime(currentSec: number, durationSec: number): string {
 const INJECTED_BEFORE_CONTENT_JS = `
   (function() {
     try {
+      // 1. Dark background to prevent white flash
       var css = 'html, body, #player, .player-container, #player-container-id, .html5-video-player { background: #000000 !important; background-color: #000000 !important; }';
       var style = document.createElement('style');
       style.type = 'text/css';
@@ -89,6 +91,35 @@ const INJECTED_BEFORE_CONTENT_JS = `
         document.body.style.background = '#000000';
         document.body.style.backgroundColor = '#000000';
       }
+
+      // 2. Background audio & Lock Screen playback spoofing:
+      // Prevents YouTube from detecting lock screen / background state and pausing audio
+      try {
+        Object.defineProperty(document, 'hidden', {
+          get: function() { return false; },
+          configurable: true
+        });
+        Object.defineProperty(document, 'visibilityState', {
+          get: function() { return 'visible'; },
+          configurable: true
+        });
+        Object.defineProperty(document, 'webkitVisibilityState', {
+          get: function() { return 'visible'; },
+          configurable: true
+        });
+      } catch(e) {}
+
+      // Block all visibility change and freeze events so YouTube never pauses when screen locks
+      var blockVisibility = function(e) {
+        if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
+        if (e && e.stopPropagation) e.stopPropagation();
+      };
+
+      window.addEventListener('visibilitychange', blockVisibility, true);
+      document.addEventListener('visibilitychange', blockVisibility, true);
+      window.addEventListener('webkitvisibilitychange', blockVisibility, true);
+      document.addEventListener('webkitvisibilitychange', blockVisibility, true);
+      window.addEventListener('pagehide', blockVisibility, true);
     } catch(e) {}
   })();
   true;
@@ -398,6 +429,44 @@ const INJECTED_CLEAN_PLAYER_JS = `
     }, { passive: true });
 
 
+    
+    // Background playback keep-alive watchdog
+    function setupBackgroundKeepAlive() {
+      var v = document.querySelector('video');
+      if (v && !v._hasAgyKeepAlive) {
+        v._hasAgyKeepAlive = true;
+
+        // Listen for user clicks on YouTube's play/pause controls to know if pause was intentional
+        document.addEventListener('click', function(e) {
+          var target = e.target;
+          if (!target) return;
+          var btn = target.closest && target.closest('.ytp-play-button, .player-control-play-pause-icon, button[aria-label*="Play" i], button[aria-label*="Pause" i]');
+          if (btn) {
+            setTimeout(function() {
+              if (v) window._agyUserPaused = v.paused;
+            }, 60);
+          }
+        }, true);
+
+        // When screen locks or page loses focus, if video paused unintentionally, keep playing!
+        v.addEventListener('pause', function() {
+          if (!window._agyUserPaused && !v.ended) {
+            setTimeout(function() {
+              if (!window._agyUserPaused && v.paused && !v.ended) {
+                v.play().catch(function() {});
+              }
+            }, 80);
+          }
+        });
+
+        window.addEventListener('blur', function() {
+          if (!window._agyUserPaused && v && v.paused && !v.ended) {
+            v.play().catch(function() {});
+          }
+        }, true);
+      }
+    }
+
     function attachVideoListeners() {
       var v = document.querySelector('video');
       if (v && !v._hasAgyProgressListeners) {
@@ -535,6 +604,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
       }
 
       attachVideoListeners();
+      setupBackgroundKeepAlive();
     }
 
     forceFullVideoAndPlay();
@@ -574,6 +644,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
         barContainer.style.setProperty('padding', '0px', 'important');
       }
       attachVideoListeners();
+      setupBackgroundKeepAlive();
 
       // Fallback: If YouTube attempts to render its settings popup/bottom sheet, remove it and open native modal
       var popups = document.querySelectorAll(
@@ -604,6 +675,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
 
 
 export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
+
   videoId,
   title,
   channel,
@@ -633,6 +705,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   onRetry,
   onSwipeExit,
 }) => {
+  useKeepAwake('YOUTUBE_PLAYER_PLAYBACK');
   const [showControls, setShowControls] = useState(false);
   const [videoResizeMode, setVideoResizeMode] = useState<'cover' | 'contain'>('cover');
   const [feedbackPill, setFeedbackPill] = useState<string | null>(null);
@@ -752,6 +825,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         (function() {
           var v = document.querySelector('video');
           if (v) {
+            window._agyUserPaused = ${!effectiveIsPlaying};
             if (v.paused) v.play().catch(function() {});
             else v.pause();
           }
@@ -1018,6 +1092,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           opaque={false}
           injectedJavaScriptBeforeContentLoaded={INJECTED_BEFORE_CONTENT_JS}
           allowsInlineMediaPlayback={true}
+          allowsPictureInPictureMediaPlayback={true}
+          allowsAirPlayForMediaPlayback={true}
           mediaPlaybackRequiresUserAction={false}
           javaScriptEnabled={true}
           domStorageEnabled={true}
