@@ -91,7 +91,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           padding: 0 !important;
         }
 
-        /* 2. Expand player container and player-size to 100% full height (remove 96px reduction) */
+        /* 2. Expand player container and player-size to 100% full height */
         .player-container,
         .player-container.sticky-player,
         #player-container-id,
@@ -108,6 +108,9 @@ const INJECTED_CLEAN_PLAYER_JS = `
           min-height: 100% !important;
           max-height: 100% !important;
           padding-bottom: 0 !important;
+          border: none !important;
+          border-bottom: none !important;
+          box-shadow: none !important;
         }
 
         /* 3. Force video element to fill the inline player frame completely */
@@ -136,25 +139,56 @@ const INJECTED_CLEAN_PLAYER_JS = `
           max-height: 100% !important;
         }
 
+        /* 4. Full width progress bar without left/right gaps, positioned right at bottom */
         .ytp-chrome-bottom {
           bottom: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
           width: 100% !important;
+          padding-left: 0 !important;
+          padding-right: 0 !important;
+          margin-left: 0 !important;
+          margin-right: 0 !important;
         }
 
-        /* 4. Hide duplicate/secondary progress bar to leave only a single scrubber */
+        .ytp-progress-bar-container {
+          position: absolute !important;
+          bottom: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          width: 100% !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          height: 4px !important;
+        }
+
+        .ytp-progress-bar,
+        .ytp-progress-list {
+          left: 0 !important;
+          right: 0 !important;
+          width: 100% !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          border-radius: 0 !important;
+        }
+
+        /* 5. Hide duplicate/secondary progress bar and bottom borders */
         .ytm-progress-bar,
         ytm-progress-bar,
         .player-control-overlay .progress-bar,
         .player-control-container > .progress-bar,
-        .thin-scrubber {
+        .player-control-overlay > .progress-bar,
+        .thin-scrubber,
+        .ytp-cued-thumbnail-overlay {
           display: none !important;
           visibility: hidden !important;
           opacity: 0 !important;
           height: 0 !important;
           pointer-events: none !important;
+          border: none !important;
         }
 
-        /* 5. Hide duplicate title & everything below the video */
+        /* 6. Hide duplicate title & everything below the video */
         ytm-slim-video-metadata-renderer,
         .slim-video-metadata-header,
         .slim-video-information-holder,
@@ -172,7 +206,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 6. Hide Tap to unmute & sound icons */
+        /* 7. Hide Tap to unmute & sound icons */
         .ytp-unmute,
         .ytp-unmute-inner,
         .ytp-unmute-box,
@@ -188,7 +222,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           pointer-events: none !important;
         }
 
-        /* 7. Hide Open App buttons, dialogs, promos */
+        /* 8. Hide Open App buttons, dialogs, promos */
         ytm-open-app-button,
         .open-in-app-dialog,
         .upsell-dialog,
@@ -202,7 +236,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 8. Clean 16:9 container frame without page scrolling */
+        /* 9. Clean 16:9 container frame without page scrolling */
         html, body {
           margin: 0 !important;
           padding: 0 !important;
@@ -234,6 +268,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           el.style.setProperty('top', '0px', 'important');
           el.style.setProperty('bottom', '0px', 'important');
           el.style.setProperty('width', '100%', 'important');
+          el.style.setProperty('border-bottom', 'none', 'important');
         });
       });
 
@@ -251,15 +286,41 @@ const INJECTED_CLEAN_PLAYER_JS = `
         }
       }
 
-      // 3. Position scrubber at the bottom of the player
+      // 3. Make progress bar 100% full width (no left/right gap) and at bottom edge
       var chromeBottom = document.querySelector('.ytp-chrome-bottom');
       if (chromeBottom) {
         chromeBottom.style.setProperty('bottom', '0px', 'important');
+        chromeBottom.style.setProperty('left', '0px', 'important');
+        chromeBottom.style.setProperty('right', '0px', 'important');
         chromeBottom.style.setProperty('width', '100%', 'important');
+        chromeBottom.style.setProperty('padding-left', '0px', 'important');
+        chromeBottom.style.setProperty('padding-right', '0px', 'important');
+        chromeBottom.style.setProperty('margin-left', '0px', 'important');
+        chromeBottom.style.setProperty('margin-right', '0px', 'important');
+      }
+
+      var barContainer = document.querySelector('.ytp-progress-bar-container');
+      if (barContainer) {
+        barContainer.style.setProperty('position', 'absolute', 'important');
+        barContainer.style.setProperty('bottom', '0px', 'important');
+        barContainer.style.setProperty('left', '0px', 'important');
+        barContainer.style.setProperty('right', '0px', 'important');
+        barContainer.style.setProperty('width', '100%', 'important');
+        barContainer.style.setProperty('padding', '0px', 'important');
+        barContainer.style.setProperty('margin', '0px', 'important');
+      }
+
+      var bar = document.querySelector('.ytp-progress-bar');
+      if (bar) {
+        bar.style.setProperty('left', '0px', 'important');
+        bar.style.setProperty('right', '0px', 'important');
+        bar.style.setProperty('width', '100%', 'important');
+        bar.style.setProperty('padding', '0px', 'important');
+        bar.style.setProperty('margin', '0px', 'important');
       }
 
       // 4. Hide duplicate secondary progress bar
-      var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar');
+      var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar, .thin-scrubber');
       secondaryBars.forEach(function(el) {
         el.style.setProperty('display', 'none', 'important');
       });
@@ -309,7 +370,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
       if (unmute) {
         try { unmute.click(); unmute.remove(); } catch(e) {}
       }
-      var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar');
+      var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar, .thin-scrubber');
       secondaryBars.forEach(function(el) {
         el.style.setProperty('display', 'none', 'important');
       });
@@ -320,6 +381,14 @@ const INJECTED_CLEAN_PLAYER_JS = `
         vid.style.setProperty('width', '100%', 'important');
         vid.style.setProperty('height', '100%', 'important');
         vid.style.setProperty('object-fit', 'cover', 'important');
+      }
+      var barContainer = document.querySelector('.ytp-progress-bar-container');
+      if (barContainer && barContainer.style.width !== '100%') {
+        barContainer.style.setProperty('left', '0px', 'important');
+        barContainer.style.setProperty('right', '0px', 'important');
+        barContainer.style.setProperty('width', '100%', 'important');
+        barContainer.style.setProperty('margin', '0px', 'important');
+        barContainer.style.setProperty('padding', '0px', 'important');
       }
     });
     if (document.body) {
