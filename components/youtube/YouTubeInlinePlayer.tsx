@@ -91,7 +91,14 @@ const INJECTED_CLEAN_PLAYER_JS = `
           padding: 0 !important;
         }
 
-        /* 2. Hide duplicate title & everything below the video */
+        /* 2. Move player container from top: 48px to top: 0 */
+        .player-container,
+        .player-container.sticky-player,
+        #player-container-id {
+          top: 0 !important;
+        }
+
+        /* 3. Hide duplicate title & everything below the video */
         ytm-slim-video-metadata-renderer,
         .slim-video-metadata-header,
         .slim-video-information-holder,
@@ -109,7 +116,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 3. Hide Tap to unmute & sound icons */
+        /* 4. Hide Tap to unmute & sound icons */
         .ytp-unmute,
         .ytp-unmute-inner,
         .ytp-unmute-box,
@@ -125,7 +132,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           pointer-events: none !important;
         }
 
-        /* 4. Hide Open App buttons, dialogs, promos */
+        /* 5. Hide Open App buttons, dialogs, promos */
         ytm-open-app-button,
         .open-in-app-dialog,
         .upsell-dialog,
@@ -139,48 +146,12 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 5. Pure 16:9 full-fill video container */
-        html, body, ytm-app, #app {
+        /* 6. Clean 16:9 container frame without page scrolling */
+        html, body {
           margin: 0 !important;
           padding: 0 !important;
           overflow: hidden !important;
           background-color: #000000 !important;
-          width: 100% !important;
-          height: 100% !important;
-        }
-
-        #player-container-id,
-        .player-container,
-        #player,
-        .player-size,
-        .player-api,
-        ytm-watch .player-size {
-          position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
-          width: 100% !important;
-          height: 100% !important;
-          padding-bottom: 0 !important;
-          margin: 0 !important;
-          background-color: #000000 !important;
-        }
-
-        video,
-        .html5-main-video {
-          position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
-          width: 100% !important;
-          height: 100% !important;
-          object-fit: contain !important;
-          background-color: #000000 !important;
-        }
-
-        #player-control-container,
-        .player-control-container,
-        .html5-video-player {
-          width: 100% !important;
-          height: 100% !important;
         }
       \`;
       (document.head || document.documentElement).appendChild(style);
