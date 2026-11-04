@@ -72,6 +72,27 @@ function formatRemainingTime(currentSec: number, durationSec: number): string {
 
 
 
+const INJECTED_BEFORE_CONTENT_JS = `
+  (function() {
+    try {
+      var css = 'html, body, #player, .player-container, #player-container-id, .html5-video-player { background: #000000 !important; background-color: #000000 !important; }';
+      var style = document.createElement('style');
+      style.type = 'text/css';
+      style.appendChild(document.createTextNode(css));
+      (document.head || document.documentElement).appendChild(style);
+      if (document.documentElement) {
+        document.documentElement.style.background = '#000000';
+        document.documentElement.style.backgroundColor = '#000000';
+      }
+      if (document.body) {
+        document.body.style.background = '#000000';
+        document.body.style.backgroundColor = '#000000';
+      }
+    } catch(e) {}
+  })();
+  true;
+`;
+
 const INJECTED_CLEAN_PLAYER_JS = `
   (function() {
     function injectStyle() {
@@ -586,6 +607,13 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   // Default to react-native-video (AVPlayer on iOS, ExoPlayer on Android) for native MP4 streaming
   const [useKSPlayer, setUseKSPlayer] = useState(false);
   const [useWebFallback, setUseWebFallback] = useState(false);
+  const [showPosterShield, setShowPosterShield] = useState(true);
+
+  useEffect(() => {
+    setShowPosterShield(true);
+  }, [videoId]);
+
+
 
   useEffect(() => {
     setUseWebFallback(false);
@@ -598,7 +626,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       const timer = setTimeout(() => {
         console.log('[YouTubeInlinePlayer] ⏱️ Engine stream pending, seamlessly playing via clean Web Player');
         setUseWebFallback(true);
-      }, 3000);
+      }, 500);
       return () => clearTimeout(timer);
     }
   }, [streamUrl, videoId, useWebFallback]);
@@ -950,7 +978,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           source={{
             uri: `https://m.youtube.com/watch?v=${videoId}`,
           }}
-          style={StyleSheet.absoluteFill}
+          style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]}
+          containerStyle={{ backgroundColor: '#000000' }}
+          opaque={false}
+          injectedJavaScriptBeforeContentLoaded={INJECTED_BEFORE_CONTENT_JS}
           allowsInlineMediaPlayback={true}
           mediaPlaybackRequiresUserAction={false}
           javaScriptEnabled={true}
@@ -984,6 +1015,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           onLoadEnd={() => {
             setIsBuffering(false);
             webViewRef.current?.injectJavaScript(INJECTED_CLEAN_PLAYER_JS);
+            setTimeout(() => {
+              setShowPosterShield(false);
+            }, 800);
           }}
           onMessage={(event) => {
             try {
@@ -996,11 +1030,17 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 setSettingsSubView('main');
                 setSettingsModalVisible(true);
               } else if (data.type === 'PROGRESS') {
-                if (typeof data.currentTime === 'number') setWebCurrentTime(data.currentTime);
+                if (typeof data.currentTime === 'number') {
+                  setWebCurrentTime(data.currentTime);
+                  if (data.currentTime > 0) setShowPosterShield(false);
+                }
                 if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
                 onProgress(data.currentTime || 0, data.duration || 0);
               } else if (data.type === 'PLAY_STATE') {
-                if (typeof data.isPlaying === 'boolean') setWebIsPlaying(data.isPlaying);
+                if (typeof data.isPlaying === 'boolean') {
+                  setWebIsPlaying(data.isPlaying);
+                  if (data.isPlaying) setShowPosterShield(false);
+                }
               }
             } catch (err) {}
           }}
@@ -1383,6 +1423,22 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         )
       )}
         </>
+      )}
+
+      {/* Loading Poster Shield: prevents any white screen flash while video or web player loads */}
+      {showPosterShield && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]} pointerEvents="none">
+          {poster ? (
+            <Image
+              source={{ uri: poster }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+          ) : null}
+          <View style={[StyleSheet.absoluteFill, styles.loadingBackdrop]}>
+            <ActivityIndicator size="small" color="#ffffff" />
+          </View>
+        </View>
       )}
 
       {/* Player Settings Bottom Sheet Modal (Active in Both Web and Native Modes) */}
