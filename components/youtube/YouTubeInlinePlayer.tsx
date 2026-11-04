@@ -63,6 +63,13 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 }
 
+function formatRemainingTime(currentSec: number, durationSec: number): string {
+  if (isNaN(durationSec) || durationSec <= 0) return '';
+  const rem = Math.max(0, durationSec - currentSec);
+  return `-${formatTime(rem)}`;
+}
+
+
 
 
 const INJECTED_CLEAN_PLAYER_JS = `
@@ -228,7 +235,6 @@ const INJECTED_CLEAN_PLAYER_JS = `
         .upsell-dialog,
         ytm-upsell-dialog-renderer,
         ytm-promoted-sparkles-web-renderer,
-        ytm-bottom-sheet-renderer,
         .yt-spec-button-shape-next--call-to-action {
           display: none !important;
           visibility: hidden !important;
@@ -236,7 +242,28 @@ const INJECTED_CLEAN_PLAYER_JS = `
           overflow: hidden !important;
         }
 
-        /* 9. Clean 16:9 container frame without page scrolling */
+        /* 9. Hide YouTube web settings popup / menu so it never clips inside 16:9 box */
+        .ytp-popup,
+        .ytp-settings-menu,
+        .ytp-panel,
+        .ytp-panel-menu,
+        ytm-bottom-sheet-renderer,
+        ytm-menu-item-section-renderer,
+        ytm-menu-popup-renderer,
+        ytm-menu-renderer,
+        .ytm-menu,
+        .ytm-settings-panel,
+        .ytp-popup.ytp-settings-menu {
+          display: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+          height: 0 !important;
+          width: 0 !important;
+          overflow: hidden !important;
+        }
+
+        /* 10. Clean 16:9 container frame without page scrolling */
         html, body {
           margin: 0 !important;
           padding: 0 !important;
@@ -248,6 +275,105 @@ const INJECTED_CLEAN_PLAYER_JS = `
     }
 
     injectStyle();
+
+    // Check if element or its ancestor matches settings trigger
+    function isSettingsTarget(el) {
+      if (!el) return false;
+      if (el.closest) {
+        var found = el.closest(
+          '.ytp-settings-button, ' +
+          'button[aria-label*="Settings" i], ' +
+          'button[aria-label*="settings" i], ' +
+          'button[aria-label*="Playback settings" i], ' +
+          '[data-action="settings"], ' +
+          '.ytm-settings-button'
+        );
+        if (found) return true;
+      }
+      var curr = el;
+      for (var i = 0; i < 4 && curr; i++) {
+        var aria = (curr.getAttribute && curr.getAttribute('aria-label')) || '';
+        var title = (curr.getAttribute && curr.getAttribute('title')) || '';
+        var cls = curr.className || '';
+        if (typeof cls === 'string' && cls.toLowerCase().includes('setting')) return true;
+        if (aria.toLowerCase().includes('setting')) return true;
+        if (title.toLowerCase().includes('setting')) return true;
+        curr = curr.parentElement;
+      }
+      return false;
+    }
+
+    function handleSettingsIntercept(e) {
+      if (isSettingsTarget(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+
+        // Immediately hide/remove any web popup YouTube attempted to spawn
+        var popups = document.querySelectorAll(
+          '.ytp-popup, .ytp-settings-menu, ytm-bottom-sheet-renderer, ' +
+          '.ytm-menu-item-section-renderer, ytm-menu-popup-renderer, .ytp-panel-menu, ytm-menu-renderer'
+        );
+        popups.forEach(function(p) {
+          p.style.setProperty('display', 'none', 'important');
+          try { p.remove(); } catch(err) {}
+        });
+
+        var vid = document.querySelector('video');
+        var cur = vid ? vid.currentTime : 0;
+        var dur = vid ? vid.duration : 0;
+        var paused = vid ? vid.paused : false;
+
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'OPEN_SETTINGS',
+            currentTime: cur,
+            duration: dur,
+            isPlaying: !paused
+          }));
+        }
+        return false;
+      }
+    }
+
+    window.addEventListener('click', handleSettingsIntercept, true);
+    window.addEventListener('touchend', handleSettingsIntercept, true);
+    window.addEventListener('pointerup', handleSettingsIntercept, true);
+    document.addEventListener('click', handleSettingsIntercept, true);
+    document.addEventListener('touchend', handleSettingsIntercept, true);
+    document.addEventListener('pointerup', handleSettingsIntercept, true);
+
+    function attachVideoListeners() {
+      var v = document.querySelector('video');
+      if (v && !v._hasAgyProgressListeners) {
+        v._hasAgyProgressListeners = true;
+        v.addEventListener('timeupdate', function() {
+          if (window.ReactNativeWebView && v.duration) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'PROGRESS',
+              currentTime: v.currentTime,
+              duration: v.duration
+            }));
+          }
+        });
+        v.addEventListener('play', function() {
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'PLAY_STATE',
+              isPlaying: true
+            }));
+          }
+        });
+        v.addEventListener('pause', function() {
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'PLAY_STATE',
+              isPlaying: false
+            }));
+          }
+        });
+      }
+    }
 
     function forceFullVideoAndPlay() {
       // 1. Expand all container elements to full 100% height
@@ -352,6 +478,8 @@ const INJECTED_CLEAN_PLAYER_JS = `
       if (playBtn && document.querySelector('video') && document.querySelector('video').paused) {
         try { playBtn.click(); } catch(e) {}
       }
+
+      attachVideoListeners();
     }
 
     forceFullVideoAndPlay();
@@ -390,6 +518,27 @@ const INJECTED_CLEAN_PLAYER_JS = `
         barContainer.style.setProperty('margin', '0px', 'important');
         barContainer.style.setProperty('padding', '0px', 'important');
       }
+      attachVideoListeners();
+
+      // Fallback: If YouTube attempts to render its settings popup/bottom sheet, remove it and open native modal
+      var popups = document.querySelectorAll(
+        '.ytp-popup, .ytp-settings-menu, ytm-bottom-sheet-renderer, ' +
+        '.ytm-menu-item-section-renderer, ytm-menu-popup-renderer, .ytp-panel-menu, ytm-menu-renderer'
+      );
+      if (popups.length > 0) {
+        popups.forEach(function(p) {
+          p.style.setProperty('display', 'none', 'important');
+          try { p.remove(); } catch(err) {}
+        });
+        if (vid && window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'OPEN_SETTINGS',
+            currentTime: vid.currentTime || 0,
+            duration: vid.duration || 0,
+            isPlaying: !vid.paused
+          }));
+        }
+      }
     });
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true });
@@ -397,6 +546,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
   })();
   true;
 `;
+
 
 export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   videoId,
@@ -479,6 +629,153 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [settingsSubView, setSettingsSubView] = useState<'main' | 'quality' | 'speed'>('main');
 
+  // Web player state for fallback mode
+  const [webCurrentTime, setWebCurrentTime] = useState(0);
+  const [webDuration, setWebDuration] = useState(0);
+  const [webIsPlaying, setWebIsPlaying] = useState(true);
+  const [webQuality, setWebQuality] = useState('Auto');
+  const [webSpeed, setWebSpeed] = useState(1.0);
+  const [webLoop, setWebLoop] = useState(false);
+  const [webResizeMode, setWebResizeMode] = useState<'cover' | 'contain'>('cover');
+  const [modalSliderPos, setModalSliderPos] = useState<number | null>(null);
+
+  const isWebActive = (useWebFallback || (playbackError && !streamUrl)) && !!videoId;
+  const effectiveCurrentTime = isWebActive ? (webCurrentTime || currentTime) : currentTime;
+  const effectiveDuration = isWebActive ? (webDuration || duration) : duration;
+  const effectiveIsPlaying = isWebActive ? webIsPlaying : isPlaying;
+  const effectiveQuality = isWebActive ? webQuality : (currentQuality || 'Auto');
+  const effectiveSpeed = isWebActive ? webSpeed : (playbackSpeed || 1.0);
+  const effectiveLoop = isWebActive ? webLoop : isLooping;
+  const effectiveResizeMode = isWebActive ? webResizeMode : videoResizeMode;
+
+  // Modal seek & progress handlers
+  const handleSeekFromModal = useCallback((targetSec: number) => {
+    if (isWebActive) {
+      setWebCurrentTime(targetSec);
+      webViewRef.current?.injectJavaScript(`
+        (function() {
+          var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+          var v = document.querySelector('video');
+          if (p && typeof p.seekTo === 'function') {
+            p.seekTo(${targetSec}, true);
+          } else if (v) {
+            v.currentTime = ${targetSec};
+          }
+        })();
+        true;
+      `);
+      onProgress(targetSec, effectiveDuration);
+    } else {
+      onSeek(targetSec);
+    }
+  }, [isWebActive, effectiveDuration, onProgress, onSeek]);
+
+  const handleSkipFromModal = useCallback(async (deltaSec: number) => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    const newTime = Math.max(0, Math.min(effectiveDuration || 1, effectiveCurrentTime + deltaSec));
+    handleSeekFromModal(newTime);
+  }, [effectiveDuration, effectiveCurrentTime, handleSeekFromModal]);
+
+  const handleTogglePlayFromModal = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (isWebActive) {
+      const nextState = !effectiveIsPlaying;
+      setWebIsPlaying(nextState);
+      webViewRef.current?.injectJavaScript(`
+        (function() {
+          var v = document.querySelector('video');
+          if (v) {
+            if (v.paused) v.play().catch(function() {});
+            else v.pause();
+          }
+        })();
+        true;
+      `);
+    } else {
+      onTogglePlay();
+    }
+  }, [isWebActive, effectiveIsPlaying, onTogglePlay]);
+
+  const handleChangeQualityFromModal = useCallback((q: string) => {
+    if (isWebActive) {
+      setWebQuality(q);
+      const qMap: Record<string, string> = {
+        '1080p': 'hd1080',
+        '720p': 'hd720',
+        '480p': 'large',
+        '360p': 'medium',
+        '240p': 'small',
+        '144p': 'tiny',
+        'Auto': 'auto',
+      };
+      const targetQ = qMap[q] || 'auto';
+      webViewRef.current?.injectJavaScript(`
+        (function() {
+          var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+          if (p) {
+            if (typeof p.setPlaybackQualityRange === 'function') {
+              p.setPlaybackQualityRange('${targetQ}', '${targetQ}');
+            }
+            if (typeof p.setPlaybackQuality === 'function') {
+              p.setPlaybackQuality('${targetQ}');
+            }
+          }
+        })();
+        true;
+      `);
+      onChangeQuality?.(q);
+    } else {
+      onChangeQuality?.(q);
+    }
+  }, [isWebActive, onChangeQuality]);
+
+  const handleSetSpeedFromModal = useCallback((speed: number) => {
+    if (isWebActive) {
+      setWebSpeed(speed);
+      webViewRef.current?.injectJavaScript(`
+        (function() {
+          var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+          var v = document.querySelector('video');
+          if (p && typeof p.setPlaybackRate === 'function') {
+            p.setPlaybackRate(${speed});
+          }
+          if (v) {
+            v.playbackRate = ${speed};
+          }
+        })();
+        true;
+      `);
+      onSetPlaybackSpeed?.(speed);
+    } else {
+      onSetPlaybackSpeed?.(speed);
+    }
+  }, [isWebActive, onSetPlaybackSpeed]);
+
+  const handleToggleLoopFromModal = useCallback(() => {
+    if (isWebActive) {
+      setWebLoop((prev) => {
+        const next = !prev;
+        webViewRef.current?.injectJavaScript(`
+          (function() {
+            var v = document.querySelector('video');
+            if (v) v.loop = ${next};
+          })();
+          true;
+        `);
+        return next;
+      });
+      onToggleLoop?.();
+    } else {
+      onToggleLoop?.();
+    }
+  }, [isWebActive, onToggleLoop]);
+
+
+
   const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 
   const playerHeaders: Record<string, string> = useMemo(() => {
@@ -530,6 +827,29 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     });
     scheduleControlsHide();
   }, [scheduleControlsHide]);
+
+  const handleToggleResizeModeFromModal = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (isWebActive) {
+      setWebResizeMode((prev) => {
+        const next = prev === 'cover' ? 'contain' : 'cover';
+        webViewRef.current?.injectJavaScript(`
+          (function() {
+            var v = document.querySelector('video');
+            if (v) {
+              v.style.setProperty('object-fit', '${next}', 'important');
+            }
+          })();
+          true;
+        `);
+        return next;
+      });
+    } else {
+      handleToggleResizeMode();
+    }
+  }, [isWebActive, handleToggleResizeMode]);
 
   const [isAutoplay, setIsAutoplay] = useState(true);
   const [isCCOn, setIsCCOn] = useState(false);
@@ -621,9 +941,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
-  if ((useWebFallback || (playbackError && !streamUrl)) && videoId) {
-    return (
-      <View style={styles.container}>
+  return (
+    <View style={styles.container}>
+      {isWebActive ? (
         <WebView
           ref={webViewRef}
           key={videoId}
@@ -665,13 +985,29 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             setIsBuffering(false);
             webViewRef.current?.injectJavaScript(INJECTED_CLEAN_PLAYER_JS);
           }}
+          onMessage={(event) => {
+            try {
+              const data = JSON.parse(event.nativeEvent.data);
+              if (!data || typeof data !== 'object') return;
+              if (data.type === 'OPEN_SETTINGS') {
+                if (typeof data.currentTime === 'number') setWebCurrentTime(data.currentTime);
+                if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
+                if (typeof data.isPlaying === 'boolean') setWebIsPlaying(data.isPlaying);
+                setSettingsSubView('main');
+                setSettingsModalVisible(true);
+              } else if (data.type === 'PROGRESS') {
+                if (typeof data.currentTime === 'number') setWebCurrentTime(data.currentTime);
+                if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
+                onProgress(data.currentTime || 0, data.duration || 0);
+              } else if (data.type === 'PLAY_STATE') {
+                if (typeof data.isPlaying === 'boolean') setWebIsPlaying(data.isPlaying);
+              }
+            } catch (err) {}
+          }}
         />
-      </View>
-    );
-  }
+      ) : (
+        <>
 
-  return (
-    <View style={styles.container}>
       {streamUrl ? (
         useKSPlayer && isKSPlayerAvailable() ? (
           <KSPlayerView
@@ -1046,8 +1382,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           </View>
         )
       )}
+        </>
+      )}
 
-      {/* Player Settings Bottom Sheet Modal */}
+      {/* Player Settings Bottom Sheet Modal (Active in Both Web and Native Modes) */}
       <Modal
         visible={settingsModalVisible}
         animationType="slide"
@@ -1065,13 +1403,101 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             {settingsSubView === 'main' && (
               <View>
                 <View style={styles.settingsHeader}>
-                  <Text style={styles.settingsTitle}>Settings</Text>
+                  <View style={styles.settingsHeaderLeft}>
+                    <Ionicons name="settings-sharp" size={18} color="#ffffff" style={{ marginRight: 8 }} />
+                    <Text style={styles.settingsTitle}>Playback Settings</Text>
+                  </View>
                   <TouchableOpacity
                     onPress={() => setSettingsModalVisible(false)}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={styles.settingsCloseBtn}
                   >
-                    <Ionicons name="close" size={22} color="#ffffff" />
+                    <Ionicons name="close" size={20} color="rgba(255, 255, 255, 0.7)" />
                   </TouchableOpacity>
+                </View>
+
+                {/* Progress View Card */}
+                <View style={styles.settingsProgressCard}>
+                  <View style={styles.progressCardHeader}>
+                    <View style={styles.progressTimeWrap}>
+                      <Text style={styles.progressCurrentTime}>
+                        {formatTime(modalSliderPos !== null ? modalSliderPos * effectiveDuration : effectiveCurrentTime)}
+                      </Text>
+                      <Text style={styles.progressTimeDivider}>/</Text>
+                      <Text style={styles.progressTotalDuration}>
+                        {formatTime(effectiveDuration)}
+                      </Text>
+                    </View>
+                    {effectiveDuration > 0 ? (
+                      <Text style={styles.progressRemainingTime}>
+                        {formatRemainingTime(
+                          modalSliderPos !== null ? modalSliderPos * effectiveDuration : effectiveCurrentTime,
+                          effectiveDuration
+                        )}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  <View style={styles.sliderWrap}>
+                    <Slider
+                      style={styles.settingsModalSlider}
+                      minimumValue={0}
+                      maximumValue={1}
+                      value={
+                        effectiveDuration > 0
+                          ? modalSliderPos !== null
+                            ? modalSliderPos
+                            : Math.min(1, Math.max(0, effectiveCurrentTime / effectiveDuration))
+                          : 0
+                      }
+                      onValueChange={(val) => {
+                        setModalSliderPos(val);
+                      }}
+                      onSlidingComplete={(val) => {
+                        const targetSec = val * (effectiveDuration || 1);
+                        setModalSliderPos(null);
+                        handleSeekFromModal(targetSec);
+                      }}
+                      minimumTrackTintColor="#ff0000"
+                      maximumTrackTintColor="rgba(255, 255, 255, 0.2)"
+                      thumbTintColor="#ff0000"
+                      thumbSize={14}
+                      trackHeight={4}
+                    />
+                  </View>
+
+                  <View style={styles.progressActionsRow}>
+                    <TouchableOpacity
+                      style={styles.progressMiniBtn}
+                      onPress={() => handleSkipFromModal(-10)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="play-back" size={16} color="#ffffff" />
+                      <Text style={styles.progressMiniBtnText}>-10s</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.progressPlayPauseBtn}
+                      onPress={handleTogglePlayFromModal}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name={effectiveIsPlaying ? 'pause' : 'play'}
+                        size={22}
+                        color="#ffffff"
+                        style={effectiveIsPlaying ? undefined : { marginLeft: 2 }}
+                      />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.progressMiniBtn}
+                      onPress={() => handleSkipFromModal(10)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="play-forward" size={16} color="#ffffff" />
+                      <Text style={styles.progressMiniBtnText}>+10s</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <View style={styles.settingsDivider} />
@@ -1088,7 +1514,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   </View>
                   <View style={styles.settingsRowRight}>
                     <Text style={styles.settingsRowValue}>
-                      {currentQuality === 'Auto' ? 'Auto' : currentQuality}
+                      {effectiveQuality === 'Auto' ? 'Auto' : effectiveQuality}
                     </Text>
                     <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
                   </View>
@@ -1106,7 +1532,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   </View>
                   <View style={styles.settingsRowRight}>
                     <Text style={styles.settingsRowValue}>
-                      {playbackSpeed === 1.0 ? 'Normal' : `${playbackSpeed}x`}
+                      {effectiveSpeed === 1.0 ? 'Normal' : `${effectiveSpeed}x`}
                     </Text>
                     <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
                   </View>
@@ -1115,7 +1541,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 {/* Screen Fit / Aspect Ratio Option */}
                 <TouchableOpacity
                   style={styles.settingsRow}
-                  onPress={handleToggleResizeMode}
+                  onPress={handleToggleResizeModeFromModal}
                   activeOpacity={0.7}
                 >
                   <View style={styles.settingsRowLeft}>
@@ -1123,8 +1549,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                     <Text style={styles.settingsRowLabel}>Screen fit</Text>
                   </View>
                   <View style={styles.settingsRowRight}>
-                    <Text style={[styles.settingsRowValue, videoResizeMode === 'cover' && { color: '#535aff', fontWeight: '700' }]}>
-                      {videoResizeMode === 'cover' ? 'Fit to Screen (Fill)' : 'Original (Fit)'}
+                    <Text style={[styles.settingsRowValue, effectiveResizeMode === 'cover' && { color: '#535aff', fontWeight: '700' }]}>
+                      {effectiveResizeMode === 'cover' ? 'Fit to Screen (Fill)' : 'Original (Fit)'}
                     </Text>
                     <Ionicons name="swap-horizontal" size={16} color="rgba(255, 255, 255, 0.45)" />
                   </View>
@@ -1133,7 +1559,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 {/* Loop Video Option */}
                 <TouchableOpacity
                   style={styles.settingsRow}
-                  onPress={onToggleLoop}
+                  onPress={handleToggleLoopFromModal}
                   activeOpacity={0.7}
                 >
                   <View style={styles.settingsRowLeft}>
@@ -1141,8 +1567,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                     <Text style={styles.settingsRowLabel}>Loop video</Text>
                   </View>
                   <View style={styles.settingsRowRight}>
-                    <Text style={[styles.settingsRowValue, isLooping && { color: '#535aff', fontWeight: '700' }]}>
-                      {isLooping ? 'On' : 'Off'}
+                    <Text style={[styles.settingsRowValue, effectiveLoop && { color: '#535aff', fontWeight: '700' }]}>
+                      {effectiveLoop ? 'On' : 'Off'}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1162,7 +1588,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   </TouchableOpacity>
                   <View style={styles.subHeaderTitleWrap}>
                     <Text style={styles.settingsTitle}>Quality for current video</Text>
-                    <Text style={styles.settingsSubTitle}>Preserves playback position</Text>
+                    <Text style={styles.settingsSubTitle}>Applied immediately to player</Text>
                   </View>
                 </View>
 
@@ -1170,7 +1596,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
                 <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
                   {availableQualities.map((q) => {
-                    const isSelected = currentQuality === q;
+                    const isSelected = effectiveQuality === q;
                     return (
                       <TouchableOpacity
                         key={q}
@@ -1179,7 +1605,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                           if (await isHapticsSupported()) {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                           }
-                          onChangeQuality?.(q);
+                          handleChangeQualityFromModal(q);
                           setSettingsModalVisible(false);
                         }}
                         activeOpacity={0.7}
@@ -1224,7 +1650,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
                 <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
                   {SPEED_OPTIONS.map((s) => {
-                    const isSelected = playbackSpeed === s;
+                    const isSelected = effectiveSpeed === s;
                     const label = s === 1.0 ? 'Normal (1x)' : `${s}x`;
                     return (
                       <TouchableOpacity
@@ -1234,7 +1660,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                           if (await isHapticsSupported()) {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                           }
-                          onSetPlaybackSpeed?.(s);
+                          handleSetSpeedFromModal(s);
                           setSettingsModalVisible(false);
                         }}
                         activeOpacity={0.7}
@@ -1257,6 +1683,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     </View>
   );
 };
+
 
 const styles = StyleSheet.create({
   slimScrubTrack: {
@@ -1652,5 +2079,89 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 11,
     fontWeight: '600',
+  },
+  settingsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingsCloseBtn: {
+    padding: 4,
+  },
+  settingsProgressCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  progressCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: 6,
+  },
+  progressTimeWrap: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  progressCurrentTime: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  progressTimeDivider: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontSize: 14,
+    marginHorizontal: 4,
+  },
+  progressTotalDuration: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 14,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
+  progressRemainingTime: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 12,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
+  sliderWrap: {
+    marginVertical: 4,
+  },
+  settingsModalSlider: {
+    width: '100%',
+    height: 24,
+  },
+  progressActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 20,
+    marginTop: 6,
+  },
+  progressMiniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 4,
+  },
+  progressMiniBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  progressPlayPauseBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#535aff',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
