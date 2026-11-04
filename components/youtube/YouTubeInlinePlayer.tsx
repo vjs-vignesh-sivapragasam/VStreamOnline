@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksplayer/KSPlayerView';
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
+import { WebView } from 'react-native-webview';
 
 export interface YouTubeInlinePlayerProps {
   videoId?: string;
@@ -98,6 +99,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [sliderPos, setSliderPos] = useState(0);
   // Default to react-native-video (AVPlayer on iOS, ExoPlayer on Android) for native MP4 streaming
   const [useKSPlayer, setUseKSPlayer] = useState(false);
+  const isLive = !!(title && (title.includes('LIVE') || title.includes('Live') || title.includes('🔴')));
+  const [useWebFallback, setUseWebFallback] = useState(isLive);
+
+  useEffect(() => {
+    setUseWebFallback(isLive);
+  }, [videoId, isLive]);
 
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [settingsSubView, setSettingsSubView] = useState<'main' | 'quality' | 'speed'>('main');
@@ -243,6 +250,57 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
+  if (useWebFallback && videoId) {
+    return (
+      <View style={styles.container}>
+        <WebView
+          key={videoId}
+          source={{
+            html: `
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                  <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body, html { width: 100%; height: 100%; background: #000; overflow: hidden; }
+                    iframe { width: 100%; height: 100%; border: none; }
+                  </style>
+                </head>
+                <body>
+                  <iframe
+                    src="https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&playsinline=1&modestbranding=1&rel=0&enablejsapi=1"
+                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                    allowfullscreen>
+                  </iframe>
+                </body>
+              </html>
+            `,
+            baseUrl: 'https://www.youtube.com',
+          }}
+          style={StyleSheet.absoluteFill}
+          allowsInlineMediaPlayback={true}
+          mediaPlaybackRequiresUserAction={false}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          allowsFullscreenVideo={true}
+          userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+          onLoadEnd={() => setIsBuffering(false)}
+        />
+        {streamUrl ? (
+          <TouchableOpacity
+            style={styles.switchPlayerPill}
+            onPress={() => setUseWebFallback(false)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="refresh" size={12} color="#ffffff" style={{ marginRight: 4 }} />
+            <Text style={styles.switchPlayerText}>Switch to Native Player</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {streamUrl ? (
@@ -347,8 +405,18 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 <Text style={styles.errorText} numberOfLines={3}>
                   {playbackError}
                 </Text>
+                {videoId ? (
+                  <TouchableOpacity
+                    style={[styles.retryButton, { backgroundColor: '#FF0000', marginTop: 8, paddingHorizontal: 16 }]}
+                    onPress={() => setUseWebFallback(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="play-circle" size={18} color="#ffffff" style={{ marginRight: 6 }} />
+                    <Text style={styles.retryButtonText}>Play with Web Player (No Server Needed)</Text>
+                  </TouchableOpacity>
+                ) : null}
                 {onRetry && (
-                  <TouchableOpacity style={styles.retryButton} onPress={onRetry} activeOpacity={0.8}>
+                  <TouchableOpacity style={[styles.retryButton, { marginTop: 8 }]} onPress={onRetry} activeOpacity={0.8}>
                     <Ionicons name="refresh" size={15} color="#ffffff" style={{ marginRight: 6 }} />
                     <Text style={styles.retryButtonText}>Retry Stream</Text>
                   </TouchableOpacity>
@@ -1176,5 +1244,24 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  switchPlayerPill: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    zIndex: 99,
+  },
+  switchPlayerText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
