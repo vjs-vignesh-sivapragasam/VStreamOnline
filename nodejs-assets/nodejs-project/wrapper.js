@@ -84,16 +84,22 @@ try {
   // Ignored if not running in nodejs-mobile
 }
 
-// 6. Start YouTube streaming engine safely
+// 6. Start YouTube streaming engine safely with lazy-load resilience
 let ytHandler = null;
-try {
-  const ytModule = require('./yt-engine.bundle.js');
-  if (ytModule && ytModule.server) {
-    ytHandler = ytModule.server.listeners('request')[0];
+function getYtHandler() {
+  if (ytHandler) return ytHandler;
+  try {
+    const ytModule = require('./yt-engine.bundle.js');
+    if (ytModule && ytModule.server) {
+      ytHandler = ytModule.server.listeners('request')[0];
+      console.log('[NODEJS-MOBILE] ✅ yt-engine loaded and ready');
+    }
+  } catch (e) {
+    console.warn('[NODEJS-MOBILE] Could not start yt-engine:', e);
   }
-} catch (e) {
-  console.warn('[NODEJS-MOBILE] Could not start yt-engine:', e);
+  return ytHandler;
 }
+getYtHandler();
 
 // 7. Route /yt/* requests directly through Stremio server (port 11470)
 // This allows YouTube video playback directly via the Stremio server!
@@ -101,8 +107,14 @@ const http = require('http');
 const originalCreateServer = http.createServer;
 http.createServer = function (requestListener) {
   return originalCreateServer.call(this, (req, res) => {
-    if (ytHandler && req.url && req.url.startsWith('/yt/')) {
-      return ytHandler(req, res);
+    if (req.url && req.url.startsWith('/yt/')) {
+      const handler = getYtHandler();
+      if (handler) {
+        return handler(req, res);
+      }
+      res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: 'YouTube engine initializing, please retry' }));
+      return;
     }
     if (requestListener) {
       return requestListener(req, res);

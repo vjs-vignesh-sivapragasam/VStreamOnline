@@ -29,7 +29,11 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var import_http = __toESM(require("http"));
 
 // node_modules/youtubei.js/dist/src/platform/node.js
-var import_web = require("stream/web");
+var import_web = (function() {
+  try { return require("stream/web"); } catch (_) {}
+  try { return require("stream"); } catch (_) {}
+  return globalThis;
+})();
 
 // node_modules/youtubei.js/dist/src/utils/Log.js
 var Log_exports = {};
@@ -39693,7 +39697,11 @@ server.on("error", (err) => {
     console.error("[yt-server] Server error:", err);
   }
 });
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`YouTube engine listening on http://0.0.0.0:${PORT}`);
-});
+try {
+  server.listen(PORT, "127.0.0.1", () => {
+    console.log(`YouTube engine listening on http://127.0.0.1:${PORT}`);
+  });
+} catch (e) {
+  console.warn('[yt-server] listen on 11472 error:', e);
+}
 module.exports = { getClient, server };

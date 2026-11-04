@@ -106,6 +106,14 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     setUseWebFallback(false);
   }, [videoId]);
 
+  // Seamless auto-fallback: if direct stream fails (e.g. 403 or engine starting), immediately play via web player
+  useEffect(() => {
+    if (playbackError && videoId) {
+      console.log('[YouTubeInlinePlayer] 🔄 Error encountered, seamlessly auto-playing via Web Player:', playbackError);
+      setUseWebFallback(true);
+    }
+  }, [playbackError, videoId]);
+
   const handleOpenYouTubeApp = useCallback(async () => {
     if (!videoId) return;
     const appUrl = `vnd.youtube://${videoId}`;
