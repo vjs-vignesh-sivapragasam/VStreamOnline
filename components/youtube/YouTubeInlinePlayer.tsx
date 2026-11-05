@@ -515,13 +515,61 @@ const INJECTED_CLEAN_PLAYER_JS = `
 
 
     
-    // Background playback keep-alive watchdog
+    // Background playback keep-alive watchdog & Lock Screen Media Controls
     function setupBackgroundKeepAlive() {
       var v = document.querySelector('video');
       if (v && !v._hasAgyKeepAlive) {
         v._hasAgyKeepAlive = true;
 
-        // Listen for user clicks on YouTube's play/pause controls to know if pause was intentional
+        // 1. Setup MediaSession for Lock Screen & Control Center play/pause
+        if ('mediaSession' in navigator) {
+          try {
+            navigator.mediaSession.setActionHandler('play', function() {
+              window._agyUserPaused = false;
+              if (v) v.play().catch(function() {});
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'PLAY_STATE',
+                  isPlaying: true
+                }));
+              }
+            });
+
+            navigator.mediaSession.setActionHandler('pause', function() {
+              window._agyUserPaused = true;
+              if (v) v.pause();
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'PLAY_STATE',
+                  isPlaying: false
+                }));
+              }
+            });
+
+            navigator.mediaSession.setActionHandler('seekbackward', function(details) {
+              var skipTime = (details && details.seekOffset) || 10;
+              if (v) v.currentTime = Math.max(v.currentTime - skipTime, 0);
+            });
+
+            navigator.mediaSession.setActionHandler('seekforward', function(details) {
+              var skipTime = (details && details.seekOffset) || 10;
+              if (v) v.currentTime = Math.min(v.currentTime + skipTime, v.duration || 0);
+            });
+
+            navigator.mediaSession.setActionHandler('stop', function() {
+              window._agyUserPaused = true;
+              if (v) v.pause();
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'PLAY_STATE',
+                  isPlaying: false
+                }));
+              }
+            });
+          } catch(err) {}
+        }
+
+        // 2. Track user manual play/pause clicks inside web player controls
         document.addEventListener('click', function(e) {
           var target = e.target;
           if (!target) return;
@@ -530,23 +578,6 @@ const INJECTED_CLEAN_PLAYER_JS = `
             setTimeout(function() {
               if (v) window._agyUserPaused = v.paused;
             }, 60);
-          }
-        }, true);
-
-        // When screen locks or page loses focus, if video paused unintentionally, keep playing!
-        v.addEventListener('pause', function() {
-          if (!window._agyUserPaused && !v.ended) {
-            setTimeout(function() {
-              if (!window._agyUserPaused && v.paused && !v.ended) {
-                v.play().catch(function() {});
-              }
-            }, 80);
-          }
-        });
-
-        window.addEventListener('blur', function() {
-          if (!window._agyUserPaused && v && v.paused && !v.ended) {
-            v.play().catch(function() {});
           }
         }, true);
       }
@@ -566,6 +597,7 @@ const INJECTED_CLEAN_PLAYER_JS = `
           }
         });
         v.addEventListener('play', function() {
+          window._agyUserPaused = false;
           if (window.ReactNativeWebView) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
               type: 'PLAY_STATE',
@@ -1055,6 +1087,53 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const videoRef = useRef<VideoRef>(null);
   const ksRef = useRef<KSPlayerRef>(null);
   const webViewRef = useRef<any>(null);
+
+  // Sync React Native isPlaying state down to the web player
+  useEffect(() => {
+    if (isWebActive && webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        (function() {
+          try {
+            var v = document.querySelector('video');
+            if (v) {
+              if (${isPlaying}) {
+                window._agyUserPaused = false;
+                if (v.paused) v.play().catch(function() {});
+              } else {
+                window._agyUserPaused = true;
+                if (!v.paused) v.pause();
+              }
+            }
+          } catch(e) {}
+        })();
+        true;
+      `);
+    }
+  }, [isPlaying, isWebActive]);
+
+  // Sync MediaMetadata to system Lock Screen & Control Center
+  useEffect(() => {
+    if (isWebActive && webViewRef.current && (title || channel || poster)) {
+      const metaJs = `
+        (function() {
+          try {
+            if ('mediaSession' in navigator && window.MediaMetadata) {
+              navigator.mediaSession.metadata = new MediaMetadata({
+                title: ${JSON.stringify(title || 'YouTube Video')},
+                artist: ${JSON.stringify(channel || 'YouTube')},
+                album: 'VStream Online',
+                artwork: [
+                  { src: ${JSON.stringify(poster || '')}, sizes: '512x512', type: 'image/jpeg' }
+                ]
+              });
+            }
+          } catch(e) {}
+        })();
+        true;
+      `;
+      webViewRef.current.injectJavaScript(metaJs);
+    }
+  }, [title, channel, poster, isWebActive]);
   // Initially hide controls when a new video stream loads
   useEffect(() => {
     setShowControls(false);
@@ -1231,7 +1310,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   );
 
   const isHero = effectiveResizeMode === 'hero';
-  const heroHeight = Math.round(width * (9 / 16)) + (topInset || (Platform.OS === 'ios' ? 47 : 0));
+  const effectiveTopInset = Math.max(topInset || 0, Platform.OS === 'ios' ? 59 : 28);
+  const heroHeight = Math.round(width * (9 / 16)) + effectiveTopInset;
+  const heroTopPadding = isHero ? effectiveTopInset + 14 : 10;
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
   return (
@@ -1242,7 +1323,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       {isHero ? (
         <LinearGradient
           colors={['rgba(0, 0, 0, 0.65)', 'rgba(0, 0, 0, 0.15)', 'transparent']}
-          style={[styles.heroTopGradient, { height: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 15 }]}
+          style={[styles.heroTopGradient, { height: effectiveTopInset + 20 }]}
           pointerEvents="none"
         />
       ) : null}
@@ -1330,6 +1411,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 if (typeof data.isPlaying === 'boolean') {
                   setWebIsPlaying(data.isPlaying);
                   if (data.isPlaying) setShowPosterShield(false);
+                  if (data.isPlaying !== isPlaying) {
+                    onTogglePlay();
+                  }
                 }
               }
             } catch (err) {}
@@ -1382,8 +1466,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             resizeMode={videoResizeMode === 'contain' ? 'contain' : videoResizeMode === 'stretch' ? 'stretch' : 'cover'}
             style={StyleSheet.absoluteFill}
             controls={false}
-            playInBackground={false}
-            playWhenInactive={false}
+            playInBackground={true}
+            playWhenInactive={true}
             ignoreSilentSwitch="ignore"
             progressUpdateInterval={250}
             onProgress={(e) => {
@@ -1542,12 +1626,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       {showControls && (
         <View style={styles.controlsOverlay} pointerEvents="box-none">
           {/* Top Bar: Real YouTube Icons (Chevron Down, Autoplay, Cast, CC, Screen Fit, Settings) */}
-          <View style={[styles.topBar, isHero && { paddingTop: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 4 }]}>
+          <View style={[styles.topBar, { paddingTop: heroTopPadding }]}>
             <TouchableOpacity
               style={styles.iconButton}
               onPress={onMinimize}
               activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
             >
               <Ionicons name="arrow-back" size={24} color="#ffffff" />
             </TouchableOpacity>
@@ -1558,7 +1642,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 style={[styles.autoplayToggleTrack, isAutoplay && styles.autoplayToggleTrackOn]}
                 onPress={handleToggleAutoplay}
                 activeOpacity={0.8}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
               >
                 <View style={[styles.autoplayToggleThumb, isAutoplay && styles.autoplayToggleThumbOn]}>
                   <Ionicons
@@ -1575,7 +1659,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 style={styles.topIconBtn}
                 onPress={handleCastPress}
                 activeOpacity={0.7}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
               >
                 <Ionicons name="tv-outline" size={20} color="#ffffff" />
               </TouchableOpacity>
@@ -1585,7 +1669,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 style={styles.topIconBtn}
                 onPress={handleToggleCC}
                 activeOpacity={0.7}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
               >
                 <View style={[styles.ccIconBadge, isCCOn && styles.ccIconBadgeActive]}>
                   <Text style={[styles.ccIconText, isCCOn && styles.ccIconTextActive]}>CC</Text>
@@ -1597,7 +1681,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 style={styles.topIconBtn}
                 onPress={handleToggleResizeMode}
                 activeOpacity={0.7}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
               >
                 {effectiveResizeMode === 'hero' ? (
                   <View style={styles.heroTopIconWrap}>
@@ -1626,7 +1710,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   setSettingsModalVisible(true);
                 }}
                 activeOpacity={0.7}
-                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
               >
                 <Ionicons name="settings-sharp" size={20} color="#ffffff" />
               </TouchableOpacity>
@@ -2252,7 +2336,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   topIconBtn: {
-    padding: 4,
+    padding: 6,
+    minWidth: 38,
+    minHeight: 38,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2508,7 +2594,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     justifyContent: 'space-between',
-    paddingTop: 10,
     paddingHorizontal: 12,
     paddingBottom: 6,
     zIndex: 999,
