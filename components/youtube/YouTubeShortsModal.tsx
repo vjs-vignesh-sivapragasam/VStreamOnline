@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
+  Pressable,
   Text,
   StyleSheet,
   Dimensions,
@@ -52,9 +53,10 @@ interface ShortPageProps {
   isActive: boolean;
   onClose: () => void;
   insets: any;
+  height: number;
 }
 
-const ShortPage: React.FC<ShortPageProps> = ({ item, isActive, onClose, insets }) => {
+const ShortPage: React.FC<ShortPageProps> = ({ item, isActive, onClose, insets, height }) => {
   const [isLiked, setIsLiked] = useState(false);
   const [isDisliked, setIsDisliked] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -137,7 +139,7 @@ const ShortPage: React.FC<ShortPageProps> = ({ item, isActive, onClose, insets }
   };
 
   return (
-    <View style={styles.shortPageContainer}>
+    <View style={[styles.shortPageContainer, { height }]}>
       {/* 1. Fullscreen Video (Active) or High-Res Poster (Inactive) */}
       {isActive ? (
         <WebView
@@ -168,9 +170,8 @@ const ShortPage: React.FC<ShortPageProps> = ({ item, isActive, onClose, insets }
       )}
 
       {/* Tap layer to toggle pause / play */}
-      <TouchableOpacity
+      <Pressable
         style={StyleSheet.absoluteFill}
-        activeOpacity={1}
         onPress={handleTogglePause}
       />
 
@@ -316,12 +317,23 @@ export const YouTubeShortsModal: React.FC = () => {
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList>(null);
   const [feed, setFeed] = useState<ActiveYouTubeVideo[]>([]);
+  const [containerHeight, setContainerHeight] = useState(SCREEN_HEIGHT);
 
   useEffect(() => {
     if (shortsList && shortsList.length > 0) {
       setFeed(shortsList);
     }
   }, [shortsList]);
+
+  // Scroll to selected short when opening
+  useEffect(() => {
+    if (isShortsVisible && activeShortIndex >= 0 && activeShortIndex < feed.length) {
+      const timer = setTimeout(() => {
+        flatListRef.current?.scrollToIndex({ index: activeShortIndex, animated: false });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isShortsVisible, activeShortIndex, feed.length]);
 
   // Load more shorts when approaching end of feed
   const handleLoadMore = useCallback(async () => {
@@ -337,6 +349,19 @@ export const YouTubeShortsModal: React.FC = () => {
     } catch {}
   }, []);
 
+  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+    if (viewableItems && viewableItems.length > 0) {
+      const current = viewableItems[0];
+      if (current.index !== null && current.index !== undefined) {
+        setActiveShortIndex(current.index);
+      }
+    }
+  }).current;
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 60,
+  }).current;
+
   if (!isShortsVisible) return null;
 
   return (
@@ -347,28 +372,41 @@ export const YouTubeShortsModal: React.FC = () => {
       onRequestClose={closeShorts}
     >
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      <View style={styles.modalContainer}>
+      <View
+        style={styles.modalContainer}
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          if (h > 0 && Math.abs(h - containerHeight) > 5) {
+            setContainerHeight(h);
+          }
+        }}
+      >
         <FlatList
           ref={flatListRef}
           data={feed}
           keyExtractor={(item) => `short_swipe_${item.id}`}
-          pagingEnabled={true}
+          pagingEnabled={Platform.OS === 'ios'}
           showsVerticalScrollIndicator={false}
-          snapToInterval={SCREEN_HEIGHT}
+          snapToInterval={containerHeight}
           snapToAlignment="start"
           decelerationRate="fast"
-          initialScrollIndex={activeShortIndex < feed.length ? activeShortIndex : 0}
+          disableIntervalMomentum={true}
+          bounces={false}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
+          windowSize={3}
           getItemLayout={(_, index) => ({
-            length: SCREEN_HEIGHT,
-            offset: SCREEN_HEIGHT * index,
+            length: containerHeight,
+            offset: containerHeight * index,
             index,
           })}
-          onMomentumScrollEnd={(e) => {
-            const idx = Math.round(e.nativeEvent.contentOffset.y / SCREEN_HEIGHT);
-            if (idx >= 0 && idx < feed.length) {
-              setActiveShortIndex(idx);
-            }
+          onScrollToIndexFailed={(info) => {
+            setTimeout(() => {
+              flatListRef.current?.scrollToIndex({ index: info.index, animated: false });
+            }, 100);
           }}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
           renderItem={({ item, index }) => (
@@ -377,6 +415,7 @@ export const YouTubeShortsModal: React.FC = () => {
               isActive={index === activeShortIndex}
               onClose={closeShorts}
               insets={insets}
+              height={containerHeight}
             />
           )}
         />

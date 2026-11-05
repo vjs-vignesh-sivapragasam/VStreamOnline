@@ -1236,18 +1236,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   return (
     <View style={[styles.container, isHero && { aspectRatio: undefined, height: heroHeight }]}>
-      {/* Top-Left Floating Back Arrow Button (Always accessible to minimize / go back to previous screen) */}
-      <TouchableOpacity
-        style={[
-          styles.floatingBackBtn,
-          isHero && { top: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 6 },
-        ]}
-        onPress={onMinimize}
-        activeOpacity={0.7}
-        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-      >
-        <Ionicons name="arrow-back" size={20} color="#ffffff" />
-      </TouchableOpacity>
+
 
       {/* Subtle top gradient in Hero mode for status bar readability */}
       {isHero ? (
@@ -1560,7 +1549,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               activeOpacity={0.7}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <Ionicons name="chevron-down" size={26} color="#ffffff" />
+              <Ionicons name="arrow-back" size={24} color="#ffffff" />
             </TouchableOpacity>
 
             <View style={styles.topBarRight}>

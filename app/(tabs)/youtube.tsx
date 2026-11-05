@@ -574,6 +574,14 @@ export default function YouTubeScreen() {
     [playInYouTubeWatch]
   );
 
+  const handlePlayShort = useCallback(
+    (item: YouTubeVideoItem, customFeed?: YouTubeVideoItem[]) => {
+      const feedToUse = customFeed && customFeed.length > 0 ? customFeed : shortsList.length > 0 ? shortsList : [item];
+      playShort(item, feedToUse);
+    },
+    [playShort, shortsList]
+  );
+
   const handleSearchSubmit = () => {
     const q = searchQuery.trim();
     if (!q) return;
@@ -763,7 +771,7 @@ export default function YouTubeScreen() {
             <ShortsShelf
               shorts={shortsList}
               isLoading={loadingVideoId !== null}
-              onPressShort={handlePlayVideo}
+              onPressShort={(item) => handlePlayShort(item, shortsList)}
               onSeeAll={() => {
                 setSearchQuery('');
                 setSelectedCategory('Shorts');
@@ -782,7 +790,7 @@ export default function YouTubeScreen() {
         </View>
       );
     },
-    [loadingVideoId, savedIds, shortsList, selectedCategory, searchQuery, handlePlayVideo, handleOpenDownloadModal, handleToggleSave, handleCopyLink]
+    [loadingVideoId, savedIds, shortsList, selectedCategory, searchQuery, handlePlayVideo, handlePlayShort, handleOpenDownloadModal, handleToggleSave, handleCopyLink]
   );
 
   const keyExtractor = useCallback((item: YouTubeVideoItem) => item.id, []);
@@ -1098,7 +1106,7 @@ export default function YouTubeScreen() {
             <ShortCard
               item={item}
               isLoading={loadingVideoId === item.id}
-              onPress={handlePlayVideo}
+              onPress={(shortItem) => handlePlayShort(shortItem, videos)}
               width={(width - 42) / 2}
             />
           )}
