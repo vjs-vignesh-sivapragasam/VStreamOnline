@@ -1231,10 +1231,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   );
 
   const isHero = effectiveResizeMode === 'hero';
+  const heroHeight = Math.round(width * (9 / 16)) + (topInset || (Platform.OS === 'ios' ? 47 : 0));
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isHero && { aspectRatio: undefined, height: heroHeight }]}>
       {/* Top-Left Floating Back Arrow Button (Always accessible to minimize / go back to previous screen) */}
       <TouchableOpacity
         style={[
@@ -1247,6 +1248,15 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       >
         <Ionicons name="arrow-back" size={20} color="#ffffff" />
       </TouchableOpacity>
+
+      {/* Subtle top gradient in Hero mode for status bar readability */}
+      {isHero ? (
+        <LinearGradient
+          colors={['rgba(0, 0, 0, 0.65)', 'rgba(0, 0, 0, 0.15)', 'transparent']}
+          style={[styles.heroTopGradient, { height: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 15 }]}
+          pointerEvents="none"
+        />
+      ) : null}
 
       {isWebActive ? (
         <WebView
@@ -2094,7 +2104,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                     {
                       id: 'hero' as ScreenFitMode,
                       title: 'Netflix Hero Banner',
-                      desc: 'Plays at the top covering the Dynamic Island & status bar (unzoomed)',
+                      desc: 'Full top height coverage over Dynamic Island & status bar',
                       icon: 'film' as const,
                       color: '#E50914',
                       badge: 'NETFLIX HERO',
@@ -2263,7 +2273,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 15,
+    zIndex: 1,
   },
   heroBottomGradient: {
     position: 'absolute',
