@@ -526,7 +526,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       <View
         style={[
           styles.fullWatchOverlay,
-          { bottom: bottomTabBarHeight },
+          { bottom: 0 },
           isMinimized && styles.hiddenOverlay,
         ]}
         pointerEvents={isMinimized ? 'none' : 'auto'}
@@ -573,6 +573,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         {/* Watch Details & Related Feed */}
         <ScrollView
           style={styles.contentScroll}
+          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.contentBodyWrap}>

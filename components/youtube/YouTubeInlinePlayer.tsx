@@ -1622,6 +1622,18 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         </View>
       ) : null}
 
+      {/* Always-accessible Back Arrow to return to previous screen */}
+      {!showControls && (
+        <TouchableOpacity
+          style={[styles.floatingBackBtn, { top: heroTopPadding }]}
+          onPress={onMinimize}
+          activeOpacity={0.7}
+          hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+        >
+          <Ionicons name="arrow-back" size={22} color="#ffffff" />
+        </TouchableOpacity>
+      )}
+
       {/* Controls Overlay (native player only) */}
       {showControls && (
         <View style={styles.controlsOverlay} pointerEvents="box-none">
