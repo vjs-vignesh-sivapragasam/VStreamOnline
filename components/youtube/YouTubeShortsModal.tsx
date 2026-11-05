@@ -286,11 +286,6 @@ const ShortPage: React.FC<ShortPageProps> = ({ item, isActive, onClose, insets, 
               <Text style={styles.actionBtnLabel}>Share</Text>
             </TouchableOpacity>
 
-            {/* Remix Button */}
-            <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7}>
-              <Ionicons name="repeat-outline" size={26} color="#ffffff" />
-              <Text style={styles.actionBtnLabel}>Remix</Text>
-            </TouchableOpacity>
 
             {/* Rotating Audio Disc */}
             <Animated.View style={[styles.soundDisc, { transform: [{ rotate: spin }] }]}>

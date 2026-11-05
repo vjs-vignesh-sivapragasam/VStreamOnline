@@ -1976,8 +1976,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                       </Text>
                     )}
                     <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
+                      onPress={() => {
                         setSettingsSubView('screenfit');
                       }}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

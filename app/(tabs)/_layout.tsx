@@ -2,6 +2,10 @@ import React from 'react';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { useTheme } from '@/contexts/ThemeContext';
 
+export const unstable_settings = {
+  initialRouteName: 'youtube',
+};
+
 export default function TabLayout() {
   const { theme } = useTheme();
 
