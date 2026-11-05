@@ -1079,10 +1079,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       case 'cover':
         return 'hero';
       case 'hero':
-        return 'stretch';
-      case 'stretch':
         return 'contain';
       case 'contain':
+        return 'cover';
+      case 'stretch':
       default:
         return 'cover';
     }
@@ -1111,7 +1111,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       }
 
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-      let label = 'Fit to Screen (Fill)';
+      let label = 'Fit to Screen (Normal)';
       let icon: keyof typeof Ionicons.glyphMap = 'expand-outline';
       if (next === 'hero') {
         label = 'Netflix Hero Banner';
@@ -1231,11 +1231,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   );
 
   const isHero = effectiveResizeMode === 'hero';
-  const heroHeight = Math.round(width * 0.78) + (topInset || (Platform.OS === 'ios' ? 47 : 0));
   const progressPct = duration > 0 ? (isSliding ? sliderPos : currentTime / duration) : 0;
 
   return (
-    <View style={[styles.container, isHero && { aspectRatio: undefined, height: heroHeight }]}>
+    <View style={styles.container}>
       {/* Top-Left Floating Back Arrow Button (Always accessible to minimize / go back to previous screen) */}
       <TouchableOpacity
         style={[
@@ -1248,40 +1247,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       >
         <Ionicons name="arrow-back" size={20} color="#ffffff" />
       </TouchableOpacity>
-
-      {/* Netflix Hero Cinematic Gradients & Badge */}
-      {isHero ? (
-        <>
-          {/* Top Status Bar Gradient (covers notch/time/wifi header with high contrast) */}
-          <LinearGradient
-            colors={['rgba(0, 0, 0, 0.85)', 'rgba(0, 0, 0, 0.35)', 'transparent']}
-            style={[styles.heroTopGradient, { height: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 30 }]}
-            pointerEvents="none"
-          />
-          {/* Bottom Cinematic Gradient (seamlessly blends video into dark details) */}
-          <LinearGradient
-            colors={['transparent', 'rgba(10, 10, 12, 0.55)', '#0a0a0c']}
-            style={styles.heroBottomGradient}
-            pointerEvents="none"
-          />
-        </>
-      ) : null}
-
-      {/* Floating Netflix Hero Badge when playing in Hero mode without controls */}
-      {isHero && !showControls ? (
-        <View
-          style={[
-            styles.netflixHeroFloatingBadge,
-            { top: (topInset || (Platform.OS === 'ios' ? 47 : 0)) + 8 },
-          ]}
-          pointerEvents="none"
-        >
-          <View style={styles.netflixBadgeN}>
-            <Text style={styles.netflixBadgeNText}>N</Text>
-          </View>
-          <Text style={styles.netflixBadgeText}>HERO BANNER</Text>
-        </View>
-      ) : null}
 
       {isWebActive ? (
         <WebView
@@ -2005,7 +1970,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                         ]}
                       >
                         {effectiveResizeMode === 'cover'
-                          ? 'Fit to Screen (Fill)'
+                          ? 'Fit to Screen (Normal)'
                           : effectiveResizeMode === 'stretch'
                           ? 'Stretch to Screen'
                           : 'Original (Fit)'}
@@ -2121,15 +2086,15 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   {[
                     {
                       id: 'cover' as ScreenFitMode,
-                      title: 'Fit to Screen (Fill)',
-                      desc: 'Fills display container, crops minor edges to preserve ratio',
+                      title: 'Fit to Screen (Normal Mode)',
+                      desc: 'Standard portrait view below mobile status bar & island',
                       icon: 'expand-outline' as const,
                       color: '#535aff',
                     },
                     {
                       id: 'hero' as ScreenFitMode,
                       title: 'Netflix Hero Banner',
-                      desc: 'Full-bleed cinematic banner covering top notch, time & wifi header',
+                      desc: 'Plays at the top covering the Dynamic Island & status bar (unzoomed)',
                       icon: 'film' as const,
                       color: '#E50914',
                       badge: 'NETFLIX HERO',
@@ -2548,6 +2513,8 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingHorizontal: 12,
     paddingBottom: 6,
+    zIndex: 999,
+    elevation: 20,
   },
   topBar: {
     flexDirection: 'row',

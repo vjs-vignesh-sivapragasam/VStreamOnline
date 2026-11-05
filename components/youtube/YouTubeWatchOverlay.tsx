@@ -517,9 +517,9 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   return (
     <View style={[styles.fullWatchOverlay, { bottom: bottomTabBarHeight }]} {...screenPanResponder.panHandlers}>
       <StatusBar style="light" />
-      <SafeAreaView style={styles.safeArea} edges={screenFitMode === 'hero' ? [] : ['top']}>
+      <View style={[styles.safeArea, { paddingTop: screenFitMode === 'hero' ? 0 : insets.top }]}>
         {/* Top 16:9 Video Player */}
-        <View {...screenPanResponder.panHandlers}>
+        <View>
           <YouTubeInlinePlayer
             videoId={currentVideo.id}
             title={currentVideo.title}
@@ -1116,7 +1116,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             </View>
           </Pressable>
         </Modal>
-      </SafeAreaView>
+      </View>
     </View>
   );
 };
