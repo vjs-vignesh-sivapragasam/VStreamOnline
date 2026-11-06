@@ -148,6 +148,10 @@ const SettingsScreen = () => {
               badgeText={
                 theme.id === 'purple'
                   ? 'Purple'
+                  : theme.id === 'blue'
+                  ? 'Ocean Blue'
+                  : theme.id === 'green'
+                  ? 'Emerald Green'
                   : theme.id === 'accent'
                   ? 'Apple Music'
                   : theme.name
@@ -165,19 +169,19 @@ const SettingsScreen = () => {
           </View>
         </View>
 
-                {/* Storage & Data Cleanup Section */}
+        {/* Storage & Data Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>STORAGE & DATA CONSUMPTION</Text>
+          <Text style={styles.sectionHeader}>STORAGE & DATA</Text>
           <View style={styles.settingsGroup}>
             <SettingItem
-              title="Storage & Data Cleanup"
-              icon="server-outline"
+              title="Storage & Data"
+              icon="pie-chart-outline"
               subtitle={
                 dataStats
-                  ? `Today: ${dataStats.todayFormatted} • Overall: ${dataStats.overallFormatted}`
-                  : 'Clear cache, downloads & data tracking'
+                  ? `${dataStats.todayFormatted} today • ${dataStats.overallFormatted} total`
+                  : 'Manage storage & clear cache'
               }
-              badgeText={dataStats ? `Today: ${dataStats.todayFormatted}` : undefined}
+              badgeText={dataStats ? dataStats.todayFormatted : undefined}
               badgeColor="#30d158"
               onPress={async () => {
                 if (await isHapticsSupported()) {

@@ -40,7 +40,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [onStatsChange]);
 
   useEffect(() => {
     loadStats();
@@ -54,38 +54,46 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
 
   // 1. Clear Downloads Action
   const handleClearDownloads = () => {
-    if (!stats || (stats.tamilmvDownloadsCount === 0 && stats.youtubeDownloadsCount === 0)) {
+    const tmvCount = stats?.tamilmvDownloadsCount || 0;
+    const ytCount = stats?.youtubeDownloadsCount || 0;
+    if (!stats || (tmvCount === 0 && ytCount === 0)) {
       Alert.alert('No Downloads', 'Your downloads directory is currently empty.');
       return;
     }
 
     Alert.alert(
       'Clear Downloads',
-      `You currently have ${stats.tamilmvDownloadsCount} TamilMV downloads (${storageCleanupService.formatBytes(stats.tamilmvDownloadsBytes)}) and ${stats.youtubeDownloadsCount} YouTube downloads (${storageCleanupService.formatBytes(stats.youtubeDownloadsBytes)}).\n\nWhat would you like to delete?`,
+      `Choose downloads to delete:`,
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'TamilMV Only',
-          onPress: async () => {
-            await triggerHaptic();
-            setActionInProgress('downloads');
-            await storageCleanupService.clearTamilMVDownloads();
-            await loadStats();
-            setActionInProgress(null);
-            Alert.alert('Done', 'TamilMV downloads cleared successfully.');
-          },
-        },
-        {
-          text: 'YouTube Only',
-          onPress: async () => {
-            await triggerHaptic();
-            setActionInProgress('downloads');
-            await storageCleanupService.clearYouTubeDownloads();
-            await loadStats();
-            setActionInProgress(null);
-            Alert.alert('Done', 'YouTube downloads cleared successfully.');
-          },
-        },
+        ...(tmvCount > 0
+          ? [
+              {
+                text: `TamilMV (${tmvCount})`,
+                onPress: async () => {
+                  await triggerHaptic();
+                  setActionInProgress('downloads');
+                  await storageCleanupService.clearTamilMVDownloads();
+                  await loadStats();
+                  setActionInProgress(null);
+                },
+              },
+            ]
+          : []),
+        ...(ytCount > 0
+          ? [
+              {
+                text: `YouTube (${ytCount})`,
+                onPress: async () => {
+                  await triggerHaptic();
+                  setActionInProgress('downloads');
+                  await storageCleanupService.clearYouTubeDownloads();
+                  await loadStats();
+                  setActionInProgress(null);
+                },
+              },
+            ]
+          : []),
         {
           text: 'Clear All',
           style: 'destructive',
@@ -95,7 +103,6 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
             await storageCleanupService.clearAllDownloads();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert('Done', 'All downloaded movies and videos have been deleted.');
           },
         },
       ]
@@ -106,7 +113,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
   const handleClearCache = () => {
     Alert.alert(
       'Clear App Cache',
-      'This will delete cached images, stream buffer chunks, and temporary API metadata. Your saved downloads and settings will NOT be deleted.',
+      'Delete cached images, buffer chunks, and temp metadata? Downloads will not be affected.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -115,53 +122,57 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
           onPress: async () => {
             await triggerHaptic();
             setActionInProgress('cache');
-            const freed = await storageCleanupService.clearCache();
+            await storageCleanupService.clearCache();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert(
-              'Cache Cleared',
-              `Freed ${storageCleanupService.formatBytes(freed)} of temporary cache memory.`
-            );
           },
         },
       ]
     );
   };
 
-  // 3. Clear My List Action
+  // 3. Clear Watchlists Action
   const handleClearMyLists = () => {
-    if (!stats || (stats.tamilmvMyListCount === 0 && stats.youtubeMyListCount === 0)) {
-      Alert.alert('No Items', 'Your watchlists are already empty.');
+    const tmvCount = stats?.tamilmvMyListCount || 0;
+    const ytCount = stats?.youtubeMyListCount || 0;
+    if (!stats || (tmvCount === 0 && ytCount === 0)) {
+      Alert.alert('No Items', 'Your saved watchlists are already empty.');
       return;
     }
 
     Alert.alert(
-      'Clear Watchlists & Saved Items',
-      `You currently have ${stats.tamilmvMyListCount} movies/series in TamilMV Watchlist and ${stats.youtubeMyListCount} saved YouTube videos.\n\nChoose which list to clear:`,
+      'Clear Watchlists',
+      'Select list to clear:',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'TamilMV Only',
-          onPress: async () => {
-            await triggerHaptic();
-            setActionInProgress('mylist');
-            await storageCleanupService.clearTamilMVMyList();
-            await loadStats();
-            setActionInProgress(null);
-            Alert.alert('Done', 'TamilMV Watchlist cleared.');
-          },
-        },
-        {
-          text: 'YouTube Only',
-          onPress: async () => {
-            await triggerHaptic();
-            setActionInProgress('mylist');
-            await storageCleanupService.clearYouTubeMyList();
-            await loadStats();
-            setActionInProgress(null);
-            Alert.alert('Done', 'YouTube Saved List cleared.');
-          },
-        },
+        ...(tmvCount > 0
+          ? [
+              {
+                text: `TamilMV (${tmvCount})`,
+                onPress: async () => {
+                  await triggerHaptic();
+                  setActionInProgress('mylist');
+                  await storageCleanupService.clearTamilMVMyList();
+                  await loadStats();
+                  setActionInProgress(null);
+                },
+              },
+            ]
+          : []),
+        ...(ytCount > 0
+          ? [
+              {
+                text: `YouTube (${ytCount})`,
+                onPress: async () => {
+                  await triggerHaptic();
+                  setActionInProgress('mylist');
+                  await storageCleanupService.clearYouTubeMyList();
+                  await loadStats();
+                  setActionInProgress(null);
+                },
+              },
+            ]
+          : []),
         {
           text: 'Clear Both',
           style: 'destructive',
@@ -171,40 +182,39 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
             await storageCleanupService.clearAllMyLists();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert('Done', 'All watchlists and saved items have been cleared.');
           },
         },
       ]
     );
   };
 
+  // 4. Reset Data Usage
   const handleResetDataTracking = () => {
     Alert.alert(
-      'Reset Data Usage Tracking',
-      'This will reset today and overall streaming data consumption counters back to 0 B.\n\nOffline downloads and cache will NOT be deleted. Do you want to proceed?',
+      'Reset Data Usage',
+      'Reset data consumption counters back to 0 B? Downloads and cache will remain intact.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset Tracking',
+          text: 'Reset',
           style: 'destructive',
           onPress: async () => {
-            await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+            await triggerHaptic();
             setActionInProgress('resetData');
             await dataConsumptionService.resetAll();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert('Done', 'Data consumption counters have been reset.');
           },
         },
       ]
     );
   };
 
-  // 4. Deep Clean / Clear Everything Action
+  // 5. Deep Clean Everything
   const handleClearEverything = () => {
     Alert.alert(
-      'Deep Clean App Memory',
-      'This will delete ALL downloads (TamilMV & YouTube), wipe all temporary cache, and clear your watchlists. The app memory will be completely freed.\n\nAre you sure you want to proceed?',
+      'Deep Clean App Storage',
+      'This will delete all downloads, cache, and watchlists. App data will be completely cleared.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -213,14 +223,10 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
           onPress: async () => {
             await triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
             setActionInProgress('everything');
-            const res = await storageCleanupService.clearEverything();
+            await storageCleanupService.clearEverything();
             await dataConsumptionService.resetAll();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert(
-              'Memory Cleanup Complete',
-              `Successfully freed ${storageCleanupService.formatBytes(res.freedBytes)} of device storage.`
-            );
           },
         },
       ]
@@ -237,636 +243,411 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
     ? storageCleanupService.formatBytes(stats.cacheBytes)
     : '0 B';
 
-  // Calculate percentages for data consumption segment bar
-  const totalTraffic = (dataStats?.overallTotalBytes || 1);
-  const streamPct = Math.max(5, Math.min(85, Math.round(((dataStats?.overallStreamBytes || 0) / totalTraffic) * 100)));
-  const downloadPct = Math.max(5, Math.min(85, Math.round(((dataStats?.overallDownloadBytes || 0) / totalTraffic) * 100)));
-  const cachePct = Math.max(2, 100 - streamPct - downloadPct);
+  const totalUsedBytes = stats?.totalStorageUsedBytes || 0;
+  const downloadBytes = stats?.totalDownloadsBytes || 0;
+  const barMax = Math.max(totalUsedBytes, 1);
+  const downloadBarPct = totalUsedBytes > 0 ? Math.round((downloadBytes / barMax) * 100) : 0;
+  const cacheBarPct = totalUsedBytes > 0 ? Math.max(0, 100 - downloadBarPct) : 0;
+
+  const totalDownloadItems = (stats?.tamilmvDownloadsCount || 0) + (stats?.youtubeDownloadsCount || 0);
+  const totalListItems = (stats?.tamilmvMyListCount || 0) + (stats?.youtubeMyListCount || 0);
 
   return (
-    <View style={styles.cardContainer}>
-      {/* ── 1. Top Section: Data Consumption Analytics ──────────────────────── */}
-      <View style={styles.sectionHeaderRow}>
-        <View style={styles.sectionHeaderLeft}>
-          <View style={[styles.headerIconBox, { backgroundColor: '#30d1581F' }]}>
-            <Ionicons name="cellular-outline" size={20} color="#30d158" />
-          </View>
+    <View style={styles.container}>
+      {/* ── 1. Storage Overview Meter Card ──────────────────────── */}
+      <View style={styles.overviewCard}>
+        <View style={styles.overviewHeader}>
           <View>
-            <Text style={styles.headerTitle}>Data Consumption Analytics</Text>
-            <Text style={styles.headerSubtitle}>
-              Today's usage vs overall app throughput
+            <Text style={styles.overviewSub}>TOTAL STORAGE USED</Text>
+            <Text style={[styles.overviewTitle, { color: theme.primaryLight || theme.primary }]}>
+              {totalUsedFormatted}
             </Text>
           </View>
+          <TouchableOpacity
+            onPress={loadStats}
+            disabled={isLoading}
+            style={styles.refreshBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color={theme.primary} />
+            ) : (
+              <Ionicons name="refresh" size={17} color="#8E8E93" />
+            )}
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          onPress={loadStats}
-          disabled={isLoading}
-          style={styles.refreshBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          activeOpacity={0.7}
-        >
-          {isLoading ? (
-            <ActivityIndicator size="small" color={theme.primary} />
-          ) : (
-            <Ionicons name="refresh" size={17} color="#8E8E93" />
+        {/* Visual Segment Bar */}
+        <View style={styles.barTrack}>
+          {downloadBarPct > 0 && (
+            <View style={[styles.barSegment, { width: `${downloadBarPct}%`, backgroundColor: '#0a84ff' }]} />
           )}
-        </TouchableOpacity>
-      </View>
-
-      {/* Two Prominent KPI Cards: Today vs Overall */}
-      <View style={styles.kpiCardsRow}>
-        {/* Card 1: Today's Consumption */}
-        <View style={[styles.kpiCard, styles.todayCard]}>
-          <View style={styles.kpiTopRow}>
-            <View style={styles.kpiTagWrap}>
-              <View style={[styles.kpiTagDot, { backgroundColor: '#30d158' }]} />
-              <Text style={styles.kpiTagText}>CONSUMED TODAY</Text>
-            </View>
-            <Ionicons name="today-outline" size={15} color="#30d158" />
-          </View>
-
-          <Text style={styles.kpiMainValue}>
-            {dataStats?.todayFormatted || '0 B'}
-          </Text>
-
-          <View style={styles.kpiDivider} />
-
-          <View style={styles.kpiDetailRow}>
-            <View style={styles.kpiDetailItem}>
-              <Text style={styles.kpiDetailLabel}>Streaming</Text>
-              <Text style={styles.kpiDetailVal}>
-                {dataStats ? dataConsumptionService.formatBytes(dataStats.todayStreamBytes) : '0 B'}
-              </Text>
-            </View>
-            <View style={styles.kpiDetailItem}>
-              <Text style={styles.kpiDetailLabel}>Downloads</Text>
-              <Text style={styles.kpiDetailVal}>
-                {dataStats ? dataConsumptionService.formatBytes(dataStats.todayDownloadBytes) : '0 B'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.kpiPlaybackRow}>
-            <Ionicons name="time-outline" size={12} color="rgba(255, 255, 255, 0.55)" />
-            <Text style={styles.kpiPlaybackText}>
-              ~{dataStats?.todayStreamMinutes || 0} mins watched today
-            </Text>
-          </View>
+          {cacheBarPct > 0 && (
+            <View style={[styles.barSegment, { width: `${cacheBarPct}%`, backgroundColor: '#ff9f0a' }]} />
+          )}
         </View>
 
-        {/* Card 2: Overall App Consumption */}
-        <View style={[styles.kpiCard, styles.overallCard, { borderColor: theme.primary + '33' }]}>
-          <View style={styles.kpiTopRow}>
-            <View style={styles.kpiTagWrap}>
-              <View style={[styles.kpiTagDot, { backgroundColor: theme.primary }]} />
-              <Text style={styles.kpiTagText}>OVERALL (ALL TIME)</Text>
-            </View>
-            <Ionicons name="globe-outline" size={15} color={theme.primary} />
-          </View>
-
-          <Text style={[styles.kpiMainValue, { color: theme.primaryLight || theme.primary }]}>
-            {dataStats?.overallFormatted || '0 B'}
-          </Text>
-
-          <View style={styles.kpiDivider} />
-
-          <View style={styles.kpiDetailRow}>
-            <View style={styles.kpiDetailItem}>
-              <Text style={styles.kpiDetailLabel}>All Streams</Text>
-              <Text style={styles.kpiDetailVal}>
-                {dataStats ? dataConsumptionService.formatBytes(dataStats.overallStreamBytes) : '0 B'}
-              </Text>
-            </View>
-            <View style={styles.kpiDetailItem}>
-              <Text style={styles.kpiDetailLabel}>Disk Storage</Text>
-              <Text style={styles.kpiDetailVal}>{totalUsedFormatted}</Text>
-            </View>
-          </View>
-
-          <View style={styles.kpiPlaybackRow}>
-            <Ionicons name="play-circle-outline" size={12} color="rgba(255, 255, 255, 0.55)" />
-            <Text style={styles.kpiPlaybackText}>
-              ~{dataStats?.overallStreamMinutes || 0} mins total streamed
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Segmented Traffic Distribution Bar */}
-      <View style={styles.distributionContainer}>
-        <View style={styles.distributionHeader}>
-          <Text style={styles.distributionTitle}>Traffic Distribution Breakdown</Text>
-          <Text style={styles.distributionSub}>All-time network throughput</Text>
-        </View>
-
-        <View style={styles.segmentTrack}>
-          <View style={[styles.segmentFill, { width: `${streamPct}%`, backgroundColor: theme.primary }]} />
-          <View style={[styles.segmentFill, { width: `${downloadPct}%`, backgroundColor: '#30d158' }]} />
-          <View style={[styles.segmentFill, { width: `${cachePct}%`, backgroundColor: '#ff9f0a' }]} />
-        </View>
-
-        <View style={styles.segmentLegendRow}>
+        {/* Legend */}
+        <View style={styles.legendRow}>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: theme.primary }]} />
-            <Text style={styles.legendText}>
-              Streaming ({dataStats ? dataConsumptionService.formatBytes(dataStats.overallStreamBytes) : '0 B'})
-            </Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#30d158' }]} />
-            <Text style={styles.legendText}>
-              Downloads ({dataStats ? dataConsumptionService.formatBytes(dataStats.overallDownloadBytes) : '0 B'})
-            </Text>
+            <View style={[styles.legendDot, { backgroundColor: '#0a84ff' }]} />
+            <Text style={styles.legendLabel}>Downloads</Text>
+            <Text style={styles.legendValue}>{downloadsFormatted}</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: '#ff9f0a' }]} />
-            <Text style={styles.legendText}>
-              Cache ({cacheFormatted})
-            </Text>
+            <Text style={styles.legendLabel}>Cache</Text>
+            <Text style={styles.legendValue}>{cacheFormatted}</Text>
           </View>
         </View>
       </View>
 
-      {/* ── 2. Device Storage & Local Disk Memory ────────────────────────────── */}
-      <View style={styles.storageSectionDivider} />
-
-      <View style={styles.sectionHeaderRow}>
-        <View style={styles.sectionHeaderLeft}>
-          <View style={[styles.headerIconBox, { backgroundColor: theme.primary + '1F' }]}>
-            <Ionicons name="pie-chart-outline" size={20} color={theme.primary} />
+      {/* ── 2. Network Data Usage (Today & Total) ────────────────── */}
+      <View style={styles.dataRow}>
+        <View style={styles.dataCard}>
+          <View style={styles.dataCardHeader}>
+            <Ionicons name="today-outline" size={14} color="#30d158" />
+            <Text style={styles.dataCardLabel}>Today's Data</Text>
           </View>
-          <View>
-            <Text style={styles.headerTitle}>Device Storage & Memory Cleanup</Text>
-            <Text style={styles.headerSubtitle}>Manage offline media, cache & lists</Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Storage Summary Big Pill */}
-      <View style={[styles.storageBanner, { borderColor: theme.primary + '33', backgroundColor: theme.primary + '0D' }]}>
-        <View style={styles.storageBannerLeft}>
-          <Text style={styles.storageBannerLabel}>TOTAL DISK STORAGE USED</Text>
-          <Text style={[styles.storageBannerValue, { color: theme.primaryLight || theme.primary }]}>
-            {totalUsedFormatted}
-          </Text>
-        </View>
-        <View style={styles.storageBannerRight}>
-          <View style={styles.storagePillRow}>
-            <View style={[styles.statDot, { backgroundColor: '#30d158' }]} />
-            <Text style={styles.statPillText}>Downloads: {downloadsFormatted}</Text>
-          </View>
-          <View style={styles.storagePillRow}>
-            <View style={[styles.statDot, { backgroundColor: '#ff9f0a' }]} />
-            <Text style={styles.statPillText}>Cache: {cacheFormatted}</Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Granular Breakdown Badges */}
-      <View style={styles.breakdownGrid}>
-        <View style={styles.breakdownItem}>
-          <Text style={styles.breakdownLabel}>TamilMV Downloads</Text>
-          <Text style={styles.breakdownValue}>
-            {stats ? `${stats.tamilmvDownloadsCount} items` : '0'} ({stats ? storageCleanupService.formatBytes(stats.tamilmvDownloadsBytes) : '0 B'})
+          <Text style={styles.dataCardValue}>{dataStats?.todayFormatted || '0 B'}</Text>
+          <Text style={styles.dataCardSub}>
+            ~{dataStats?.todayStreamMinutes || 0}m streamed
           </Text>
         </View>
 
-        <View style={styles.breakdownItem}>
-          <Text style={styles.breakdownLabel}>YouTube Downloads</Text>
-          <Text style={styles.breakdownValue}>
-            {stats ? `${stats.youtubeDownloadsCount} items` : '0'} ({stats ? storageCleanupService.formatBytes(stats.youtubeDownloadsBytes) : '0 B'})
+        <View style={styles.dataCard}>
+          <View style={styles.dataCardHeader}>
+            <Ionicons name="globe-outline" size={14} color={theme.primary} />
+            <Text style={styles.dataCardLabel}>Total Usage</Text>
+          </View>
+          <Text style={[styles.dataCardValue, { color: theme.primaryLight || theme.primary }]}>
+            {dataStats?.overallFormatted || '0 B'}
           </Text>
-        </View>
-
-        <View style={styles.breakdownItem}>
-          <Text style={styles.breakdownLabel}>TamilMV Watchlist</Text>
-          <Text style={styles.breakdownValue}>{stats?.tamilmvMyListCount || 0} movies</Text>
-        </View>
-
-        <View style={styles.breakdownItem}>
-          <Text style={styles.breakdownLabel}>YouTube Saved</Text>
-          <Text style={styles.breakdownValue}>{stats?.youtubeMyListCount || 0} videos</Text>
+          <Text style={styles.dataCardSub}>
+            ~{dataStats?.overallStreamMinutes || 0}m all-time
+          </Text>
         </View>
       </View>
 
-      {/* ── 3. Action Buttons Grid ─────────────────────────────────────────── */}
-      <View style={styles.actionsContainer}>
-        {/* 1. Clear All Downloads Button */}
+      {/* ── 3. Manage & Cleanup List ─────────────────────────────── */}
+      <Text style={styles.sectionHeading}>CLEANUP</Text>
+      <View style={styles.groupedList}>
+        {/* Downloads */}
         <TouchableOpacity
-          style={[styles.actionBtn, { borderColor: theme.primary + '3A', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}
+          style={styles.listItem}
           onPress={handleClearDownloads}
           disabled={actionInProgress !== null}
           activeOpacity={0.7}
         >
-          <View style={[styles.actionIconWrap, { backgroundColor: theme.primary + '18' }]}>
-            {actionInProgress === 'downloads' ? (
-              <ActivityIndicator size="small" color={theme.primary} />
-            ) : (
-              <Ionicons name="arrow-down-circle-outline" size={18} color={theme.primary} />
-            )}
+          <View style={[styles.itemIcon, { backgroundColor: '#0a84ff1C' }]}>
+            <Ionicons name="arrow-down-circle" size={18} color="#0a84ff" />
           </View>
-          <View style={styles.actionTextWrap}>
-            <Text style={styles.actionBtnTitle}>Clear All Downloads</Text>
-            <Text style={styles.actionBtnSub}>Delete offline TamilMV & YouTube files</Text>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>Downloads</Text>
+            <Text style={styles.itemSub}>
+              {totalDownloadItems > 0 ? `${totalDownloadItems} files • ${downloadsFormatted}` : 'Empty'}
+            </Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
+          {actionInProgress === 'downloads' ? (
+            <ActivityIndicator size="small" color="#0a84ff" />
+          ) : (
+            <View style={styles.actionPill}>
+              <Text style={styles.actionPillText}>Clear</Text>
+            </View>
+          )}
         </TouchableOpacity>
 
-        {/* 2. Clear Cache Button */}
+        <View style={styles.listDivider} />
+
+        {/* Cache */}
         <TouchableOpacity
-          style={[styles.actionBtn, { borderColor: theme.primary + '3A', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}
+          style={styles.listItem}
           onPress={handleClearCache}
           disabled={actionInProgress !== null}
           activeOpacity={0.7}
         >
-          <View style={[styles.actionIconWrap, { backgroundColor: theme.primary + '18' }]}>
-            {actionInProgress === 'cache' ? (
-              <ActivityIndicator size="small" color={theme.primary} />
-            ) : (
-              <Ionicons name="trash-bin-outline" size={18} color={theme.primary} />
-            )}
+          <View style={[styles.itemIcon, { backgroundColor: '#ff9f0a1C' }]}>
+            <Ionicons name="trash-bin" size={18} color="#ff9f0a" />
           </View>
-          <View style={styles.actionTextWrap}>
-            <Text style={styles.actionBtnTitle}>Clear App Cache</Text>
-            <Text style={styles.actionBtnSub}>Free temporary image & stream buffer memory</Text>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>App Cache</Text>
+            <Text style={styles.itemSub}>{cacheFormatted} temporary buffer</Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
+          {actionInProgress === 'cache' ? (
+            <ActivityIndicator size="small" color="#ff9f0a" />
+          ) : (
+            <View style={styles.actionPill}>
+              <Text style={styles.actionPillText}>Clear</Text>
+            </View>
+          )}
         </TouchableOpacity>
 
-        {/* 3. Clear My List Button */}
+        <View style={styles.listDivider} />
+
+        {/* Watchlists */}
         <TouchableOpacity
-          style={[styles.actionBtn, { borderColor: theme.primary + '3A', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}
+          style={styles.listItem}
           onPress={handleClearMyLists}
           disabled={actionInProgress !== null}
           activeOpacity={0.7}
         >
-          <View style={[styles.actionIconWrap, { backgroundColor: theme.primary + '18' }]}>
-            {actionInProgress === 'mylist' ? (
-              <ActivityIndicator size="small" color={theme.primary} />
-            ) : (
-              <Ionicons name="bookmark-outline" size={18} color={theme.primary} />
-            )}
+          <View style={[styles.itemIcon, { backgroundColor: '#af52de1C' }]}>
+            <Ionicons name="bookmark" size={18} color="#af52de" />
           </View>
-          <View style={styles.actionTextWrap}>
-            <Text style={styles.actionBtnTitle}>Clear Watchlists & My List</Text>
-            <Text style={styles.actionBtnSub}>Reset saved TamilMV & YouTube lists</Text>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>Saved Watchlists</Text>
+            <Text style={styles.itemSub}>
+              {totalListItems > 0 ? `${totalListItems} saved items` : 'Empty'}
+            </Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
+          {actionInProgress === 'mylist' ? (
+            <ActivityIndicator size="small" color="#af52de" />
+          ) : (
+            <View style={styles.actionPill}>
+              <Text style={styles.actionPillText}>Clear</Text>
+            </View>
+          )}
         </TouchableOpacity>
 
-                {/* Reset Data Tracking Button */}
+        <View style={styles.listDivider} />
+
+        {/* Reset Data Counters */}
         <TouchableOpacity
-          style={[styles.actionBtn, { borderColor: '#30d1583A', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}
+          style={styles.listItem}
           onPress={handleResetDataTracking}
           disabled={actionInProgress !== null}
           activeOpacity={0.7}
         >
-          <View style={[styles.actionIconWrap, { backgroundColor: '#30d15818' }]}>
-            {actionInProgress === 'resetData' ? (
-              <ActivityIndicator size="small" color="#30d158" />
-            ) : (
-              <Ionicons name="refresh-circle-outline" size={18} color="#30d158" />
-            )}
+          <View style={[styles.itemIcon, { backgroundColor: '#30d1581C' }]}>
+            <Ionicons name="refresh-circle" size={18} color="#30d158" />
           </View>
-          <View style={styles.actionTextWrap}>
-            <Text style={styles.actionBtnTitle}>Reset Data Consumption Counters</Text>
-            <Text style={styles.actionBtnSub}>Reset today & overall streaming throughput counters</Text>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>Reset Data Tracking</Text>
+            <Text style={styles.itemSub}>Clear usage stats back to 0 B</Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
-        </TouchableOpacity>
-
-        {/* 4. Master Deep Clean Button */}
-        <TouchableOpacity
-          style={[
-            styles.deepCleanBtn,
-            { backgroundColor: '#e50914' },
-            actionInProgress === 'everything' && { opacity: 0.7 },
-          ]}
-          onPress={handleClearEverything}
-          disabled={actionInProgress !== null}
-          activeOpacity={0.8}
-        >
-          {actionInProgress === 'everything' ? (
-            <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+          {actionInProgress === 'resetData' ? (
+            <ActivityIndicator size="small" color="#30d158" />
           ) : (
-            <Ionicons name="sparkles" size={16} color="#ffffff" style={{ marginRight: 8 }} />
+            <View style={[styles.actionPill, styles.actionPillGreen]}>
+              <Text style={[styles.actionPillText, { color: '#30d158' }]}>Reset</Text>
+            </View>
           )}
-          <Text style={styles.deepCleanBtnText}>Deep Clean (Wipe All App Data)</Text>
         </TouchableOpacity>
       </View>
+
+      {/* ── 4. Deep Clean Button (Subtle & Clean) ─────────────────── */}
+      <TouchableOpacity
+        style={styles.deepCleanBtn}
+        onPress={handleClearEverything}
+        disabled={actionInProgress !== null}
+        activeOpacity={0.75}
+      >
+        {actionInProgress === 'everything' ? (
+          <ActivityIndicator size="small" color="#ff453a" />
+        ) : (
+          <>
+            <Ionicons name="sparkles-outline" size={16} color="#ff453a" />
+            <Text style={styles.deepCleanText}>Deep Clean (Wipe All App Storage)</Text>
+          </>
+        )}
+      </TouchableOpacity>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  cardContainer: {
-    backgroundColor: 'rgba(18, 18, 20, 0.98)',
+  container: {
+    paddingVertical: 4,
+    gap: 14,
+  },
+
+  /* Overview Card */
+  overviewCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  sectionHeaderRow: {
+  overviewHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 14,
   },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  overviewSub: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#8E8E93',
+    letterSpacing: 0.6,
+    marginBottom: 4,
   },
-  headerIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
+  overviewTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  refreshBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.2,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 2,
-  },
-  refreshBtn: {
-    padding: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-  },
-
-  // ── Dual KPI Stat Cards (Today vs Overall) ─────────────────────────────────
-  kpiCardsRow: {
+  barTrack: {
+    height: 7,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 4,
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
-  },
-  kpiCard: {
-    flex: 1,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-  },
-  todayCard: {
-    backgroundColor: 'rgba(48, 209, 88, 0.07)',
-    borderColor: 'rgba(48, 209, 88, 0.28)',
-  },
-  overallCard: {
-    backgroundColor: 'rgba(83, 90, 255, 0.07)',
-  },
-  kpiTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  kpiTagWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  kpiTagDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  kpiTagText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#8E8E93',
-    letterSpacing: 0.5,
-  },
-  kpiMainValue: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#30d158',
-    letterSpacing: -0.5,
-    marginVertical: 2,
-  },
-  kpiDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
-    marginVertical: 8,
-  },
-  kpiDetailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  kpiDetailItem: {
-    gap: 2,
-  },
-  kpiDetailLabel: {
-    fontSize: 10,
-    color: '#8E8E93',
-  },
-  kpiDetailVal: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  kpiPlaybackRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 8,
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  kpiPlaybackText: {
-    fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.65)',
-    fontWeight: '500',
-  },
-
-  // ── Traffic Distribution Segment Bar ───────────────────────────────────────
-  distributionContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    marginBottom: 14,
-  },
-  distributionHeader: {
-    marginBottom: 8,
-  },
-  distributionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  distributionSub: {
-    fontSize: 10,
-    color: '#8E8E93',
-    marginTop: 1,
-  },
-  segmentTrack: {
-    flexDirection: 'row',
-    height: 6,
-    borderRadius: 3,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    marginVertical: 8,
+    marginBottom: 12,
   },
-  segmentFill: {
+  barSegment: {
     height: '100%',
   },
-  segmentLegendRow: {
+  legendRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginTop: 4,
+    alignItems: 'center',
+    gap: 18,
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
   },
   legendDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  legendText: {
-    fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.75)',
-  },
-
-  storageSectionDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    marginVertical: 14,
-  },
-
-  // ── Storage Banner ─────────────────────────────────────────────────────────
-  storageBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 14,
-  },
-  storageBannerLeft: {
-    gap: 2,
-  },
-  storageBannerLabel: {
-    fontSize: 10,
-    fontWeight: '700',
+  legendLabel: {
+    fontSize: 12,
     color: '#8E8E93',
-    letterSpacing: 0.8,
+    fontWeight: '500',
   },
-  storageBannerValue: {
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: -0.5,
+  legendValue: {
+    fontSize: 12,
+    color: '#ffffff',
+    fontWeight: '600',
   },
-  storageBannerRight: {
-    gap: 4,
-    alignItems: 'flex-end',
+
+  /* Data KPI Cards */
+  dataRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
-  storagePillRow: {
+  dataCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  dataCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginBottom: 6,
   },
-  statDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statPillText: {
-    fontSize: 11,
+  dataCardLabel: {
+    fontSize: 12,
     fontWeight: '600',
-    color: '#D1D1D6',
-  },
-
-  // ── Breakdown Grid ─────────────────────────────────────────────────────────
-  breakdownGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 14,
-  },
-  breakdownItem: {
-    flex: 1,
-    minWidth: '47%',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  breakdownLabel: {
-    fontSize: 11,
     color: '#8E8E93',
+  },
+  dataCardValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
     marginBottom: 2,
   },
-  breakdownValue: {
+  dataCardSub: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontWeight: '500',
+  },
+
+  /* Grouped List */
+  sectionHeading: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#8E8E93',
+    letterSpacing: 0.6,
+    marginLeft: 4,
+    marginTop: 2,
+  },
+  groupedList: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    overflow: 'hidden',
+  },
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  itemIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemContent: {
+    flex: 1,
+  },
+  itemTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 2,
+  },
+  itemSub: {
+    fontSize: 12,
+    color: '#8E8E93',
+  },
+  listDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    marginLeft: 58,
+  },
+  actionPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  actionPillGreen: {
+    backgroundColor: 'rgba(48, 209, 88, 0.12)',
+  },
+  actionPillText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#ffffff',
   },
 
-  // ── Action Buttons ─────────────────────────────────────────────────────────
-  actionsContainer: {
-    gap: 8,
-  },
-  actionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  actionIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  actionTextWrap: {
-    flex: 1,
-  },
-  actionBtnTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  actionBtnSub: {
-    fontSize: 11,
-    color: '#8E8E93',
-    marginTop: 1,
-  },
+  /* Deep Clean */
   deepCleanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 10,
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 69, 58, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.22)',
     marginTop: 4,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 3,
   },
-  deepCleanBtnText: {
-    color: '#ffffff',
-    fontSize: 14,
+  deepCleanText: {
+    fontSize: 13,
     fontWeight: '700',
-    letterSpacing: 0.2,
+    color: '#ff453a',
   },
 });

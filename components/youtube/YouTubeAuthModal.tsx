@@ -170,7 +170,25 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-    Linking.openURL(deviceCodeData.verification_url);
+
+    let targetUrl = deviceCodeData.verification_url;
+    if (deviceCodeData.user_code && !targetUrl.includes('user_code=')) {
+      const sep = targetUrl.includes('?') ? '&' : '?';
+      targetUrl = `${targetUrl}${sep}user_code=${encodeURIComponent(deviceCodeData.user_code)}`;
+    }
+
+    try {
+      await Linking.openURL(targetUrl);
+    } catch {
+      try {
+        await Linking.openURL(deviceCodeData.verification_url);
+      } catch (err) {
+        Alert.alert(
+          'Verification URL',
+          `Please open your browser, visit ${deviceCodeData.verification_url} and enter code: ${deviceCodeData.user_code}`
+        );
+      }
+    }
   };
 
   const handleLogout = () => {

@@ -45,11 +45,8 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
   // Fallback items if details are still fetching or offline
   const fallbackFormats = React.useMemo(() => {
     const videoFormats: YouTubeFormatOption[] = [
-      { itag: 137, quality: '1080p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'Full HD (1080p)', hasAudio: true, hasVideo: true, type: 'video' },
-      { itag: 22, quality: '720p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'HD (720p)', hasAudio: true, hasVideo: true, type: 'video' },
-      { itag: 135, quality: '480p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'SD (480p)', hasAudio: true, hasVideo: true, type: 'video' },
-      { itag: 18, quality: '360p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'Standard (360p)', hasAudio: true, hasVideo: true, type: 'video' },
-      { itag: 133, quality: '240p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'Small (240p)', hasAudio: true, hasVideo: true, type: 'video' },
+      { itag: 22, quality: '720p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'HD (720p with Audio)', hasAudio: true, hasVideo: true, type: 'video' },
+      { itag: 18, quality: '360p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'Standard (360p with Audio)', hasAudio: true, hasVideo: true, type: 'video' },
     ];
     const audioFormats: YouTubeFormatOption[] = [
       { itag: 140, quality: '128 kbps', container: 'mp3', mimeType: 'audio/mp4', url: '', sizeFormatted: 'High Quality MP3', hasAudio: true, hasVideo: false, type: 'audio' },
@@ -64,15 +61,20 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
     const map = new Map<string, YouTubeFormatOption>();
 
     if (videoDetails?.formats) {
-      // First add progressive formats (which have video + audio)
+      // First add progressive formats (which have video + audio combined)
       for (const f of videoDetails.formats.progressive || []) {
-        const q = f.quality || '360p';
-        map.set(q, f);
+        const q = f.quality || (f.itag === 22 ? '720p' : '360p');
+        map.set(q, {
+          ...f,
+          hasAudio: true,
+          hasVideo: true,
+          sizeFormatted: f.sizeFormatted || `${q} (Video + Audio)`,
+        });
       }
-      // Next add video adaptive formats (high res like 1080p, 720p, etc.)
+      // Also add videoAdaptive formats for qualities not yet mapped (e.g. 1080p, 480p, etc.)
       for (const f of videoDetails.formats.videoAdaptive || []) {
         const q = f.quality || 'Standard';
-        if (!map.has(q) || (f.container === 'mp4' && map.get(q)?.container !== 'mp4')) {
+        if (!map.has(q)) {
           map.set(q, f);
         }
       }
@@ -256,15 +258,7 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
                   <Text style={styles.formatSize}>{f.sizeFormatted || 'Standard file size'}</Text>
                 </View>
                 <View style={styles.formatActionsRow}>
-                  {onPlayFormat && (
-                    <TouchableOpacity
-                      style={styles.actionIconButton}
-                      onPress={() => onPlayFormat(f)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="play-circle" size={28} color="#ffffff" />
-                    </TouchableOpacity>
-                  )}
+
                   <TouchableOpacity
                     style={styles.actionIconButton}
                     onPress={() => onSelectFormat(f)}
@@ -295,15 +289,7 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
                   <Text style={styles.formatSize}>{f.sizeFormatted || 'Audio stream'}</Text>
                 </View>
                 <View style={styles.formatActionsRow}>
-                  {onPlayFormat && (
-                    <TouchableOpacity
-                      style={styles.actionIconButton}
-                      onPress={() => onPlayFormat(f)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="play-circle" size={28} color="#00ffff" />
-                    </TouchableOpacity>
-                  )}
+
                   <TouchableOpacity
                     style={styles.actionIconButton}
                     onPress={() => onSelectFormat(f)}

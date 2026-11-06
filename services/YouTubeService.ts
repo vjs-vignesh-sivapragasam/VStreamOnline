@@ -14,6 +14,22 @@ export interface YouTubeVideoItem {
   isShort?: boolean;
 }
 
+export function formatPublishedTime(published?: string): string {
+  if (!published || typeof published !== 'string') return '';
+  const trimmed = published.trim();
+  if (!trimmed) return '';
+  if (trimmed.toUpperCase() === 'LIVE') return '🔴 LIVE';
+
+  return trimmed
+    .replace(/\b(\d+)\s*s\s+ago\b/i, (_, n) => `${n} ${n === '1' ? 'second' : 'seconds'} ago`)
+    .replace(/\b(\d+)\s*m\s+ago\b/i, (_, n) => `${n} ${n === '1' ? 'minute' : 'minutes'} ago`)
+    .replace(/\b(\d+)\s*h\s+ago\b/i, (_, n) => `${n} ${n === '1' ? 'hour' : 'hours'} ago`)
+    .replace(/\b(\d+)\s*d\s+ago\b/i, (_, n) => `${n} ${n === '1' ? 'day' : 'days'} ago`)
+    .replace(/\b(\d+)\s*w\s+ago\b/i, (_, n) => `${n} ${n === '1' ? 'week' : 'weeks'} ago`)
+    .replace(/\b(\d+)\s*mo\s+ago\b/i, (_, n) => `${n} ${n === '1' ? 'month' : 'months'} ago`)
+    .replace(/\b(\d+)\s*y\s+ago\b/i, (_, n) => `${n} ${n === '1' ? 'year' : 'years'} ago`);
+}
+
 export interface YouTubeSearchResult {
   videos: YouTubeVideoItem[];
   continuationToken?: string;
@@ -375,12 +391,22 @@ class YouTubeService {
 
           const v = item.videoRenderer || item.compactVideoRenderer;
           if (v && v.videoId) {
+            const isShort =
+              !!v.navigationEndpoint?.reelWatchEndpoint ||
+              v.thumbnailOverlays?.some(
+                (o: any) =>
+                  o?.thumbnailOverlayTimeStatusRenderer?.style === 'SHORTS' ||
+                  o?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText?.toUpperCase() === 'SHORTS'
+              );
+            if (isShort) continue;
+
             const title =
               v.title?.runs?.[0]?.text ||
               v.title?.simpleText ||
               v.headline?.runs?.[0]?.text ||
               v.headline?.simpleText ||
               'Untitled';
+            if (title.toLowerCase().includes('#short')) continue;
             const channel =
               v.ownerText?.runs?.[0]?.text ||
               v.shortBylineText?.runs?.[0]?.text ||
@@ -396,10 +422,20 @@ class YouTubeService {
               v.shortViewCountText?.simpleText ||
               v.shortViewCountText?.runs?.[0]?.text ||
               '';
-            const published =
+            const isLive = v.badges?.some((b: any) =>
+              b.metadataBadgeRenderer?.label?.toLowerCase().includes('live') ||
+              b.metadataBadgeRenderer?.style?.toLowerCase().includes('live')
+            ) || v.style === 'BADGE_STYLE_TYPE_LIVE_NOW';
+
+            let rawPublished =
               v.publishedTimeText?.simpleText ||
-              v.publishedTimeText?.runs?.[0]?.text ||
+              v.publishedTimeText?.runs?.map((r: any) => r.text).join('') ||
               '';
+
+            if (!rawPublished && isLive) {
+              rawPublished = 'LIVE';
+            }
+            const published = formatPublishedTime(rawPublished);
 
             videos.push({
               id: v.videoId,
@@ -483,12 +519,22 @@ class YouTubeService {
 
           const v = sub.videoRenderer || sub.compactVideoRenderer;
           if (v && v.videoId) {
+            const isShort =
+              !!v.navigationEndpoint?.reelWatchEndpoint ||
+              v.thumbnailOverlays?.some(
+                (o: any) =>
+                  o?.thumbnailOverlayTimeStatusRenderer?.style === 'SHORTS' ||
+                  o?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText?.toUpperCase() === 'SHORTS'
+              );
+            if (isShort) continue;
+
             const title =
               v.title?.runs?.[0]?.text ||
               v.title?.simpleText ||
               v.headline?.runs?.[0]?.text ||
               v.headline?.simpleText ||
               'Untitled';
+            if (title.toLowerCase().includes('#short')) continue;
             const channel =
               v.ownerText?.runs?.[0]?.text ||
               v.shortBylineText?.runs?.[0]?.text ||
@@ -504,10 +550,20 @@ class YouTubeService {
               v.shortViewCountText?.simpleText ||
               v.shortViewCountText?.runs?.[0]?.text ||
               '';
-            const published =
+            const isLive = v.badges?.some((b: any) =>
+              b.metadataBadgeRenderer?.label?.toLowerCase().includes('live') ||
+              b.metadataBadgeRenderer?.style?.toLowerCase().includes('live')
+            ) || v.style === 'BADGE_STYLE_TYPE_LIVE_NOW';
+
+            let rawPublished =
               v.publishedTimeText?.simpleText ||
-              v.publishedTimeText?.runs?.[0]?.text ||
+              v.publishedTimeText?.runs?.map((r: any) => r.text).join('') ||
               '';
+
+            if (!rawPublished && isLive) {
+              rawPublished = 'LIVE';
+            }
+            const published = formatPublishedTime(rawPublished);
 
             videos.push({
               id: v.videoId,
@@ -539,12 +595,17 @@ class YouTubeService {
   async getVideoDetails(videoId: string, fallbackItem?: YouTubeVideoItem | null): Promise<YouTubeVideoDetails> {
     const liveStream = this.liveStreamMap.get(videoId);
 
-    // 1. Quick check if local engine (port 11472, 11470, or PC LAN IP) is responsive
+    // 1. Ensure the embedded engine on 11470 is booting/running on mobile
+    if (Platform.OS !== 'web') {
+      ensureEmbeddedServerRunning().catch(() => {});
+    }
+
+    // 2. Check active or candidate local engines (port 11470, 11472, or PC LAN IP)
     const localCandidates = getEngineCandidates();
     for (const baseUrl of localCandidates.slice(0, 3)) {
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 1200);
+        const timer = setTimeout(() => controller.abort(), 3000);
         const res = await fetch(`${baseUrl}/yt/info?v=${encodeURIComponent(videoId)}`, {
           signal: controller.signal,
         }).finally(() => clearTimeout(timer));
@@ -866,40 +927,110 @@ class YouTubeService {
   }
 
   /**
-   * Resolves a direct downloadable HTTPS stream URL for a given format
+   * Resolves a direct downloadable HTTPS stream URL for a given format.
+   * GUARANTEES that video downloads ALWAYS contain an audio track!
    */
   async resolveDownloadStreamUrl(videoId: string, format: YouTubeFormatOption): Promise<string> {
+    const isAudio = format.type === 'audio';
+
+    // 1. Audio Downloads (MP3 / M4A)
+    if (isAudio) {
+      if (format.url && format.url.startsWith('http') && !format.hasVideo) {
+        return format.url;
+      }
+      try {
+        const details = await this.getVideoDetails(videoId);
+        const audioList = details.formats?.audioAdaptive || [];
+        const itagMatch = audioList.find((f) => f.itag === format.itag && f.url && f.url.startsWith('http'));
+        if (itagMatch?.url) return itagMatch.url;
+        const audioFormat = audioList.find((f) => f.url && f.url.startsWith('http'));
+        if (audioFormat?.url) return audioFormat.url;
+        const progFormat = (details.formats?.progressive || []).find((f) => f.url && f.url.startsWith('http'));
+        if (progFormat?.url) return progFormat.url;
+      } catch {}
+
+      try {
+        const isEngineUp = await this.pingEngine(1500);
+        if (isEngineUp) {
+          const base = this.getActiveBaseUrl();
+          return `${base}/yt/download?v=${encodeURIComponent(videoId)}&type=audio&itag=${format.itag || ''}&quality=${encodeURIComponent(format.quality || '')}`;
+        }
+      } catch {}
+
+      if (format.url && format.url.startsWith('http')) {
+        return format.url;
+      }
+      if (format.proxyUrl && format.proxyUrl.startsWith('http')) {
+        return format.proxyUrl;
+      }
+
+      throw new Error('Unable to resolve audio stream URL. Please check connection and try again.');
+    }
+
+    // 2. Video Downloads (MP4) - Match User's Chosen Resolution & Itag
+    const cleanQ = format.quality ? format.quality.replace(/\D/g, '') : '';
+    const targetItag = format.itag;
+
+    // 2.1 Direct URL if the format object already contains one
     if (format.url && format.url.startsWith('http')) {
+      console.log(`[YouTubeService] 🎯 Using direct URL for selected format (${format.quality}, itag ${format.itag})`);
       return format.url;
     }
+
+    // 2.2 Search videoDetails for the requested format by itag or quality
+    try {
+      const details = await this.getVideoDetails(videoId);
+      const allFormats = [
+        ...(details.formats?.progressive || []),
+        ...(details.formats?.videoAdaptive || []),
+      ];
+
+      // Exact itag match
+      if (targetItag) {
+        const itagMatch = allFormats.find((f) => f.itag === targetItag && f.url && f.url.startsWith('http'));
+        if (itagMatch?.url) {
+          console.log(`[YouTubeService] 🎯 Found exact itag ${targetItag} match (${itagMatch.quality}) for download`);
+          return itagMatch.url;
+        }
+      }
+
+      // Resolution match (e.g. 1080, 720, 480, 360, 240, 144)
+      if (cleanQ) {
+        const qualityMatch =
+          (details.formats?.progressive || []).find((f) => f.quality.includes(cleanQ) && f.url && f.url.startsWith('http')) ||
+          (details.formats?.videoAdaptive || []).find((f) => f.quality.includes(cleanQ) && f.url && f.url.startsWith('http')) ||
+          allFormats.find((f) => f.quality.includes(cleanQ) && f.url && f.url.startsWith('http'));
+
+        if (qualityMatch?.url) {
+          console.log(`[YouTubeService] 🎯 Found quality match for ${cleanQ}p (${qualityMatch.quality}, itag ${qualityMatch.itag}) for download`);
+          return qualityMatch.url;
+        }
+      }
+    } catch (err) {
+      console.warn('[YouTubeService] Error resolving video format from details:', err);
+    }
+
+    // 2.3 Route through backend engine with exact itag and quality parameters
+    try {
+      const isEngineUp = await this.pingEngine(1500);
+      if (isEngineUp) {
+        const base = this.getActiveBaseUrl();
+        const downloadUrl = `${base}/yt/download?v=${encodeURIComponent(videoId)}&type=video&itag=${format.itag || ''}&quality=${encodeURIComponent(format.quality || '')}`;
+        console.log(`[YouTubeService] 🚀 Routing download for ${format.quality} (itag ${format.itag}) through engine: ${downloadUrl}`);
+        return downloadUrl;
+      }
+    } catch {}
+
     if (format.proxyUrl && format.proxyUrl.startsWith('http')) {
       return format.proxyUrl;
     }
 
     const liveStream = this.liveStreamMap.get(videoId);
-    if (liveStream?.streamUrl) {
+    if (liveStream?.streamUrl && liveStream.streamUrl.startsWith('http')) {
       return liveStream.streamUrl;
     }
 
-    try {
-      const publicDetails = await this.fetchFromPublicInstances(videoId);
-      if (publicDetails) {
-        if (format.type === 'audio') {
-          const audio = publicDetails.formats.audioAdaptive[0] || publicDetails.formats.progressive[0];
-          if (audio?.url) return audio.url;
-        } else {
-          const cleanQ = format.quality.replace(/\D/g, '');
-          const match =
-            publicDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQ)) ||
-            publicDetails.formats.progressive.find((f) => f.quality.includes(cleanQ)) ||
-            publicDetails.formats.videoAdaptive[0] ||
-            publicDetails.formats.progressive[0];
-          if (match?.url) return match.url;
-        }
-      }
-    } catch {}
-
-    return '';
+    throw new Error('Unable to resolve video download URL. Please check connection and try again.');
   }
 
   getActiveBaseUrl(): string {
@@ -990,6 +1121,9 @@ class YouTubeService {
   async startAuth(timeoutMs = 12000): Promise<YouTubeAuthStartResponse> {
     try {
       const baseUrl = await this.resolveActiveBaseUrl(2000);
+      if (!baseUrl) {
+        return { status: 'error', error: 'YouTube engine is not connected. Please ensure the local streaming service is running.' };
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(`${baseUrl}/yt/auth/start`, {
@@ -1009,6 +1143,7 @@ class YouTubeService {
   async logout(timeoutMs = 3000): Promise<boolean> {
     try {
       const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      if (!baseUrl) return false;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(`${baseUrl}/yt/auth/logout`, {
@@ -1035,7 +1170,10 @@ class YouTubeService {
 
       if (res.ok) {
         const data = await res.json();
-        return { videos: data.results || [] };
+        const clean = (data.results || []).filter(
+          (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
+        );
+        return { videos: clean };
       }
       return { videos: [] };
     } catch (err: any) {
@@ -1055,7 +1193,10 @@ class YouTubeService {
 
       if (res.ok) {
         const data = await res.json();
-        return { videos: data.results || [] };
+        const clean = (data.results || []).filter(
+          (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
+        );
+        return { videos: clean };
       }
       return { videos: [] };
     } catch (err: any) {
@@ -1075,7 +1216,10 @@ class YouTubeService {
 
       if (res.ok) {
         const data = await res.json();
-        return { videos: data.results || [] };
+        const clean = (data.results || []).filter(
+          (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
+        );
+        return { videos: clean };
       }
       return { videos: [] };
     } catch (err: any) {
@@ -1084,38 +1228,8 @@ class YouTubeService {
     }
   }
 
-  async getShortsFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
-    try {
-      const baseUrl = await this.resolveActiveBaseUrl(1000);
-      if (baseUrl) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        const res = await fetch(`${baseUrl}/yt/feed/shorts`, {
-          signal: controller.signal,
-        }).finally(() => clearTimeout(timer));
-
-        if (res.ok) {
-          const data = await res.json();
-          return {
-            videos: (data.results || []).map((v: any) => ({
-              id: v.id,
-              title: v.title,
-              channel: v.channel,
-              thumbnail: v.thumbnail,
-              duration: v.duration,
-              views: v.views,
-              published: v.published,
-              isShort: true,
-            })),
-          };
-        }
-      }
-
-      // Serverless fallback: load shorts directly via web scraping
-      return await this.searchViaWebWithContinuation('shorts');
-    } catch (err: any) {
-      return { videos: [] };
-    }
+  async getShortsFeed(_timeoutMs = 6000): Promise<YouTubeSearchResult> {
+    return { videos: [] };
   }
 }
 

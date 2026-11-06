@@ -12,6 +12,31 @@ interface ThemeSelectorProps {
   showNavigationLink?: boolean;
 }
 
+const getThemeBadgeText = (theme: AppTheme) => {
+  switch (theme.id) {
+    case 'purple':
+      return 'Purple';
+    case 'blue':
+      return 'Ocean Blue';
+    case 'green':
+      return 'Emerald Green';
+    case 'accent':
+      return 'Apple Music';
+    default:
+      return theme.name;
+  }
+};
+
+const getSubtitleBadge = (t: AppTheme) => {
+  if (t.id === 'purple') return 'Default';
+  if (t.id === 'blue') return 'Ocean';
+  if (t.id === 'green') return 'Emerald';
+  if (t.id === 'yellow') return 'Amber';
+  if (t.id === 'red') return 'Crimson';
+  if (t.id === 'accent') return 'Apple Pink';
+  return t.subtitle.split(' ')[0];
+};
+
 export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
   showPreviewBar = true,
   showNavigationLink = true,
@@ -52,11 +77,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
         >
           <View style={[styles.activeDot, { backgroundColor: theme.primary }]} />
           <Text style={[styles.activeBadgeText, { color: theme.primaryLight || theme.primary }]}>
-            {theme.id === 'purple'
-              ? 'Purple'
-              : theme.id === 'accent'
-              ? 'Apple Music'
-              : theme.name}
+            {getThemeBadgeText(theme)}
           </Text>
         </View>
       </View>
@@ -148,7 +169,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
                   ]}
                   numberOfLines={1}
                 >
-                  {isDefault ? 'Default' : t.id === 'accent' ? 'Apple Pink' : t.subtitle.split(' ')[0]}
+                  {getSubtitleBadge(t)}
                 </Text>
               </View>
             </Pressable>
@@ -242,11 +263,12 @@ const styles = StyleSheet.create({
   },
   swatchesContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 8,
+    rowGap: 10,
   },
   swatchCard: {
-    flex: 1,
+    width: '31.5%',
     borderRadius: 13,
     borderWidth: 1.5,
     paddingVertical: 12,

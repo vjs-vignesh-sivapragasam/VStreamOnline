@@ -13,7 +13,6 @@ import { PlayerSelectionModal } from '@/components/PlayerSelectionModal';
 import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
 import { YouTubePlayerProvider } from '@/contexts/YouTubePlayerContext';
 import { YouTubeWatchOverlay } from '@/components/youtube/YouTubeWatchOverlay';
-import { YouTubeShortsModal } from '@/components/youtube/YouTubeShortsModal';
 import { AppThemeProvider, useTheme } from '@/contexts/ThemeContext';
 
 export {
@@ -24,6 +23,9 @@ export {
 export const unstable_settings = {
   // Ensure that reloading on `/modal` keeps a back button present.
   initialRouteName: '(tabs)',
+  tabs: {
+    initialRouteName: 'youtube',
+  },
   '(tabs)': {
     initialRouteName: 'youtube',
   },
@@ -258,7 +260,6 @@ function RootLayoutNav() {
           </Stack>
           <PlayerSelectionModal />
           <YouTubeWatchOverlay />
-          <YouTubeShortsModal />
         </YouTubePlayerProvider>
       </ThemeProvider>
     </ActionSheetProvider>

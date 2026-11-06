@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { downloadService, DownloadItem } from '@/services/DownloadService';
+import { downloadService, DownloadItem, getDownloadHealth } from '@/services/DownloadService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
@@ -56,23 +56,16 @@ export default function YouTubeDownloadsScreen() {
         return;
       }
 
-      externalPlayerService.promptPlayerSelection({
-        fileUri: item.fileUri,
-        title: item.title,
-        poster: item.poster || '',
-        fileLength: item.totalBytes,
-        onPlayInternal: () => {
-          router.push({
-            pathname: '/stream/player',
-            params: {
-              videoUrl: item.fileUri,
-              title: item.title,
-              poster: item.poster || '',
-              progress: '0',
-            },
-          } as any);
+      // Directly start in-app player immediately - no modal selection popup!
+      router.push({
+        pathname: '/stream/player',
+        params: {
+          videoUrl: item.fileUri,
+          title: item.title,
+          poster: item.poster || '',
+          progress: '0',
         },
-      });
+      } as any);
     },
     [router]
   );
@@ -209,6 +202,7 @@ export default function YouTubeDownloadsScreen() {
             const isCompleted = item.status === 'completed';
             const isDownloading = item.status === 'downloading';
             const isPaused = item.status === 'paused';
+            const health = getDownloadHealth(28, item.speedBps || 0, true);
 
             return (
               <TouchableOpacity
@@ -231,9 +225,32 @@ export default function YouTubeDownloadsScreen() {
                       <Text style={styles.offlineBadgeText}>Offline</Text>
                     </View>
                   ) : (
-                    <View style={styles.statusBadge}>
-                      <Text style={styles.statusBadgeText}>
-                        {isDownloading ? 'Downloading' : isPaused ? 'Paused' : 'Error'}
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        isDownloading && {
+                          backgroundColor: health.bgColor,
+                          borderColor: `${health.color}88`,
+                          borderWidth: 1,
+                        },
+                        isPaused && {
+                          backgroundColor: 'rgba(255, 179, 0, 0.2)',
+                          borderColor: '#ffb300',
+                          borderWidth: 1,
+                        },
+                      ]}
+                    >
+                      {isDownloading && (
+                        <View style={[styles.statusDot, { backgroundColor: health.color }]} />
+                      )}
+                      <Text
+                        style={[
+                          styles.statusBadgeText,
+                          isDownloading && { color: health.color, fontWeight: '700' },
+                          isPaused && { color: '#ffb300', fontWeight: '700' },
+                        ]}
+                      >
+                        {isDownloading ? health.label : isPaused ? 'Paused' : 'Error'}
                       </Text>
                     </View>
                   )}
@@ -265,8 +282,21 @@ export default function YouTubeDownloadsScreen() {
                           {Math.round(item.progress || 0)}%
                         </Text>
                         <Text style={styles.speedText}>
-                          {item.speedFormatted || 'Downloading...'}
+                          {item.speedFormatted || (isPaused ? 'Paused' : 'Downloading...')}
                         </Text>
+                        {isDownloading && (
+                          <View
+                            style={[
+                              styles.healthBadge,
+                              { backgroundColor: health.bgColor, borderColor: health.color },
+                            ]}
+                          >
+                            <View style={[styles.healthDot, { backgroundColor: health.color }]} />
+                            <Text style={[styles.healthBadgeText, { color: health.color }]}>
+                              {health.label}
+                            </Text>
+                          </View>
+                        )}
                       </View>
                     </View>
                   )}
@@ -276,7 +306,19 @@ export default function YouTubeDownloadsScreen() {
                 <View style={styles.cardActions}>
                   {!isCompleted ? (
                     <TouchableOpacity
-                      style={styles.actionCircleBtn}
+                      style={[
+                        styles.actionCircleBtn,
+                        isDownloading && {
+                          backgroundColor: 'rgba(255, 179, 0, 0.15)',
+                          borderColor: '#ffb300',
+                          borderWidth: 1,
+                        },
+                        isPaused && {
+                          backgroundColor: 'rgba(83, 90, 255, 0.25)',
+                          borderColor: '#535aff',
+                          borderWidth: 1,
+                        },
+                      ]}
                       onPress={() => handleTogglePause(item)}
                       activeOpacity={0.7}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -284,7 +326,7 @@ export default function YouTubeDownloadsScreen() {
                       <Ionicons
                         name={isDownloading ? 'pause' : 'play'}
                         size={18}
-                        color="#535aff"
+                        color={isDownloading ? '#ffb300' : '#ffffff'}
                       />
                     </TouchableOpacity>
                   ) : (
@@ -520,6 +562,30 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  healthBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+    borderWidth: 0.8,
+  },
+  healthDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  healthBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  statusDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    marginRight: 4,
   },
   emptyContainer: {
     flex: 1,

@@ -291,15 +291,10 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     setIsMinimized(true);
   }, []);
 
-  const playShort = useCallback((short: ActiveYouTubeVideo, feed?: ActiveYouTubeVideo[]) => {
-    console.log('[YouTubePlayer] 📱 playShort requested:', short.id, short.title);
-    pauseVideo();
-    const list = feed && feed.length > 0 ? feed : [short];
-    setShortsList(list);
-    const targetIdx = list.findIndex((s) => s.id === short.id);
-    setActiveShortIndex(targetIdx >= 0 ? targetIdx : 0);
-    setIsShortsVisible(true);
-  }, [pauseVideo]);
+  const playShort = useCallback((short: ActiveYouTubeVideo, _feed?: ActiveYouTubeVideo[]) => {
+    // Shorts mode disabled: route directly to standard YouTube Watch screen
+    playVideo(short);
+  }, [playVideo]);
 
   const closeShorts = useCallback(() => {
     setIsShortsVisible(false);
