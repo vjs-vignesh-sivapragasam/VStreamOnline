@@ -110,7 +110,7 @@ export const isKSPlayerAvailable = (): boolean => {
 function dispatchCommand(ref: React.RefObject<any>, command: string, args: any[] = []) {
   const node = findNodeHandle(ref.current);
   if (!node) return;
-  const commands = UIManager.getViewManagerConfig('KSPlayerView')?.Commands;
+  const commands = (UIManager.getViewManagerConfig('KSPlayerView') as any)?.Commands;
   if (!commands || commands[command] === undefined) {
     console.warn(`[KSPlayerView] Command "${command}" not found`);
     return;

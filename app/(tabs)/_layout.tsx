@@ -9,7 +9,6 @@ export const unstable_settings = {
 export default function TabLayout() {
   return (
     <Tabs
-      initialRouteName="youtube"
       tabBar={(props) => <CinemaBottomBar {...props} />}
       screenOptions={{
         headerShown: false,

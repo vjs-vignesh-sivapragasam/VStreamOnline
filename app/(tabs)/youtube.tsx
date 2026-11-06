@@ -280,7 +280,7 @@ export default function YouTubeScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<any>(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [videos, setVideos] = useState<YouTubeVideoItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
