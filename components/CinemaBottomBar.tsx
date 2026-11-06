@@ -93,9 +93,9 @@ export default function CinemaBottomBar({
       <BlurView
         intensity={Platform.OS === 'android' ? 30 : 60}
         tint="dark"
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, styles.roundedSurface]}
       >
-        <View style={styles.obsidianOverlay} />
+        <View style={[styles.obsidianOverlay, styles.roundedSurface]} />
       </BlurView>
 
       {/* Top Ambient Glow Line */}
@@ -175,6 +175,11 @@ export default function CinemaBottomBar({
               accessibilityLabel={config.label}
               onPress={handlePress}
               onLongPress={handleLongPress}
+              android_ripple={{
+                color: theme.ripple || 'rgba(255, 255, 255, 0.12)',
+                borderless: true,
+                radius: 28,
+              }}
               style={({ pressed }) => [
                 styles.tabButton,
                 pressed && styles.tabButtonPressed,
@@ -197,17 +202,20 @@ export default function CinemaBottomBar({
                 )}
               </View>
 
-              {/* Illuminated Icon Capsule */}
+              {/* Illuminated Icon Capsule (Always rounded pill shape) */}
               <View
                 style={[
                   styles.iconCapsule,
-                  isFocused && [
-                    styles.iconCapsuleActive,
-                    {
-                      backgroundColor: theme.iconBg,
-                      borderColor: theme.cardBorder,
-                    },
-                  ],
+                  isFocused
+                    ? [
+                        styles.iconCapsuleActive,
+                        {
+                          backgroundColor: theme.iconBg,
+                          borderColor: theme.cardBorder,
+                          borderRadius: 20,
+                        },
+                      ]
+                    : styles.iconCapsuleInactive,
                 ]}
               >
                 <Ionicons
@@ -244,14 +252,24 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     width: '100%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
     backgroundColor: 'rgba(10, 10, 14, 0.96)',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     elevation: 24,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -6 },
     shadowOpacity: 0.6,
     shadowRadius: 16,
+  },
+  roundedSurface: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
   },
   obsidianOverlay: {
     position: 'absolute',
@@ -267,6 +285,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 1.5,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
   },
   tabRow: {
     flexDirection: 'row',
@@ -281,6 +301,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     height: '100%',
     paddingVertical: 1,
+    borderRadius: 18,
   },
   tabButtonPressed: {
     opacity: 0.75,
@@ -296,7 +317,7 @@ const styles = StyleSheet.create({
   activeBeam: {
     width: 22,
     height: 2.5,
-    borderRadius: 2,
+    borderRadius: 3,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.9,
     shadowRadius: 6,
@@ -305,18 +326,26 @@ const styles = StyleSheet.create({
   inactiveBeam: {
     width: 22,
     height: 2.5,
+    borderRadius: 3,
     backgroundColor: 'transparent',
   },
   iconCapsule: {
-    paddingHorizontal: 14,
-    paddingVertical: 3,
-    borderRadius: 14,
-    backgroundColor: 'transparent',
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   iconCapsuleActive: {
     borderWidth: 1,
+    borderRadius: 20,
+  },
+  iconCapsuleInactive: {
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    borderRadius: 20,
   },
   tabLabel: {
     fontSize: 10.5,
