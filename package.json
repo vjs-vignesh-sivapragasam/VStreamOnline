@@ -43,7 +43,6 @@
     "expo-status-bar": "~58.0.4",
     "expo-updates": "~58.0.19",
     "expo-web-browser": "~58.0.7",
-    "install": "^0.13.0",
     "nodejs-mobile-react-native": "^18.20.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -79,4 +78,3 @@
     }
   }
 }
-

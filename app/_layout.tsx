@@ -1,13 +1,13 @@
 import '@/utils/crashLogger';
 import { AppCrashErrorBoundary } from '@/utils/crashLogger';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme, Theme, ThemeProvider } from 'expo-router/react-navigation';
+import { DarkTheme, Theme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
@@ -74,9 +74,13 @@ export default function RootLayout() {
 
 // Custom header background component
 const HeaderBackground = () => (
-  <BlurView intensity={20} style={styles.headerBlur}>
-    <View style={styles.headerGlass} />
-  </BlurView>
+  Platform.OS === 'ios' ? (
+    <BlurView intensity={20} style={styles.headerBlur}>
+      <View style={styles.headerGlass} />
+    </BlurView>
+  ) : (
+    <View style={[styles.headerBlur, { backgroundColor: 'rgba(12, 12, 16, 0.95)' }]} />
+  )
 );
 
 // Custom header background component for invisible header

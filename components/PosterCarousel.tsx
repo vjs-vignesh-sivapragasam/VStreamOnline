@@ -6,6 +6,7 @@ import {
     TouchableOpacity,
     StyleSheet,
     ImageBackground,
+    Platform,
 } from 'react-native';
 import { ActivityIndicator, Text } from '@/components/Themed';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -270,20 +271,37 @@ export default function PosterCarousel({
                         },
                     ]}
                 >
-                    <BlurView intensity={20} style={styles.paginationBlur}>
-                        <View style={styles.paginationDots}>
-                            {data.map((_, index) => (
-                                <TouchableOpacity
-                                    key={`dot-${index}`}
-                                    style={[
-                                        styles.paginationDot,
-                                        activeIndex === index && styles.paginationDotActive,
-                                    ]}
-                                    onPress={() => scrollToIndex(index)}
-                                />
-                            ))}
+                    {Platform.OS === 'ios' ? (
+                        <BlurView intensity={20} style={styles.paginationBlur}>
+                            <View style={styles.paginationDots}>
+                                {data.map((_, index) => (
+                                    <TouchableOpacity
+                                        key={`dot-${index}`}
+                                        style={[
+                                            styles.paginationDot,
+                                            activeIndex === index && styles.paginationDotActive,
+                                        ]}
+                                        onPress={() => scrollToIndex(index)}
+                                    />
+                                ))}
+                            </View>
+                        </BlurView>
+                    ) : (
+                        <View style={[styles.paginationBlur, { backgroundColor: 'rgba(0, 0, 0, 0.55)' }]}>
+                            <View style={styles.paginationDots}>
+                                {data.map((_, index) => (
+                                    <TouchableOpacity
+                                        key={`dot-${index}`}
+                                        style={[
+                                            styles.paginationDot,
+                                            activeIndex === index && styles.paginationDotActive,
+                                        ]}
+                                        onPress={() => scrollToIndex(index)}
+                                    />
+                                ))}
+                            </View>
                         </View>
-                    </BlurView>
+                    )}
                 </View>
             )}
         </View>

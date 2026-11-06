@@ -90,13 +90,17 @@ export default function CinemaBottomBar({
   return (
     <View style={[styles.wrapper, { paddingBottom: bottomPadding }]}>
       {/* Dark Obsidian Glass Background */}
-      <BlurView
-        intensity={Platform.OS === 'android' ? 30 : 60}
-        tint="dark"
-        style={[StyleSheet.absoluteFill, styles.roundedSurface]}
-      >
-        <View style={[styles.obsidianOverlay, styles.roundedSurface]} />
-      </BlurView>
+      {Platform.OS === 'ios' ? (
+        <BlurView
+          intensity={60}
+          tint="dark"
+          style={[StyleSheet.absoluteFill, styles.roundedSurface]}
+        >
+          <View style={[styles.obsidianOverlay, styles.roundedSurface]} />
+        </BlurView>
+      ) : (
+        <View style={[StyleSheet.absoluteFill, styles.obsidianOverlayAndroid, styles.roundedSurface]} />
+      )}
 
       {/* Top Ambient Glow Line */}
       <LinearGradient
@@ -278,6 +282,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(10, 10, 14, 0.88)',
+  },
+  obsidianOverlayAndroid: {
+    backgroundColor: 'rgba(11, 11, 15, 0.96)',
   },
   topGlowLine: {
     position: 'absolute',

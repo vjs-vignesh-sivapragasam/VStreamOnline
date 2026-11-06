@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, Pressable, View, ScrollView, Modal, TouchableOpacity } from 'react-native';
+import { StyleSheet, Pressable, View, ScrollView, Modal, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { StatusBar, Text } from '@/components/Themed';
 import { useRouter } from 'expo-router';
@@ -14,6 +14,17 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
+
+const PopupSheet: React.FC<{ children: React.ReactNode; style: any }> = ({ children, style }) => {
+  if (Platform.OS === 'ios') {
+    return (
+      <BlurView intensity={45} tint="dark" style={style}>
+        {children}
+      </BlurView>
+    );
+  }
+  return <View style={style}>{children}</View>;
+};
 
 const SettingsScreen = () => {
   const router = useRouter();
@@ -267,7 +278,7 @@ const SettingsScreen = () => {
       >
         <View style={styles.modalBackdrop}>
           <Pressable style={styles.modalDismissArea} onPress={() => setThemeModalVisible(false)} />
-          <BlurView intensity={45} tint="dark" style={styles.popupSheet}>
+          <PopupSheet style={styles.popupSheet}>
             <View style={styles.modalDragHandle} />
             <View style={styles.popupHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -291,7 +302,7 @@ const SettingsScreen = () => {
             >
               <ThemeSelector showPreviewBar={false} showNavigationLink={true} />
             </ScrollView>
-          </BlurView>
+          </PopupSheet>
         </View>
       </Modal>
 
@@ -304,7 +315,7 @@ const SettingsScreen = () => {
       >
         <View style={styles.modalBackdrop}>
           <Pressable style={styles.modalDismissArea} onPress={() => setStorageModalVisible(false)} />
-          <BlurView intensity={45} tint="dark" style={styles.popupSheet}>
+          <PopupSheet style={styles.popupSheet}>
             <View style={styles.modalDragHandle} />
             <View style={styles.popupHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -328,7 +339,7 @@ const SettingsScreen = () => {
             >
               <StorageCleanupCard onStatsChange={loadDataStats} />
             </ScrollView>
-          </BlurView>
+          </PopupSheet>
         </View>
       </Modal>
     </SafeAreaView>

@@ -1,49 +1,26 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 
-const MAX_LOGS = 100;
+const MAX_LOGS = 50;
 const logBuffer: string[] = [];
 
-function recordLog(level: string, ...args: any[]) {
+function recordLog(level: string, message: string) {
   const timestamp = new Date().toISOString().substring(11, 19);
-  const formatted = args
-    .map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg)))
-    .join(' ');
-  const entry = `[${timestamp}] [${level}] ${formatted}`;
+  const entry = `[${timestamp}] [${level}] ${message}`;
   logBuffer.push(entry);
   if (logBuffer.length > MAX_LOGS) {
     logBuffer.shift();
   }
 }
 
-// Hook into console to record breadcrumbs
-const originalLog = console.log.bind(console);
-const originalWarn = console.warn.bind(console);
-const originalError = console.error.bind(console);
-
-console.log = (...args: any[]) => {
-  recordLog('LOG', ...args);
-  originalLog.apply(console, args);
-};
-
-console.warn = (...args: any[]) => {
-  recordLog('WARN', ...args);
-  originalWarn.apply(console, args);
-};
-
-console.error = (...args: any[]) => {
-  recordLog('ERROR', ...args);
-  originalError.apply(console, args);
-};
-
-// Global Error Handler via ErrorUtils
+// Global Error Handler via ErrorUtils for uncaught fatal crashes only
 if (typeof (global as any).ErrorUtils !== 'undefined') {
   const defaultHandler = (global as any).ErrorUtils.getGlobalHandler();
   (global as any).ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
     const errorMsg = `FATAL JS ERROR (isFatal=${isFatal}): ${error?.message || error}\nStack: ${error?.stack || 'No stack'}`;
     recordLog('FATAL', errorMsg);
     try {
-      originalError('[CRASH_LOGGER] ' + errorMsg);
+      console.error('[CRASH_LOGGER] ' + errorMsg);
     } catch {}
 
     if (defaultHandler) {
@@ -80,7 +57,9 @@ export class AppCrashErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo });
     recordLog('REACT_CRASH', `${error.message}\n${errorInfo.componentStack}`);
-    originalError('[AppCrashErrorBoundary] Caught error:', error, errorInfo);
+    try {
+      console.error('[AppCrashErrorBoundary] Caught error:', error?.message);
+    } catch {}
   }
 
   handleRestart = () => {
@@ -123,49 +102,52 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   errorTitle: {
-    color: '#ff4d4f',
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ff4444',
     marginBottom: 8,
   },
   errorMessage: {
-    color: '#ffffff',
     fontSize: 14,
+    color: '#ffffff',
     marginBottom: 12,
   },
   stackScrollView: {
     flex: 1,
-    backgroundColor: '#1e1e1e',
+    backgroundColor: '#1a1a1a',
     borderRadius: 8,
     padding: 12,
     marginBottom: 16,
   },
   sectionHeader: {
-    color: '#ffd591',
-    fontWeight: 'bold',
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#888888',
     marginTop: 8,
     marginBottom: 4,
+    textTransform: 'uppercase',
   },
   stackText: {
-    color: '#ff7875',
     fontSize: 11,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#ff8888',
+    lineHeight: 16,
   },
   logText: {
-    color: '#91d5ff',
-    fontSize: 10,
+    fontSize: 11,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#cccccc',
+    lineHeight: 16,
   },
   retryButton: {
-    backgroundColor: '#ff4d4f',
-    paddingVertical: 12,
+    backgroundColor: '#333333',
+    paddingVertical: 14,
     borderRadius: 8,
     alignItems: 'center',
   },
   retryButtonText: {
     color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

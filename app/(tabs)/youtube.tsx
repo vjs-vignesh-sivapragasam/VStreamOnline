@@ -252,6 +252,14 @@ const VideoCard = memo<VideoCardProps>(({
       </View>
     </TouchableOpacity>
   );
+}, (prev, next) => {
+  return (
+    prev.item.id === next.item.id &&
+    prev.isLoading === next.isLoading &&
+    prev.isSaved === next.isSaved &&
+    prev.downloadItem?.status === next.downloadItem?.status &&
+    prev.downloadItem?.progress === next.downloadItem?.progress
+  );
 });
 
 export default function YouTubeScreen() {

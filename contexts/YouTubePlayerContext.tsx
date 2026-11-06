@@ -75,6 +75,7 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   const activeVideoIdRef = useRef<string | null>(null);
   const fallbackCountRef = useRef<number>(0);
   const lastTrackTimeRef = useRef<number>(0);
+  const lastReportedTimeRef = useRef<number>(0);
 
   const playVideo = useCallback(async (video: ActiveYouTubeVideo) => {
     console.log(`[YouTubePlayer] ▶️ playVideo requested for ID: "${video.id}", Title: "${video.title}"`);
@@ -416,9 +417,13 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   }, []);
 
     const updateProgress = useCallback((cur: number, dur: number) => {
-    setCurrentTime(cur);
-    if (dur > 0) {
-      setDuration(dur);
+    const floored = Math.floor(cur);
+    if (floored !== lastReportedTimeRef.current) {
+      lastReportedTimeRef.current = floored;
+      setCurrentTime(cur);
+      if (dur > 0) {
+        setDuration(dur);
+      }
     }
 
     // Track streaming data consumption incrementally (~every 4-5s)

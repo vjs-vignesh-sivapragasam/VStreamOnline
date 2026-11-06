@@ -9,6 +9,7 @@ import {
   Image,
   Dimensions,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -28,6 +29,17 @@ interface QualityPickerModalProps {
 }
 
 const { width } = Dimensions.get('window');
+
+const SheetContainer: React.FC<{ children: React.ReactNode; style: any }> = ({ children, style }) => {
+  if (Platform.OS === 'ios') {
+    return (
+      <BlurView intensity={40} tint="dark" style={style}>
+        {children}
+      </BlurView>
+    );
+  }
+  return <View style={style}>{children}</View>;
+};
 
 export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
   visible,
@@ -163,7 +175,7 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
       <View style={styles.modalBackdrop}>
         <TouchableOpacity style={styles.backdropDismiss} activeOpacity={1} onPress={onClose} />
 
-        <BlurView intensity={40} tint="dark" style={styles.sheetContainer}>
+        <SheetContainer style={styles.sheetContainer}>
           {/* Header Bar Indicator */}
           <View style={styles.dragIndicator} />
 
@@ -301,7 +313,7 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
               </View>
             ))}
           </ScrollView>
-        </BlurView>
+        </SheetContainer>
       </View>
     </Modal>
   );
