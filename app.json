@@ -36,6 +36,9 @@
           "infuse",
           "outplayer",
           "open-vidhub"
+        ],
+        "UIBackgroundModes": [
+          "audio"
         ]
       }
     },
@@ -45,7 +48,8 @@
         "backgroundColor": "#000000"
       },
       "package": "com.vijayyuvi.vstreamonline",
-      "icon": "assets/images/icon.png"
+      "icon": "assets/images/icon.png",
+      "supportsPictureInPicture": true
     },
     "web": {
       "bundler": "metro",
@@ -54,6 +58,14 @@
     },
     "plugins": [
       "./plugins/withKSPlayer",
+      [
+        "react-native-video",
+        {
+          "enableNotificationControls": true,
+          "enableBackgroundAudio": true,
+          "enableAndroidPictureInPicture": true
+        }
+      ],
       "expo-router",
       "expo-font",
       [

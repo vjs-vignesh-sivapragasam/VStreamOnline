@@ -13,10 +13,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
-import { YouTubeVideoDetails, YouTubeFormatOption } from '@/services/YouTubeService';
+import { YouTubeVideoDetails, YouTubeFormatOption, YouTubeVideoItem } from '@/services/YouTubeService';
 
 interface QualityPickerModalProps {
   visible: boolean;
+  videoItem?: YouTubeVideoItem | null;
   videoDetails: YouTubeVideoDetails | null;
   isLoading: boolean;
   onClose: () => void;
@@ -30,6 +31,7 @@ const { width } = Dimensions.get('window');
 
 export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
   visible,
+  videoItem,
   videoDetails,
   isLoading,
   onClose,
@@ -40,15 +42,50 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
 }) => {
   const [isCopied, setIsCopied] = useState(false);
 
-  const filteredVideoAdaptive = React.useMemo(() => {
-    if (!videoDetails?.formats?.videoAdaptive) return [];
+  // Fallback items if details are still fetching or offline
+  const fallbackFormats = React.useMemo(() => {
+    const videoFormats: YouTubeFormatOption[] = [
+      { itag: 22, quality: '720p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'HD (720p with Audio)', hasAudio: true, hasVideo: true, type: 'video' },
+      { itag: 18, quality: '360p', container: 'mp4', mimeType: 'video/mp4', url: '', sizeFormatted: 'Standard (360p with Audio)', hasAudio: true, hasVideo: true, type: 'video' },
+    ];
+    const audioFormats: YouTubeFormatOption[] = [
+      { itag: 140, quality: '128 kbps', container: 'mp3', mimeType: 'audio/mp4', url: '', sizeFormatted: 'High Quality MP3', hasAudio: true, hasVideo: false, type: 'audio' },
+      { itag: 141, quality: '160 kbps', container: 'mp3', mimeType: 'audio/mp4', url: '', sizeFormatted: 'Studio Audio MP3', hasAudio: true, hasVideo: false, type: 'audio' },
+      { itag: 139, quality: '64 kbps', container: 'mp3', mimeType: 'audio/mp4', url: '', sizeFormatted: 'Fast Audio MP3', hasAudio: true, hasVideo: false, type: 'audio' },
+    ];
+    return { videoFormats, audioFormats };
+  }, []);
+
+  const videoList = React.useMemo(() => {
+    const list: YouTubeFormatOption[] = [];
     const map = new Map<string, YouTubeFormatOption>();
-    for (const f of videoDetails.formats.videoAdaptive) {
-      const q = f.quality || 'Standard';
-      if (!map.has(q) || (f.container === 'mp4' && map.get(q)?.container !== 'mp4')) {
-        map.set(q, f);
+
+    if (videoDetails?.formats) {
+      // First add progressive formats (which have video + audio combined)
+      for (const f of videoDetails.formats.progressive || []) {
+        const q = f.quality || (f.itag === 22 ? '720p' : '360p');
+        map.set(q, {
+          ...f,
+          hasAudio: true,
+          hasVideo: true,
+          sizeFormatted: f.sizeFormatted || `${q} (Video + Audio)`,
+        });
+      }
+      // Also add videoAdaptive formats for qualities not yet mapped (e.g. 1080p, 480p, etc.)
+      for (const f of videoDetails.formats.videoAdaptive || []) {
+        const q = f.quality || 'Standard';
+        if (!map.has(q)) {
+          map.set(q, f);
+        }
       }
     }
+
+    if (map.size > 0) {
+      list.push(...Array.from(map.values()));
+    } else {
+      list.push(...fallbackFormats.videoFormats);
+    }
+
     const qualityRank: Record<string, number> = {
       '2160p': 2160,
       '1440p': 1440,
@@ -59,26 +96,28 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
       '240p': 240,
       '144p': 144,
     };
-    return Array.from(map.values()).sort((a, b) => {
-      const rankA = qualityRank[a.quality] || parseInt(a.quality) || 0;
-      const rankB = qualityRank[b.quality] || parseInt(b.quality) || 0;
+
+    return list.sort((a, b) => {
+      const rankA = qualityRank[a.quality] || parseInt(a.quality, 10) || 0;
+      const rankB = qualityRank[b.quality] || parseInt(b.quality, 10) || 0;
       return rankB - rankA;
     });
-  }, [videoDetails]);
+  }, [videoDetails, fallbackFormats]);
 
-  const filteredAudioAdaptive = React.useMemo(() => {
+  const audioList = React.useMemo(() => {
     let list: YouTubeFormatOption[] = [];
+
     if (videoDetails?.formats?.audioAdaptive && videoDetails.formats.audioAdaptive.length > 0) {
       const map = new Map<string, YouTubeFormatOption>();
       for (const f of videoDetails.formats.audioAdaptive) {
         const key = `${f.quality}_${f.container}`;
         if (!map.has(key)) {
-          map.set(key, { ...f, type: 'audio' as const });
+          map.set(key, { ...f, type: 'audio' as const, container: 'mp3' });
         }
       }
       list = Array.from(map.values()).sort((a, b) => {
-        const numA = parseInt(a.quality) || 0;
-        const numB = parseInt(b.quality) || 0;
+        const numA = parseInt(a.quality, 10) || 0;
+        const numB = parseInt(b.quality, 10) || 0;
         return numB - numA;
       });
     }
@@ -90,17 +129,30 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
         quality: '128 kbps',
         container: 'mp3',
         type: 'audio' as const,
+        sizeFormatted: 'High Quality MP3',
       });
     }
 
+    if (list.length === 0) {
+      list = fallbackFormats.audioFormats;
+    }
+
     return list;
-  }, [videoDetails]);
+  }, [videoDetails, fallbackFormats]);
 
   if (!visible) return null;
 
+  const displayTitle = videoDetails?.title || videoItem?.title || 'YouTube Video';
+  const displayChannel = videoDetails?.channel || videoItem?.channel || 'YouTube';
+  const displayId = videoDetails?.id || videoItem?.id || '';
+  const displayThumbnail =
+    videoDetails?.thumbnail ||
+    videoItem?.thumbnail ||
+    (displayId ? `https://i.ytimg.com/vi/${displayId}/hqdefault.jpg` : '');
+
   const handleCopyLink = async () => {
-    if (!videoDetails) return;
-    const url = `https://www.youtube.com/watch?v=${videoDetails.id}`;
+    if (!displayId) return;
+    const url = `https://www.youtube.com/watch?v=${displayId}`;
     await Clipboard.setStringAsync(url);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
@@ -117,204 +169,138 @@ export const QualityPickerModal: React.FC<QualityPickerModalProps> = ({
 
           {/* Title Row */}
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>Stream & Download Options</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={styles.sheetTitle}>Download Video & Audio</Text>
+              {isLoading && <ActivityIndicator size="small" color="#FF0000" />}
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name="close" size={22} color="#ffffff" />
             </TouchableOpacity>
           </View>
 
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#FF0000" />
-              <Text style={styles.loadingText}>Fetching available stream formats...</Text>
-            </View>
-          ) : !videoDetails ? (
-            <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle-outline" size={40} color="#ff4444" />
-              <Text style={styles.errorText}>Could not load formats for this video.</Text>
-            </View>
-          ) : (
-            <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent}>
-              {/* Video Preview Card */}
-              <View style={styles.previewCard}>
-                <Image source={{ uri: videoDetails.thumbnail }} style={styles.previewThumbnail} />
-                <View style={styles.previewMeta}>
-                  <Text style={styles.previewTitle} numberOfLines={2}>
-                    {videoDetails.title}
-                  </Text>
-                  <Text style={styles.previewChannel} numberOfLines={1}>
-                    {videoDetails.channel}
-                  </Text>
-                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+          <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {/* Video Preview Card */}
+            <View style={styles.previewCard}>
+              {displayThumbnail ? (
+                <Image source={{ uri: displayThumbnail }} style={styles.previewThumbnail} />
+              ) : (
+                <View style={[styles.previewThumbnail, { backgroundColor: '#222222', justifyContent: 'center', alignItems: 'center' }]}>
+                  <Ionicons name="videocam-outline" size={24} color="#888888" />
+                </View>
+              )}
+              <View style={styles.previewMeta}>
+                <Text style={styles.previewTitle} numberOfLines={2}>
+                  {displayTitle}
+                </Text>
+                <Text style={styles.previewChannel} numberOfLines={1}>
+                  {displayChannel}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                  <TouchableOpacity
+                    style={[styles.savePillButton, isCopied && styles.savePillButtonActive]}
+                    onPress={handleCopyLink}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name={isCopied ? 'checkmark' : 'copy-outline'}
+                      size={13}
+                      color={isCopied ? '#00e676' : '#ffffff'}
+                    />
+                    <Text style={[styles.savePillText, isCopied && { color: '#00e676' }]}>
+                      {isCopied ? 'Copied' : 'Copy link'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {onToggleSave && (
                     <TouchableOpacity
-                      style={[styles.savePillButton, isCopied && styles.savePillButtonActive]}
-                      onPress={handleCopyLink}
+                      style={[styles.savePillButton, isSaved && styles.savePillButtonActive]}
+                      onPress={onToggleSave}
                       activeOpacity={0.7}
                     >
                       <Ionicons
-                        name={isCopied ? 'checkmark' : 'copy-outline'}
+                        name={isSaved ? 'bookmark' : 'bookmark-outline'}
                         size={13}
-                        color={isCopied ? '#00e676' : '#ffffff'}
+                        color={isSaved ? '#ffffff' : '#535aff'}
                       />
-                      <Text style={[styles.savePillText, isCopied && { color: '#00e676' }]}>
-                        {isCopied ? 'Copied' : 'Copy link'}
+                      <Text style={[styles.savePillText, isSaved && styles.savePillTextActive]}>
+                        {isSaved ? 'Saved to List' : 'Save to List'}
                       </Text>
                     </TouchableOpacity>
-
-                    {onToggleSave && (
-                      <TouchableOpacity
-                        style={[styles.savePillButton, isSaved && styles.savePillButtonActive]}
-                        onPress={onToggleSave}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons
-                          name={isSaved ? 'bookmark' : 'bookmark-outline'}
-                          size={13}
-                          color={isSaved ? '#ffffff' : '#535aff'}
-                        />
-                        <Text style={[styles.savePillText, isSaved && styles.savePillTextActive]}>
-                          {isSaved ? 'Saved to List' : 'Save to List'}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
+                  )}
                 </View>
               </View>
+            </View>
 
-              {/* ── Section: Video Formats ────────────────────────────────────── */}
-              <View style={styles.sectionHeaderRow}>
-                <Ionicons name="videocam-outline" size={18} color="#FF0000" />
-                <Text style={styles.sectionTitle}>Video Streams</Text>
+            {/* ── Section: Video Resolutions ─────────────────────────────────── */}
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="videocam" size={18} color="#FF0000" />
+              <Text style={styles.sectionTitle}>Video Downloads (Choose Resolution)</Text>
+            </View>
+
+            {videoList.map((f, idx) => (
+              <View key={`video_${f.itag}_${idx}`} style={styles.formatItem}>
+                <View style={styles.formatBadgeContainer}>
+                  <Text style={styles.formatQuality}>{f.quality}</Text>
+                  <View style={[styles.tagBadge, f.quality.includes('1080') || f.quality.includes('720') ? { backgroundColor: '#535aff' } : undefined]}>
+                    <Text style={styles.tagText}>{f.quality.includes('1080') || f.quality.includes('720') ? 'MP4 HD' : 'MP4'}</Text>
+                  </View>
+                </View>
+                <View style={styles.formatMeta}>
+                  <Text style={styles.formatLabel}>
+                    {f.quality.includes('1080')
+                      ? 'Full HD 1080p Video'
+                      : f.quality.includes('720')
+                      ? 'High Definition 720p'
+                      : f.quality.includes('480')
+                      ? 'Standard Definition 480p'
+                      : `${f.quality} Video Track`}
+                  </Text>
+                  <Text style={styles.formatSize}>{f.sizeFormatted || 'Standard file size'}</Text>
+                </View>
+                <View style={styles.formatActionsRow}>
+
+                  <TouchableOpacity
+                    style={styles.actionIconButton}
+                    onPress={() => onSelectFormat(f)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
+                  </TouchableOpacity>
+                </View>
               </View>
+            ))}
 
-              {/* Progressive combined formats (Video + Audio) */}
-              {videoDetails.formats.progressive.length > 0 && (
-                <>
-                  <View style={styles.sectionHeaderRow}>
-                    <Ionicons name="play-circle-outline" size={18} color="#FF0000" />
-                    <Text style={styles.sectionTitle}>Combined Stream (Video + Audio)</Text>
+            {/* ── Section: Audio Downloads ───────────────────────────────────── */}
+            <View style={[styles.sectionHeaderRow, { marginTop: 22 }]}>
+              <Ionicons name="musical-notes" size={18} color="#00e5ff" />
+              <Text style={styles.sectionTitle}>Audio / MP3 Downloads</Text>
+            </View>
+
+            {audioList.map((f, idx) => (
+              <View key={`audio_${f.itag}_${idx}`} style={styles.formatItem}>
+                <View style={styles.formatBadgeContainer}>
+                  <Text style={[styles.formatQuality, { color: '#00e5ff' }]}>{f.quality}</Text>
+                  <View style={[styles.tagBadge, { backgroundColor: '#004455' }]}>
+                    <Text style={[styles.tagText, { color: '#00e5ff' }]}>MP3 AUDIO</Text>
                   </View>
-                  {videoDetails.formats.progressive.map((f, idx) => (
-                    <View key={`prog_${f.itag}_${idx}`} style={styles.formatItem}>
-                      <View style={styles.formatBadgeContainer}>
-                        <Text style={styles.formatQuality}>{f.quality}</Text>
-                        <View style={styles.tagBadge}>
-                          <Text style={styles.tagText}>{f.container.toUpperCase()}</Text>
-                        </View>
-                      </View>
-                      <View style={styles.formatMeta}>
-                        <Text style={styles.formatLabel}>Video + Audio (Ready to play)</Text>
-                        <Text style={styles.formatSize}>{f.sizeFormatted}</Text>
-                      </View>
-                      <View style={styles.formatActionsRow}>
-                        {onPlayFormat && (
-                          <TouchableOpacity
-                            style={styles.actionIconButton}
-                            onPress={() => onPlayFormat(f)}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <Ionicons name="play-circle" size={28} color="#ffffff" />
-                          </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                          style={styles.actionIconButton}
-                          onPress={() => onSelectFormat(f)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))}
-                </>
-              )}
+                </View>
+                <View style={styles.formatMeta}>
+                  <Text style={styles.formatLabel}>MP3 Music Track (Audio Only)</Text>
+                  <Text style={styles.formatSize}>{f.sizeFormatted || 'Audio stream'}</Text>
+                </View>
+                <View style={styles.formatActionsRow}>
 
-              {/* High-res adaptive video formats (4K, 1440p, 1080p, 720p, 480p, etc.) */}
-              {filteredVideoAdaptive.length > 0 && (
-                <>
-                  <View style={[styles.sectionHeaderRow, { marginTop: videoDetails.formats.progressive.length > 0 ? 16 : 4 }]}>
-                    <Ionicons name="videocam-outline" size={18} color="#535aff" />
-                    <Text style={styles.sectionTitle}>High Definition Video (Choose Quality)</Text>
-                  </View>
-                  {filteredVideoAdaptive.map((f, idx) => (
-                    <View key={`adapt_${f.itag}_${idx}`} style={styles.formatItem}>
-                      <View style={styles.formatBadgeContainer}>
-                        <Text style={styles.formatQuality}>{f.quality}</Text>
-                        <View style={[styles.tagBadge, { backgroundColor: '#333333' }]}>
-                          <Text style={styles.tagText}>{f.container.toUpperCase()} HD</Text>
-                        </View>
-                      </View>
-                      <View style={styles.formatMeta}>
-                        <Text style={styles.formatLabel}>HD Video Track</Text>
-                        <Text style={styles.formatSize}>{f.sizeFormatted}</Text>
-                      </View>
-                      <View style={styles.formatActionsRow}>
-                        {onPlayFormat && (
-                          <TouchableOpacity
-                            style={styles.actionIconButton}
-                            onPress={() => onPlayFormat(f)}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <Ionicons name="play-circle" size={28} color="#ffffff" />
-                          </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                          style={styles.actionIconButton}
-                          onPress={() => onSelectFormat(f)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))}
-                </>
-              )}
-
-              {/* ── Section: Audio Formats ────────────────────────────────────── */}
-              <View style={[styles.sectionHeaderRow, { marginTop: 20 }]}>
-                <Ionicons name="musical-notes" size={18} color="#00e5ff" />
-                <Text style={styles.sectionTitle}>Audio / MP3 Downloads</Text>
+                  <TouchableOpacity
+                    style={styles.actionIconButton}
+                    onPress={() => onSelectFormat(f)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
+                  </TouchableOpacity>
+                </View>
               </View>
-
-              {filteredAudioAdaptive.length === 0 ? (
-                <Text style={styles.emptyText}>No separate audio streams found.</Text>
-              ) : (
-                filteredAudioAdaptive.map((f, idx) => (
-                  <View key={`audio_${f.itag}_${idx}`} style={styles.formatItem}>
-                    <View style={styles.formatBadgeContainer}>
-                      <Text style={[styles.formatQuality, { color: '#00e5ff' }]}>{f.quality}</Text>
-                      <View style={[styles.tagBadge, { backgroundColor: '#004455' }]}>
-                        <Text style={[styles.tagText, { color: '#00e5ff' }]}>MP3 AUDIO</Text>
-                      </View>
-                    </View>
-                    <View style={styles.formatMeta}>
-                      <Text style={styles.formatLabel}>MP3 Music Track (Audio Only)</Text>
-                      <Text style={styles.formatSize}>{f.sizeFormatted}</Text>
-                    </View>
-                    <View style={styles.formatActionsRow}>
-                      {onPlayFormat && (
-                        <TouchableOpacity
-                          style={styles.actionIconButton}
-                          onPress={() => onPlayFormat(f)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <Ionicons name="play-circle" size={28} color="#00ffff" />
-                        </TouchableOpacity>
-                      )}
-                      <TouchableOpacity
-                        style={styles.actionIconButton}
-                        onPress={() => onSelectFormat(f)}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-          )}
+            ))}
+          </ScrollView>
         </BlurView>
       </View>
     </Modal>
@@ -338,7 +324,7 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255, 255, 255, 0.12)',
     paddingTop: 10,
     paddingBottom: 36,
-    maxHeight: '75%',
+    maxHeight: '80%',
   },
   dragIndicator: {
     width: 38,
@@ -356,124 +342,99 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   sheetTitle: {
+    color: '#ffffff',
     fontSize: 18,
     fontWeight: '700',
-    color: '#ffffff',
+    letterSpacing: 0.3,
   },
   closeButton: {
     padding: 4,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  loadingContainer: {
-    paddingVertical: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    marginTop: 14,
-    color: '#aaaaaa',
-    fontSize: 14,
-  },
-  errorContainer: {
-    paddingVertical: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  errorText: {
-    color: '#ff6666',
-    fontSize: 14,
-    marginTop: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   scrollArea: {
-    flexGrow: 0,
+    paddingHorizontal: 16,
   },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingBottom: 24,
   },
   previewCard: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 14,
     padding: 10,
-    marginBottom: 16,
+    marginBottom: 18,
     alignItems: 'center',
   },
   previewThumbnail: {
-    width: 80,
-    height: 45,
-    borderRadius: 6,
-    backgroundColor: '#333333',
+    width: 104,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: '#111111',
   },
   previewMeta: {
     flex: 1,
     marginLeft: 12,
+    justifyContent: 'center',
   },
   previewTitle: {
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '600',
-    lineHeight: 18,
+    lineHeight: 17,
   },
   previewChannel: {
     color: '#aaaaaa',
-    fontSize: 12,
-    marginTop: 3,
+    fontSize: 11,
+    marginTop: 2,
   },
   savePillButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(83, 90, 255, 0.15)',
-    borderWidth: 1,
-    borderColor: '#535aff',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginTop: 6,
     gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   savePillButtonActive: {
-    backgroundColor: '#535aff',
+    backgroundColor: 'rgba(83, 90, 255, 0.25)',
   },
   savePillText: {
-    color: '#535aff',
-    fontSize: 11,
-    fontWeight: '700',
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '500',
   },
   savePillTextActive: {
-    color: '#ffffff',
+    color: '#8c91ff',
   },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
     marginBottom: 10,
-    gap: 6,
+    marginTop: 6,
   },
   sectionTitle: {
+    color: '#ffffff',
     fontSize: 14,
     fontWeight: '700',
-    color: '#e0e0e0',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.2,
   },
   formatItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   formatBadgeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minWidth: 80,
-    gap: 6,
+    width: 76,
+    alignItems: 'flex-start',
   },
   formatQuality: {
     color: '#ffffff',
@@ -481,10 +442,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   tagBadge: {
-    backgroundColor: 'rgba(255, 0, 0, 0.3)',
-    borderRadius: 4,
+    backgroundColor: '#333333',
     paddingHorizontal: 5,
     paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 3,
   },
   tagText: {
     color: '#ffffff',
@@ -496,8 +458,9 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   formatLabel: {
-    color: '#dddddd',
-    fontSize: 12,
+    color: '#e0e0e0',
+    fontSize: 13,
+    fontWeight: '500',
   },
   formatSize: {
     color: '#888888',
@@ -507,16 +470,9 @@ const styles = StyleSheet.create({
   formatActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginLeft: 8,
+    gap: 10,
   },
   actionIconButton: {
     padding: 2,
-  },
-  emptyText: {
-    color: '#777777',
-    fontSize: 13,
-    fontStyle: 'italic',
-    paddingVertical: 8,
   },
 });

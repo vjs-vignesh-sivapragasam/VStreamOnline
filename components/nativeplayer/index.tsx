@@ -203,6 +203,12 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
 
         Animated.timing(bufferOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
 
+        // Restore playback position seamlessly when switching qualities or reloading stream
+        if (lastKnownTimeRef.current > 1 && videoRef.current) {
+            videoRef.current.seek(lastKnownTimeRef.current);
+            playerState.setCurrentTime(lastKnownTimeRef.current);
+        }
+
         if (data.audioTracks && Array.isArray(data.audioTracks) && data.audioTracks.length > 0) {
             setAvailableAudioTracks(data.audioTracks);
             if (selectedAudioTrack === -1) {
@@ -424,7 +430,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, []);
 
     // Memoize menu actions
-    const settingsActions = useMemo(() => buildSettingsActions(settings.playbackSpeed), [settings.playbackSpeed]);
+    const settingsActions = useMemo(() => buildSettingsActions(settings.playbackSpeed, streams, currentStreamIndex), [settings.playbackSpeed, streams, currentStreamIndex]);
 
     const subtitleActions = useMemo(() => {
         const adaptedTracks = adaptTracks(availableTextTracks);
@@ -550,6 +556,22 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         );
     }
 
+        const videoSource = useMemo(() => {
+        if (!videoUrl) return undefined;
+        if (videoUrl.includes('googlevideo.com')) {
+            return {
+                uri: videoUrl,
+                headers: {
+                    'User-Agent': Platform.OS === 'ios'
+                        ? 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)'
+                        : 'com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US)',
+                    'Accept': '*/*',
+                },
+            };
+        }
+        return { uri: videoUrl };
+    }, [videoUrl]);
+
     if (videoError) {
         return <ErrorDisplay error={videoError} onBack={handleBack} onRetry={handleRetry} />;
     }
@@ -558,12 +580,13 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         <View style={styles.container}>
             <Video
                 ref={videoRef}
-                source={{ uri: videoUrl }}
+                source={videoSource}
                 style={styles.video}
                 paused={isPaused}
                 muted={settings.isMuted}
                 rate={settings.playbackSpeed}
                 resizeMode={contentFit}
+                ignoreSilentSwitch="ignore"
                 useTextureView={Platform.OS === 'android'}
                 hideShutterView={true}
                 shutterColor="transparent"
@@ -582,8 +605,9 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 controls={false}
                 fullscreen={isFullscreen}
                 enterPictureInPictureOnLeave={true}
-                playInBackground={false}
-                playWhenInactive={false}
+                playInBackground={true}
+                playWhenInactive={true}
+                preventsDisplaySleepDuringVideoPlayback={true}
                 allowsExternalPlayback={true}
                 onFullscreenPlayerWillPresent={() => setIsFullscreen(true)}
                 onFullscreenPlayerWillDismiss={() => setIsFullscreen(false)}

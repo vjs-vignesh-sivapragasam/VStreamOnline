@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { youTubeService, YouTubeVideoDetails, YouTubeVideoItem } from '@/services/YouTubeService';
+import { dataConsumptionService } from '@/services/DataConsumptionService';
 
 export interface ActiveYouTubeVideo {
   id: string;
@@ -43,6 +44,12 @@ export interface YouTubePlayerContextType {
   setPlaybackError: (error: string | null) => void;
   handlePlayerError: (error: string) => void;
   retryStream: () => void;
+  isShortsVisible: boolean;
+  activeShortIndex: number;
+  shortsList: ActiveYouTubeVideo[];
+  playShort: (short: ActiveYouTubeVideo, feed?: ActiveYouTubeVideo[]) => void;
+  closeShorts: () => void;
+  setActiveShortIndex: (index: number) => void;
 }
 
 const YouTubePlayerContext = createContext<YouTubePlayerContextType | null>(null);
@@ -61,14 +68,19 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   const [currentQuality, setCurrentQuality] = useState<string>('480p');
   const [playbackSpeed, setPlaybackSpeedState] = useState<number>(1.0);
   const [isLooping, setIsLooping] = useState<boolean>(false);
+  const [isShortsVisible, setIsShortsVisible] = useState(false);
+  const [activeShortIndex, setActiveShortIndex] = useState(0);
+  const [shortsList, setShortsList] = useState<ActiveYouTubeVideo[]>([]);
 
   const activeVideoIdRef = useRef<string | null>(null);
   const fallbackCountRef = useRef<number>(0);
+  const lastTrackTimeRef = useRef<number>(0);
 
   const playVideo = useCallback(async (video: ActiveYouTubeVideo) => {
     console.log(`[YouTubePlayer] ▶️ playVideo requested for ID: "${video.id}", Title: "${video.title}"`);
     activeVideoIdRef.current = video.id;
     fallbackCountRef.current = 0;
+    lastTrackTimeRef.current = 0;
     setCurrentVideo(video);
     setVideoDetails(null);
     setStreamUrl(null);
@@ -86,26 +98,20 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
       const details = await youTubeService.getVideoDetails(video.id);
 
       if (activeVideoIdRef.current !== video.id) {
-        console.log(`[YouTubePlayer] ⏹️ Active video ID changed (current: ${activeVideoIdRef.current}), discarding result for ${video.id}`);
+        console.log(`[YouTubePlayer] ⏹️ Active video ID changed, discarding result for ${video.id}`);
         return;
       }
 
       console.log(`[YouTubePlayer] ✅ Received videoDetails for: ${video.id}`);
-      console.log(`[YouTubePlayer] 📊 Progressive streams: ${details.formats.progressive.length}, VideoAdaptive: ${details.formats.videoAdaptive.length}, AudioAdaptive: ${details.formats.audioAdaptive.length}`);
-
       setVideoDetails(details);
       if (details.duration) {
         setDuration(details.duration);
       }
 
-      // Default to 480p as requested
+      // Default to progressive format (combines audio and video) closest to 480p
       const cleanQuality = '480';
-
-      // 1. Check if a progressive stream (video + audio) matching 480p exists
       let chosenFormat = details.formats.progressive.find((f) => f.quality.includes(cleanQuality));
 
-      // 2. If no 480p progressive stream exists, pick the progressive stream closest to 480p (e.g. 720p or 360p)
-      // This is crucial: progressive streams contain BOTH audio and video, avoiding silent playback
       if (!chosenFormat && details.formats.progressive.length > 0) {
         const sorted = [...details.formats.progressive].sort((a, b) => {
           const numA = parseInt((a.quality.match(/\d+/) || ['360'])[0], 10);
@@ -115,7 +121,6 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
         chosenFormat = sorted[0];
       }
 
-      // 3. Fallback to adaptive if no progressive available
       if (!chosenFormat) {
         chosenFormat =
           details.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality) && f.container === 'mp4') ||
@@ -124,24 +129,18 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
       }
 
       if (!chosenFormat) {
-        const errMsg = 'No playable format returned from YouTube engine';
+        const errMsg = 'No playable format returned from streaming engine';
         console.error(`[YouTubePlayer] ❌ ${errMsg}`);
         setPlaybackError(errMsg);
         setIsBuffering(false);
         return;
       }
 
-      console.log(`[YouTubePlayer] 🎬 Chosen format: ${chosenFormat.quality} (${chosenFormat.container}), itag: ${chosenFormat.itag}`);
-      console.log(`[YouTubePlayer] 🌐 Direct CDN URL:`, chosenFormat.url ? chosenFormat.url.substring(0, 90) + '...' : 'none');
-      console.log(`[YouTubePlayer] 🛡️ Proxy URL:`, chosenFormat.proxyUrl || 'none');
-
-      // Use direct CDN URL directly for stable native AVPlayer / ExoPlayer playback
       const selectedUrl = chosenFormat.url || chosenFormat.proxyUrl || null;
-      console.log(`[YouTubePlayer] 🚀 Setting active streamUrl to direct CDN:`, selectedUrl ? selectedUrl.substring(0, 90) + '...' : 'null');
-
+      console.log(`[YouTubePlayer] 🚀 Setting active streamUrl: ${selectedUrl ? selectedUrl.substring(0, 85) + '...' : 'null'}`);
       setStreamUrl(selectedUrl);
     } catch (err: any) {
-      console.warn(`[YouTubePlayer] ⚠️ playVideo caught error:`, err?.message || err);
+      console.warn(`[YouTubePlayer] ⚠️ playVideo error:`, err?.message || err);
       setPlaybackError(err?.message || 'Could not load video stream');
       setIsBuffering(false);
     }
@@ -288,9 +287,18 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   }, []);
 
   const minimize = useCallback(() => {
-    console.log('[YouTubePlayer] 🔽 minimize called -> closing player (miniplayer removed)');
-    close();
-  }, [close]);
+    console.log('[YouTubePlayer] 🔽 minimize called -> switching to floating miniplayer');
+    setIsMinimized(true);
+  }, []);
+
+  const playShort = useCallback((short: ActiveYouTubeVideo, _feed?: ActiveYouTubeVideo[]) => {
+    // Shorts mode disabled: route directly to standard YouTube Watch screen
+    playVideo(short);
+  }, [playVideo]);
+
+  const closeShorts = useCallback(() => {
+    setIsShortsVisible(false);
+  }, []);
 
   const availableQualities = useMemo(() => {
     const qualities = new Set<string>();
@@ -407,12 +415,21 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     setSeekTarget(null);
   }, []);
 
-  const updateProgress = useCallback((cur: number, dur: number) => {
+    const updateProgress = useCallback((cur: number, dur: number) => {
     setCurrentTime(cur);
     if (dur > 0) {
       setDuration(dur);
     }
-  }, []);
+
+    // Track streaming data consumption incrementally (~every 4-5s)
+    const delta = cur - lastTrackTimeRef.current;
+    if (delta >= 4 && delta < 30) {
+      lastTrackTimeRef.current = cur;
+      dataConsumptionService.trackStreamingSeconds(delta, currentQuality);
+    } else if (delta < 0 || delta >= 30) {
+      lastTrackTimeRef.current = cur;
+    }
+  }, [currentQuality]);
 
   return (
     <YouTubePlayerContext.Provider
@@ -448,6 +465,12 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
         setPlaybackError,
         handlePlayerError,
         retryStream,
+        isShortsVisible,
+        activeShortIndex,
+        shortsList,
+        playShort,
+        closeShorts,
+        setActiveShortIndex,
       }}
     >
       {children}

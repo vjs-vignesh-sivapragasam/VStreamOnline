@@ -15,20 +15,23 @@ import {
   KeyboardAvoidingView,
   Pressable,
   PanResponder,
+  ToastAndroid,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, usePathname } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { isHapticsSupported } from '@/utils/platform';
 import { useYouTubePlayer } from '@/contexts/YouTubePlayerContext';
-import { youTubeService, YouTubeVideoItem, YouTubeVideoDetails, YouTubeFormatOption } from '@/services/YouTubeService';
+import { youTubeService, YouTubeVideoItem, YouTubeVideoDetails, YouTubeFormatOption, formatPublishedTime } from '@/services/YouTubeService';
 import { youTubeListService } from '@/services/YouTubeListService';
-import { downloadService } from '@/services/DownloadService';
+import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
-import { YouTubeInlinePlayer } from '@/components/youtube/YouTubeInlinePlayer';
+import { YouTubeInlinePlayer, ScreenFitMode } from '@/components/youtube/YouTubeInlinePlayer';
 import BottomSpacing from '@/components/BottomSpacing';
 
 interface VideoComment {
@@ -150,24 +153,62 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  // Swipe left or swipe down on video player to return/minimize like real YouTube
-  const swipePanResponder = useRef(
+  // Go back / minimize to previous YouTube screen (does not exit to home screen)
+  const handleGoBackPrevious = useCallback(async () => {
+    console.log('[YouTubeWatchOverlay] 👈 Going back to previous screen (minimizing watch overlay)');
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    minimize();
+  }, [minimize]);
+
+  const handleExpand = useCallback(() => {
+    try {
+      console.log('[YouTubeWatchOverlay] 🔼 Expanding mini player to full watch overlay');
+      expand();
+    } catch (err) {
+      console.error('[YouTubeWatchOverlay] ❌ Error in expand:', err);
+    }
+  }, [expand]);
+
+  // Dedicated PanResponder on the inline player: only swipe down or swipe left on the player minimizes/goes back
+  const playerPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        // Trigger only on clear deliberate swipes on the player area
-        return (
-          (Math.abs(gestureState.dx) > 50 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5) ||
-          (gestureState.dy > 50 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5)
-        );
+        // Deliberate vertical swipe down (dy > 40)
+        const isSwipeDown =
+          gestureState.dy > 40 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3;
+        // Deliberate vertical swipe up (dy < -40) -> Fullscreen!
+        const isSwipeUp =
+          gestureState.dy < -40 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3;
+        // Deliberate horizontal swipe left (dx < -50)
+        const isSwipeLeft =
+          gestureState.dx < -50 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4;
+        return isSwipeDown || isSwipeUp || isSwipeLeft;
       },
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
       onPanResponderRelease: async (_evt, gestureState) => {
-        // Swipe left (dx < -60) or swipe down (dy > 60) closes player
-        if (gestureState.dx < -60 || gestureState.dy > 60) {
-          if (await isHapticsSupported()) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        const isSwipeDown =
+          gestureState.dy > 40 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3;
+        const isSwipeUp =
+          gestureState.dy < -40 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3;
+        const isSwipeLeft =
+          gestureState.dx < -50 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4;
+        if (isSwipeUp) {
+          if (!isFullScreen) {
+            handleFullScreen(true);
           }
-          close();
+        } else if (isSwipeDown) {
+          if (isFullScreen) {
+            handleFullScreen(false);
+          } else {
+            handleGoBackPrevious();
+          }
+        } else if (isSwipeLeft) {
+          handleGoBackPrevious();
         }
       },
     })
@@ -176,14 +217,42 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // Related videos state
   const [relatedVideos, setRelatedVideos] = useState<YouTubeVideoItem[]>([]);
   const [loadingRelated, setLoadingRelated] = useState(false);
-  const [shortsVideos, setShortsVideos] = useState<YouTubeVideoItem[]>([]);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
 
   // Download modal state
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [activeDownloadItem, setActiveDownloadItem] = useState<YouTubeVideoItem | null>(null);
+  const insets = useSafeAreaInsets();
+  const [screenFitMode, setScreenFitMode] = useState<ScreenFitMode>('cover');
   const [modalVideoDetails, setModalVideoDetails] = useState<YouTubeVideoDetails | null>(null);
+  const [activeDownload, setActiveDownload] = useState<DownloadItem | null>(null);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
+  useEffect(() => {
+    if (!currentVideo?.id) {
+      setActiveDownload(null);
+      return;
+    }
+    const updateActiveDownload = () => {
+      const items = downloadService.getDownloads();
+      const match = items.find((d) => d.id === currentVideo.id || d.id.startsWith('yt_' + currentVideo.id));
+      setActiveDownload(match || null);
+    };
+    updateActiveDownload();
+    const unsub = downloadService.addListener(() => updateActiveDownload());
+    return unsub;
+  }, [currentVideo?.id]);
   const [isLoadingModalDetails, setIsLoadingModalDetails] = useState(false);
+  const [downloadToast, setDownloadToast] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+
+  const showDownloadToast = useCallback((msg: string) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setDownloadToast(msg);
+    toastTimeoutRef.current = setTimeout(() => {
+      setDownloadToast(null);
+    }, 2800);
+  }, []);
 
   const handleOpenDownload = useCallback(
     async (item: YouTubeVideoItem) => {
@@ -197,7 +266,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
 
       setIsLoadingModalDetails(true);
       try {
-        const details = await youTubeService.getVideoDetails(item.id);
+        const details = await youTubeService.getVideoDetails(item.id, item);
         setModalVideoDetails(details);
       } catch (err) {
         console.warn('[YouTubeWatchOverlay] Could not fetch download formats:', err);
@@ -234,16 +303,8 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       setCommentsList(DEFAULT_COMMENTS);
       setActiveDownloadItem(null);
 
-      // Fetch related recommendations and shorts
+      // Fetch related recommendations
       fetchRelated(currentVideo.channel || currentVideo.title);
-      youTubeService
-        .getShortsFeed(5000)
-        .then((res) => {
-          if (res.videos.length > 0) {
-            setShortsVideos(res.videos.slice(0, 4));
-          }
-        })
-        .catch(() => {});
       youTubeService
         .getAuthStatus()
         .then((st) => {
@@ -255,12 +316,29 @@ const YouTubeWatchOverlayInner: React.FC = () => {
     }
   }, [currentVideo?.id]);
 
+  // Sync saved state in real-time with youTubeListService
+  useEffect(() => {
+    if (!currentVideo?.id) return;
+    setIsSaved(youTubeListService.isSaved(currentVideo.id));
+    const unsubscribe = youTubeListService.subscribe(() => {
+      setIsSaved(youTubeListService.isSaved(currentVideo.id));
+    });
+    return () => unsubscribe();
+  }, [currentVideo?.id]);
+
   const fetchRelated = async (query: string) => {
     try {
       setLoadingRelated(true);
       const results = await youTubeService.search(query);
-      // Filter out current video
-      setRelatedVideos(results.filter((v) => v.id !== currentVideo?.id));
+      // Filter out current video and short videos
+      setRelatedVideos(
+        results.filter(
+          (v) =>
+            v.id !== currentVideo?.id &&
+            !v.isShort &&
+            !v.title.toLowerCase().includes('#short')
+        )
+      );
     } catch {
       setRelatedVideos([]);
     } finally {
@@ -355,47 +433,62 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         const fileName = `${cleanTitle}_${cleanQuality}.${ext}`;
         const downloadId = `yt_${targetVideo.id}_${format.itag}_${ext}`;
 
+        // Guarantee that downloaded video ALWAYS has an audio track
+        const downloadStreamUrl = await youTubeService.resolveDownloadStreamUrl(targetVideo.id, format);
+
+        if (!downloadStreamUrl) {
+          throw new Error('Unable to resolve download URL. Please try another quality.');
+        }
+
         await downloadService.startDirectDownload({
           id: downloadId,
           title: targetVideo.title,
           poster: targetVideo.thumbnail,
           fileName,
-          streamUrl: format.url || format.proxyUrl || '',
+          streamUrl: downloadStreamUrl,
           fileLength: format.contentLength,
         });
 
-        Alert.alert(
-          'Download Started',
-          `Downloading "${cleanTitle}" (${isAudio ? 'MP3 Audio' : format.quality + ' MP4'}) to your Downloads.`,
-          [
-            { text: 'View Downloads', onPress: () => router.push('/youtube/downloads' as any) },
-            { text: 'OK', style: 'cancel' },
-          ]
-        );
+        showDownloadToast(`Download started (${isAudio ? 'MP3 Audio' : format.quality})`);
+        if (Platform.OS === 'android') {
+          ToastAndroid.show('Download started', ToastAndroid.SHORT);
+        }
+        if (await isHapticsSupported()) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
       } catch (err: any) {
-        Alert.alert('Download Failed', err?.message || 'Could not start download.');
+        showDownloadToast(err?.message || 'Could not start download');
       }
     },
-    [currentVideo, activeDownloadItem, videoDetails, modalVideoDetails, router]
+    [currentVideo, activeDownloadItem, videoDetails, modalVideoDetails, showDownloadToast]
   );
 
-  const handleFullScreen = useCallback(() => {
-    if (!currentVideo || !streamUrl) return;
+  const handleFullScreen = useCallback(async (forced?: boolean) => {
+    const next = forced !== undefined ? forced : !isFullScreen;
+    setIsFullScreen(next);
+    try {
+      if (next) {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+      } else {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      }
+    } catch (e) {
+      console.warn('[YouTubeWatchOverlay] ScreenOrientation error:', e);
+    }
+  }, [isFullScreen]);
 
-    // Pause the inline player before switching to fullscreen
-    pauseVideo();
+  useEffect(() => {
+    if (isMinimized && isFullScreen) {
+      setIsFullScreen(false);
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    }
+  }, [isMinimized, isFullScreen]);
 
-    // Route to the app's tested cinematic landscape player with resume progress
-    router.push({
-      pathname: '/stream/player' as any,
-      params: {
-        videoUrl: streamUrl,
-        title: currentVideo.title,
-        poster: currentVideo.thumbnail,
-        progress: duration > 0 ? Math.floor((currentTime / duration) * 100) : 0,
-      },
-    });
-  }, [currentVideo, streamUrl, currentTime, duration, router, pauseVideo]);
+  useEffect(() => {
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    };
+  }, []);
 
 
 
@@ -427,18 +520,89 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   // While fullscreen player is active, suppress the portrait overlay
   if (pathname === '/stream/player') return null;
 
-  // Mini player removed completely
-  if (isMinimized) {
-    return null;
-  }
+  const bottomTabBarHeight = Platform.OS === 'ios' ? 49 + insets.bottom : 56 + insets.bottom;
 
-  // ── Render Full Real YouTube Watch Screen ──────────────────────────────────
+  // ── Render Full Real YouTube Watch Screen & Mini Player Bar ────────────────
   return (
-    <View style={styles.fullWatchOverlay}>
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        {/* Top 16:9 Video Player */}
-        <View {...swipePanResponder.panHandlers}>
+    <>
+      {/* Minimized Floating Mini Player Bar */}
+      {isMinimized && (
+        <View
+          style={[
+            styles.miniPlayerContainer,
+            { bottom: bottomTabBarHeight + 8 },
+          ]}
+          pointerEvents="box-none"
+        >
+          <View style={styles.miniPlayerBar}>
+            {/* Tapping preview or video info expands back to full watch overlay */}
+            <TouchableOpacity
+              style={styles.miniPlayerContentArea}
+              activeOpacity={0.8}
+              onPress={handleExpand}
+            >
+              {/* Mini 16:9 Thumbnail Preview */}
+              <View style={styles.miniThumbWrap}>
+                <Image
+                  source={{ uri: currentVideo.thumbnail }}
+                  style={styles.miniThumb}
+                  resizeMode="cover"
+                />
+              </View>
+
+              {/* Mini Video Info */}
+              <View style={styles.miniInfo}>
+                <Text style={styles.miniTitle} numberOfLines={1}>
+                  {currentVideo.title}
+                </Text>
+                <Text style={styles.miniChannel} numberOfLines={1}>
+                  {currentVideo.channel}
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Mini Play / Pause */}
+            <TouchableOpacity
+              style={styles.miniActionBtn}
+              onPress={togglePlay}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={isPlaying ? 'pause' : 'play'}
+                size={22}
+                color="#ffffff"
+              />
+            </TouchableOpacity>
+
+            {/* Mini Close Button */}
+            <TouchableOpacity
+              style={styles.miniActionBtn}
+              onPress={close}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={22} color="rgba(255, 255, 255, 0.75)" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Full Real YouTube Watch Screen (kept mounted so audio never stops and expand is instantaneous) */}
+      <View
+        style={[
+          styles.fullWatchOverlay,
+          { bottom: 0 },
+          isMinimized && styles.hiddenOverlay,
+        ]}
+        pointerEvents={isMinimized ? 'none' : 'auto'}
+      >
+        {!isMinimized && <StatusBar style="light" hidden={isFullScreen} />}
+        <View style={[styles.safeArea, { paddingTop: isFullScreen ? 0 : insets.top }]}>
+          {/* Top 16:9 Video Player: swipe down or left on the player minimizes/goes back */}
+          <View style={[styles.playerContainer, isFullScreen && styles.fullScreenPlayerContainer]} {...playerPanResponder.panHandlers}>
           <YouTubeInlinePlayer
+            videoId={currentVideo.id}
             title={currentVideo.title}
             channel={currentVideo.channel}
             streamUrl={streamUrl}
@@ -449,9 +613,14 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             duration={duration}
             seekTarget={seekTarget}
             playbackError={playbackError}
+            screenFitMode={screenFitMode}
+            onScreenFitChange={setScreenFitMode}
+            topInset={isFullScreen ? 0 : insets.top}
+            isFullScreen={isFullScreen}
             onTogglePlay={togglePlay}
-            onMinimize={close}
-            onFullScreen={handleFullScreen}
+            onMinimize={isFullScreen ? () => handleFullScreen(false) : handleGoBackPrevious}
+            onSwipeExit={isFullScreen ? () => handleFullScreen(false) : handleGoBackPrevious}
+            onFullScreen={() => handleFullScreen()}
             onSeek={seekTo}
             onClearSeekTarget={clearSeekTarget}
             onProgress={updateProgress}
@@ -469,8 +638,10 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         </View>
 
         {/* Watch Details & Related Feed */}
+        {!isFullScreen && (
         <ScrollView
           style={styles.contentScroll}
+          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.contentBodyWrap}>
@@ -606,37 +777,67 @@ const YouTubeWatchOverlayInner: React.FC = () => {
               <Text style={styles.actionText}>Share</Text>
             </TouchableOpacity>
 
-            {/* Remix Pill (Sparkles) */}
+
+            {/* Download Pill with dynamic state & health */}
             <TouchableOpacity
-              style={styles.actionPill}
+              style={[
+                styles.actionPill,
+                activeDownload?.status === 'downloading' && { borderColor: 'rgba(0, 229, 255, 0.4)', backgroundColor: 'rgba(0, 229, 255, 0.12)' },
+                activeDownload?.status === 'paused' && { borderColor: 'rgba(255, 179, 0, 0.4)', backgroundColor: 'rgba(255, 179, 0, 0.12)' },
+                activeDownload?.status === 'completed' && { borderColor: 'rgba(0, 230, 118, 0.4)', backgroundColor: 'rgba(0, 230, 118, 0.12)' },
+              ]}
               onPress={() => {
-                Alert.alert('Remix', 'YouTube Remix & Sound creation is ready for this video.');
+                if (activeDownload?.status === 'paused') {
+                  downloadService.resumeDownload(activeDownload.id);
+                } else if (activeDownload?.status === 'downloading') {
+                  downloadService.pauseDownload(activeDownload.id);
+                } else if (currentVideo) {
+                  handleOpenDownload(currentVideo);
+                }
               }}
               activeOpacity={0.7}
             >
-              <Ionicons name="sparkles-outline" size={16} color="#ffffff" />
-              <Text style={styles.actionText}>Remix</Text>
+              {activeDownload?.status === 'downloading' ? (
+                <>
+                  <ActivityIndicator size="small" color="#00e5ff" style={{ transform: [{ scale: 0.7 }] }} />
+                  <Text style={[styles.actionText, { color: '#00e5ff', fontWeight: '700' }]}>
+                    {activeDownload.progress}%
+                  </Text>
+                </>
+              ) : activeDownload?.status === 'paused' ? (
+                <>
+                  <Ionicons name="play-circle" size={17} color="#ffb300" />
+                  <Text style={[styles.actionText, { color: '#ffb300', fontWeight: '700' }]}>Resume</Text>
+                </>
+              ) : activeDownload?.status === 'completed' ? (
+                <>
+                  <Ionicons name="checkmark-circle" size={17} color="#00e676" />
+                  <Text style={[styles.actionText, { color: '#00e676', fontWeight: '700' }]}>Downloaded</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="arrow-down-circle-outline" size={17} color="#ffffff" />
+                  <Text style={styles.actionText}>Download</Text>
+                </>
+              )}
             </TouchableOpacity>
 
-            {/* Download Pill */}
+            {/* Save to My List Pill (Next to Download) */}
             <TouchableOpacity
-              style={styles.actionPill}
+              style={[styles.actionPill, isSaved && styles.actionPillActive]}
               onPress={() => {
-                if (currentVideo) handleOpenDownload(currentVideo);
+                if (currentVideo) handleToggleSave(currentVideo);
               }}
               activeOpacity={0.7}
             >
-              <Ionicons name="arrow-down-circle-outline" size={17} color="#ffffff" />
-              <Text style={styles.actionText}>Download</Text>
-            </TouchableOpacity>
-
-            {/* More Options Pill */}
-            <TouchableOpacity
-              style={styles.actionPillRound}
-              onPress={() => handleOpenItemOptions(currentVideo)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="ellipsis-horizontal" size={18} color="#ffffff" />
+              <Ionicons
+                name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                size={17}
+                color={isSaved ? '#535aff' : '#ffffff'}
+              />
+              <Text style={[styles.actionText, isSaved && { color: '#535aff' }]}>
+                {isSaved ? 'Saved' : 'Save to My List'}
+              </Text>
             </TouchableOpacity>
           </ScrollView>
 
@@ -670,55 +871,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             </View>
           </TouchableOpacity>
 
-          {/* 4. Real YouTube Shorts Shelf */}
-          {shortsVideos.length > 0 && (
-            <View style={styles.shortsShelfWrap}>
-              <View style={styles.shortsHeader}>
-                <View style={styles.shortsTitleRow}>
-                  <Ionicons name="logo-youtube" size={22} color="#ff0000" />
-                  <Text style={styles.shortsTitleText}>Shorts</Text>
-                </View>
-              </View>
-
-              <View style={styles.shortsGrid}>
-                {shortsVideos.slice(0, 2).map((item) => (
-                  <TouchableOpacity
-                    key={`short_${item.id}`}
-                    style={styles.shortCard}
-                    activeOpacity={0.9}
-                    onPress={() => playVideo(item)}
-                  >
-                    <Image source={{ uri: item.thumbnail }} style={styles.shortThumb} resizeMode="cover" />
-                    <LinearGradient
-                      colors={['transparent', 'rgba(0, 0, 0, 0.35)', 'rgba(0, 0, 0, 0.88)']}
-                      locations={[0, 0.5, 1]}
-                      style={styles.shortGradientBottom}
-                      pointerEvents="none"
-                    >
-                      <Text style={styles.shortVideoTitle} numberOfLines={2}>
-                        {item.title}
-                      </Text>
-                      <Text style={styles.shortViewsText}>
-                        {item.views || '1.2M views'}
-                      </Text>
-                    </LinearGradient>
-                    <TouchableOpacity
-                      style={styles.shortDotsBtn}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleOpenItemOptions(item);
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="ellipsis-vertical" size={14} color="#ffffff" />
-                    </TouchableOpacity>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* 4. Real YouTube Up Next / Related Feed (Full-Width 16:9 Cards) */}
+          {/* Real YouTube Up Next / Related Feed (Full-Width 16:9 Cards) */}
           <View style={styles.feedContainer}>
             {loadingRelated ? (
               <View style={styles.relatedLoading}>
@@ -784,7 +937,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
                           style={styles.verifiedCheck}
                         />
                         <Text style={styles.feedStatsText} numberOfLines={1}>
-                          • {item.views || '1.1M'} • {item.published || 'Recently'}
+                          • {item.published ? formatPublishedTime(item.published) : 'Recently'}
                         </Text>
                       </View>
 
@@ -810,6 +963,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
 
           <BottomSpacing space={60} />
         </ScrollView>
+        )}
 
         {/* Quality Download Modal */}
         <QualityPickerModal
@@ -1029,16 +1183,46 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             </View>
           </Pressable>
         </Modal>
-      </SafeAreaView>
+
+        {/* Floating Download Toast Pill */}
+        {downloadToast && (
+          <View style={styles.downloadToastPill} pointerEvents="none">
+            <Ionicons name="arrow-down-circle" size={18} color="#00e5ff" style={{ marginRight: 8 }} />
+            <Text style={styles.downloadToastText}>{downloadToast}</Text>
+          </View>
+        )}
+      </View>
     </View>
+    </>
   );
 };
 
 const styles = StyleSheet.create({
   fullWatchOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     backgroundColor: '#0a0a0c',
     zIndex: 99999,
+  },
+  hiddenOverlay: {
+    opacity: 0,
+    zIndex: -1,
+  },
+  playerContainer: {
+    width: '100%',
+  },
+  fullScreenPlayerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+    zIndex: 99999,
+    backgroundColor: '#000000',
   },
   safeArea: {
     flex: 1,
@@ -1308,74 +1492,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.6)',
   },
-
-  // ── Shorts Shelf Under Comments (Real YouTube Style) ───────────────────────
-  shortsShelfWrap: {
-    marginTop: 8,
-    marginBottom: 16,
-    paddingHorizontal: 16,
-  },
-  shortsHeader: {
-    marginBottom: 10,
-  },
-  shortsTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  shortsTitleText: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#ffffff',
-  },
-  shortsGrid: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  shortCard: {
-    flex: 1,
-    aspectRatio: 9 / 16,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#1c1c1e',
-    position: 'relative',
-  },
-  shortThumb: {
-    width: '100%',
-    height: '100%',
-  },
-  shortGradientBottom: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 8,
-    paddingBottom: 8,
-    paddingTop: 18,
-  },
-  shortVideoTitle: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
-  },
-  shortViewsText: {
-    color: 'rgba(255, 255, 255, 0.75)',
-    fontSize: 11,
-    marginTop: 3,
-  },
-  shortDotsBtn: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
   // ── Up Next / Related Full-Width 16:9 Feed ─────────────────────────────────
   feedContainer: {
     marginTop: 6,
@@ -1505,6 +1621,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 8,
     elevation: 8,
+  },
+  miniPlayerContentArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   miniThumbWrap: {
     width: 86,
@@ -1744,6 +1865,30 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#ffffff',
     fontWeight: '500',
+  },
+  downloadToastPill: {
+    position: 'absolute',
+    bottom: 30,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(20, 20, 24, 0.95)',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 10,
+    zIndex: 999999,
+  },
+  downloadToastText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 

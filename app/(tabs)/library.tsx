@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomSpacing from '@/components/BottomSpacing';
 import { TorrentItem } from '@/hooks/useTamilMv';
 import { confirmAction } from '@/utils/platform';
-import { downloadService, DownloadItem } from '@/services/DownloadService';
+import { downloadService, DownloadItem, getDownloadHealth } from '@/services/DownloadService';
 import { myListService, MyListItem } from '@/services/MyListService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
 import { tmdbService } from '@/services/TmdbService';
@@ -90,9 +90,10 @@ const LibraryScreen: React.FC = () => {
     }, []);
 
     // Automatically resolve missing posters for downloads in background via TMDB
+    // ONLY for torrent items that have an infoHash and are not YouTube items, and only when item count changes
     useEffect(() => {
         downloads.forEach((item) => {
-            if (!item.poster || !item.poster.trim()) {
+            if (item.infoHash && item.sourceType !== 'direct' && !item.id.startsWith('yt_') && (!item.poster || !item.poster.trim())) {
                 tmdbService.getMovieFullInfo(item.title)
                     .then((info) => {
                         if (info?.posterUrl) {
@@ -102,7 +103,7 @@ const LibraryScreen: React.FC = () => {
                     .catch(() => {});
             }
         });
-    }, [downloads]);
+    }, [downloads.length]);
 
     // ── Data ──────────────────────────────────────────────────────────────────────
 
@@ -203,23 +204,16 @@ const LibraryScreen: React.FC = () => {
 
     const handleDownloadItemPress = (item: DownloadItem) => {
         if (item.status === 'completed') {
-            // Prompt user with Internal player, VLC, MX Player, or system chooser
-            externalPlayerService.promptPlayerSelection({
-                fileUri: item.fileUri,
-                title: item.title,
-                poster: item.poster,
-                fileLength: item.totalBytes,
-                onPlayInternal: () => {
-                    router.push({
-                        pathname: '/stream/player' as any,
-                        params: {
-                            videoUrl: item.fileUri,
-                            title: item.title,
-                            poster: item.poster,
-                        },
-                    });
+            // Directly start in-app player immediately - no modal selection popup!
+            router.push({
+                pathname: '/stream/player' as any,
+                params: {
+                    videoUrl: item.fileUri,
+                    title: item.title,
+                    poster: item.poster,
                 },
             });
+            return;
         } else if (item.status === 'downloading') {
             downloadService.pauseDownload(item.id);
         } else if (item.status === 'paused' || item.status === 'error') {
@@ -414,6 +408,16 @@ const LibraryScreen: React.FC = () => {
                                                 <Text style={styles.peersText}>{item.peers} peers</Text>
                                             </View>
                                         )}
+
+                                        {isDownloading && (() => {
+                                            const health = getDownloadHealth(item.peers || 0, item.speedBps || 0, false);
+                                            return (
+                                                <View style={[styles.healthBadgeMini, { backgroundColor: health.bgColor, borderColor: health.color }]}>
+                                                    <View style={[styles.healthDotMini, { backgroundColor: health.color }]} />
+                                                    <Text style={[styles.healthBadgeText, { color: health.color }]}>{health.label}</Text>
+                                                </View>
+                                            );
+                                        })()}
 
                                         <Text style={styles.bytesText}>
                                             {downloadService.formatBytes(item.downloadedBytes)} / {downloadService.formatBytes(item.totalBytes)}
@@ -640,6 +644,15 @@ const LibraryScreen: React.FC = () => {
                                                     <Text style={styles.speedText}>{item.speedFormatted || 'Downloading...'}</Text>
                                                 </View>
                                             )}
+                                            {isDownloading && (() => {
+                                                const health = getDownloadHealth(item.peers || 28, item.speedBps || 0, true);
+                                                return (
+                                                    <View style={[styles.healthBadgeMini, { backgroundColor: health.bgColor, borderColor: health.color }]}>
+                                                        <View style={[styles.healthDotMini, { backgroundColor: health.color }]} />
+                                                        <Text style={[styles.healthBadgeText, { color: health.color }]}>{health.label}</Text>
+                                                    </View>
+                                                );
+                                            })()}
                                             <Text style={styles.bytesText}>
                                                 {downloadService.formatBytes(item.downloadedBytes)} / {downloadService.formatBytes(item.totalBytes)}
                                             </Text>
@@ -1388,6 +1401,24 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '600',
         color: '#7b82ff',
+    },
+    healthBadgeMini: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: 6,
+        paddingHorizontal: 6,
+        paddingVertical: 1.5,
+        borderWidth: 0.8,
+    },
+    healthDotMini: {
+        width: 5,
+        height: 5,
+        borderRadius: 2.5,
+    },
+    healthBadgeText: {
+        fontSize: 10,
+        fontWeight: '700',
     },
     bytesText: {
         fontSize: 11,

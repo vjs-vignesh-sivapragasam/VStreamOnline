@@ -12,24 +12,35 @@ import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import { useTheme } from '@/contexts/ThemeContext';
 import { storageCleanupService, StorageStats } from '@/services/StorageCleanupService';
+import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
 
-export const StorageCleanupCard: React.FC = () => {
+export interface StorageCleanupCardProps {
+  onStatsChange?: () => void;
+}
+
+export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsChange }) => {
   const { theme } = useTheme();
   const [stats, setStats] = useState<StorageStats | null>(null);
+  const [dataStats, setDataStats] = useState<DataConsumptionStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
       setIsLoading(true);
-      const data = await storageCleanupService.getStorageStats();
-      setStats(data);
+      const [storageData, consumptionData] = await Promise.all([
+        storageCleanupService.getStorageStats(),
+        dataConsumptionService.getDataConsumptionStats(),
+      ]);
+      setStats(storageData);
+      setDataStats(consumptionData);
+      onStatsChange?.();
     } catch (err) {
-      console.warn('[StorageCleanupCard] Error loading storage stats:', err);
+      console.warn('[StorageCleanupCard] Error loading stats:', err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [onStatsChange]);
 
   useEffect(() => {
     loadStats();
@@ -43,38 +54,46 @@ export const StorageCleanupCard: React.FC = () => {
 
   // 1. Clear Downloads Action
   const handleClearDownloads = () => {
-    if (!stats || (stats.tamilmvDownloadsCount === 0 && stats.youtubeDownloadsCount === 0)) {
+    const tmvCount = stats?.tamilmvDownloadsCount || 0;
+    const ytCount = stats?.youtubeDownloadsCount || 0;
+    if (!stats || (tmvCount === 0 && ytCount === 0)) {
       Alert.alert('No Downloads', 'Your downloads directory is currently empty.');
       return;
     }
 
     Alert.alert(
       'Clear Downloads',
-      `You currently have ${stats.tamilmvDownloadsCount} TamilMV downloads (${storageCleanupService.formatBytes(stats.tamilmvDownloadsBytes)}) and ${stats.youtubeDownloadsCount} YouTube downloads (${storageCleanupService.formatBytes(stats.youtubeDownloadsBytes)}).\n\nWhat would you like to delete?`,
+      `Choose downloads to delete:`,
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'TamilMV Only',
-          onPress: async () => {
-            await triggerHaptic();
-            setActionInProgress('downloads');
-            await storageCleanupService.clearTamilMVDownloads();
-            await loadStats();
-            setActionInProgress(null);
-            Alert.alert('Done', 'TamilMV downloads cleared successfully.');
-          },
-        },
-        {
-          text: 'YouTube Only',
-          onPress: async () => {
-            await triggerHaptic();
-            setActionInProgress('downloads');
-            await storageCleanupService.clearYouTubeDownloads();
-            await loadStats();
-            setActionInProgress(null);
-            Alert.alert('Done', 'YouTube downloads cleared successfully.');
-          },
-        },
+        ...(tmvCount > 0
+          ? [
+              {
+                text: `TamilMV (${tmvCount})`,
+                onPress: async () => {
+                  await triggerHaptic();
+                  setActionInProgress('downloads');
+                  await storageCleanupService.clearTamilMVDownloads();
+                  await loadStats();
+                  setActionInProgress(null);
+                },
+              },
+            ]
+          : []),
+        ...(ytCount > 0
+          ? [
+              {
+                text: `YouTube (${ytCount})`,
+                onPress: async () => {
+                  await triggerHaptic();
+                  setActionInProgress('downloads');
+                  await storageCleanupService.clearYouTubeDownloads();
+                  await loadStats();
+                  setActionInProgress(null);
+                },
+              },
+            ]
+          : []),
         {
           text: 'Clear All',
           style: 'destructive',
@@ -84,7 +103,6 @@ export const StorageCleanupCard: React.FC = () => {
             await storageCleanupService.clearAllDownloads();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert('Done', 'All downloaded movies and videos have been deleted.');
           },
         },
       ]
@@ -95,7 +113,7 @@ export const StorageCleanupCard: React.FC = () => {
   const handleClearCache = () => {
     Alert.alert(
       'Clear App Cache',
-      'This will delete cached images, stream buffer chunks, and temporary API metadata. Your saved downloads and settings will NOT be deleted.',
+      'Delete cached images, buffer chunks, and temp metadata? Downloads will not be affected.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -104,53 +122,57 @@ export const StorageCleanupCard: React.FC = () => {
           onPress: async () => {
             await triggerHaptic();
             setActionInProgress('cache');
-            const freed = await storageCleanupService.clearCache();
+            await storageCleanupService.clearCache();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert(
-              'Cache Cleared',
-              `Freed ${storageCleanupService.formatBytes(freed)} of temporary cache memory.`
-            );
           },
         },
       ]
     );
   };
 
-  // 3. Clear My List Action
+  // 3. Clear Watchlists Action
   const handleClearMyLists = () => {
-    if (!stats || (stats.tamilmvMyListCount === 0 && stats.youtubeMyListCount === 0)) {
-      Alert.alert('No Items', 'Your watchlists are already empty.');
+    const tmvCount = stats?.tamilmvMyListCount || 0;
+    const ytCount = stats?.youtubeMyListCount || 0;
+    if (!stats || (tmvCount === 0 && ytCount === 0)) {
+      Alert.alert('No Items', 'Your saved watchlists are already empty.');
       return;
     }
 
     Alert.alert(
-      'Clear Watchlists & Saved Items',
-      `You currently have ${stats.tamilmvMyListCount} movies/series in TamilMV Watchlist and ${stats.youtubeMyListCount} saved YouTube videos.\n\nChoose which list to clear:`,
+      'Clear Watchlists',
+      'Select list to clear:',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'TamilMV Only',
-          onPress: async () => {
-            await triggerHaptic();
-            setActionInProgress('mylist');
-            await storageCleanupService.clearTamilMVMyList();
-            await loadStats();
-            setActionInProgress(null);
-            Alert.alert('Done', 'TamilMV Watchlist cleared.');
-          },
-        },
-        {
-          text: 'YouTube Only',
-          onPress: async () => {
-            await triggerHaptic();
-            setActionInProgress('mylist');
-            await storageCleanupService.clearYouTubeMyList();
-            await loadStats();
-            setActionInProgress(null);
-            Alert.alert('Done', 'YouTube Saved List cleared.');
-          },
-        },
+        ...(tmvCount > 0
+          ? [
+              {
+                text: `TamilMV (${tmvCount})`,
+                onPress: async () => {
+                  await triggerHaptic();
+                  setActionInProgress('mylist');
+                  await storageCleanupService.clearTamilMVMyList();
+                  await loadStats();
+                  setActionInProgress(null);
+                },
+              },
+            ]
+          : []),
+        ...(ytCount > 0
+          ? [
+              {
+                text: `YouTube (${ytCount})`,
+                onPress: async () => {
+                  await triggerHaptic();
+                  setActionInProgress('mylist');
+                  await storageCleanupService.clearYouTubeMyList();
+                  await loadStats();
+                  setActionInProgress(null);
+                },
+              },
+            ]
+          : []),
         {
           text: 'Clear Both',
           style: 'destructive',
@@ -160,18 +182,39 @@ export const StorageCleanupCard: React.FC = () => {
             await storageCleanupService.clearAllMyLists();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert('Done', 'All watchlists and saved items have been cleared.');
           },
         },
       ]
     );
   };
 
-  // 4. Deep Clean / Clear Everything Action
+  // 4. Reset Data Usage
+  const handleResetDataTracking = () => {
+    Alert.alert(
+      'Reset Data Usage',
+      'Reset data consumption counters back to 0 B? Downloads and cache will remain intact.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            await triggerHaptic();
+            setActionInProgress('resetData');
+            await dataConsumptionService.resetAll();
+            await loadStats();
+            setActionInProgress(null);
+          },
+        },
+      ]
+    );
+  };
+
+  // 5. Deep Clean Everything
   const handleClearEverything = () => {
     Alert.alert(
-      'Deep Clean App Memory',
-      'This will delete ALL downloads (TamilMV & YouTube), wipe all temporary cache, and clear your watchlists. The app memory will be completely freed.\n\nAre you sure you want to proceed?',
+      'Deep Clean App Storage',
+      'This will delete all downloads, cache, and watchlists. App data will be completely cleared.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -180,13 +223,10 @@ export const StorageCleanupCard: React.FC = () => {
           onPress: async () => {
             await triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
             setActionInProgress('everything');
-            const res = await storageCleanupService.clearEverything();
+            await storageCleanupService.clearEverything();
+            await dataConsumptionService.resetAll();
             await loadStats();
             setActionInProgress(null);
-            Alert.alert(
-              'Memory Cleanup Complete',
-              `Successfully freed ${storageCleanupService.formatBytes(res.freedBytes)} of device storage.`
-            );
           },
         },
       ]
@@ -203,332 +243,411 @@ export const StorageCleanupCard: React.FC = () => {
     ? storageCleanupService.formatBytes(stats.cacheBytes)
     : '0 B';
 
+  const totalUsedBytes = stats?.totalStorageUsedBytes || 0;
+  const downloadBytes = stats?.totalDownloadsBytes || 0;
+  const barMax = Math.max(totalUsedBytes, 1);
+  const downloadBarPct = totalUsedBytes > 0 ? Math.round((downloadBytes / barMax) * 100) : 0;
+  const cacheBarPct = totalUsedBytes > 0 ? Math.max(0, 100 - downloadBarPct) : 0;
+
+  const totalDownloadItems = (stats?.tamilmvDownloadsCount || 0) + (stats?.youtubeDownloadsCount || 0);
+  const totalListItems = (stats?.tamilmvMyListCount || 0) + (stats?.youtubeMyListCount || 0);
+
   return (
-    <View style={styles.cardContainer}>
-      {/* Top Header Row with Refresh */}
-      <View style={styles.headerRow}>
-        <View style={styles.headerLeft}>
-          <View style={[styles.headerIconBox, { backgroundColor: theme.primary + '1F' }]}>
-            <Ionicons name="pie-chart-outline" size={20} color={theme.primary} />
-          </View>
+    <View style={styles.container}>
+      {/* ── 1. Storage Overview Meter Card ──────────────────────── */}
+      <View style={styles.overviewCard}>
+        <View style={styles.overviewHeader}>
           <View>
-            <Text style={styles.headerTitle}>Storage & Memory Usage</Text>
-            <Text style={styles.headerSubtitle}>Manage offline media, cache & lists</Text>
+            <Text style={styles.overviewSub}>TOTAL STORAGE USED</Text>
+            <Text style={[styles.overviewTitle, { color: theme.primaryLight || theme.primary }]}>
+              {totalUsedFormatted}
+            </Text>
           </View>
+          <TouchableOpacity
+            onPress={loadStats}
+            disabled={isLoading}
+            style={styles.refreshBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color={theme.primary} />
+            ) : (
+              <Ionicons name="refresh" size={17} color="#8E8E93" />
+            )}
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          onPress={loadStats}
-          disabled={isLoading}
-          style={styles.refreshBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          activeOpacity={0.7}
-        >
-          {isLoading ? (
-            <ActivityIndicator size="small" color={theme.primary} />
-          ) : (
-            <Ionicons name="refresh" size={17} color="#8E8E93" />
+        {/* Visual Segment Bar */}
+        <View style={styles.barTrack}>
+          {downloadBarPct > 0 && (
+            <View style={[styles.barSegment, { width: `${downloadBarPct}%`, backgroundColor: '#0a84ff' }]} />
           )}
-        </TouchableOpacity>
-      </View>
-
-      {/* Storage Summary Big Pill */}
-      <View style={[styles.storageBanner, { borderColor: theme.primary + '33', backgroundColor: theme.primary + '0D' }]}>
-        <View style={styles.storageBannerLeft}>
-          <Text style={styles.storageBannerLabel}>TOTAL DATA CONSUMED</Text>
-          <Text style={[styles.storageBannerValue, { color: theme.primaryLight || theme.primary }]}>
-            {totalUsedFormatted}
-          </Text>
+          {cacheBarPct > 0 && (
+            <View style={[styles.barSegment, { width: `${cacheBarPct}%`, backgroundColor: '#ff9f0a' }]} />
+          )}
         </View>
-        <View style={styles.storageBannerRight}>
-          <View style={styles.storagePillRow}>
-            <View style={[styles.statDot, { backgroundColor: '#30d158' }]} />
-            <Text style={styles.statPillText}>Downloads: {downloadsFormatted}</Text>
+
+        {/* Legend */}
+        <View style={styles.legendRow}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#0a84ff' }]} />
+            <Text style={styles.legendLabel}>Downloads</Text>
+            <Text style={styles.legendValue}>{downloadsFormatted}</Text>
           </View>
-          <View style={styles.storagePillRow}>
-            <View style={[styles.statDot, { backgroundColor: '#ff9f0a' }]} />
-            <Text style={styles.statPillText}>Cache: {cacheFormatted}</Text>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#ff9f0a' }]} />
+            <Text style={styles.legendLabel}>Cache</Text>
+            <Text style={styles.legendValue}>{cacheFormatted}</Text>
           </View>
         </View>
       </View>
 
-      {/* Granular Breakdown Badges */}
-      <View style={styles.breakdownGrid}>
-        <View style={styles.breakdownItem}>
-          <Text style={styles.breakdownLabel}>TamilMV Downloads</Text>
-          <Text style={styles.breakdownValue}>
-            {stats ? `${stats.tamilmvDownloadsCount} items` : '0'} ({stats ? storageCleanupService.formatBytes(stats.tamilmvDownloadsBytes) : '0 B'})
+      {/* ── 2. Network Data Usage (Today & Total) ────────────────── */}
+      <View style={styles.dataRow}>
+        <View style={styles.dataCard}>
+          <View style={styles.dataCardHeader}>
+            <Ionicons name="today-outline" size={14} color="#30d158" />
+            <Text style={styles.dataCardLabel}>Today's Data</Text>
+          </View>
+          <Text style={styles.dataCardValue}>{dataStats?.todayFormatted || '0 B'}</Text>
+          <Text style={styles.dataCardSub}>
+            ~{dataStats?.todayStreamMinutes || 0}m streamed
           </Text>
         </View>
 
-        <View style={styles.breakdownItem}>
-          <Text style={styles.breakdownLabel}>YouTube Downloads</Text>
-          <Text style={styles.breakdownValue}>
-            {stats ? `${stats.youtubeDownloadsCount} items` : '0'} ({stats ? storageCleanupService.formatBytes(stats.youtubeDownloadsBytes) : '0 B'})
+        <View style={styles.dataCard}>
+          <View style={styles.dataCardHeader}>
+            <Ionicons name="globe-outline" size={14} color={theme.primary} />
+            <Text style={styles.dataCardLabel}>Total Usage</Text>
+          </View>
+          <Text style={[styles.dataCardValue, { color: theme.primaryLight || theme.primary }]}>
+            {dataStats?.overallFormatted || '0 B'}
           </Text>
-        </View>
-
-        <View style={styles.breakdownItem}>
-          <Text style={styles.breakdownLabel}>TamilMV Watchlist</Text>
-          <Text style={styles.breakdownValue}>{stats?.tamilmvMyListCount || 0} movies</Text>
-        </View>
-
-        <View style={styles.breakdownItem}>
-          <Text style={styles.breakdownLabel}>YouTube Saved</Text>
-          <Text style={styles.breakdownValue}>{stats?.youtubeMyListCount || 0} videos</Text>
+          <Text style={styles.dataCardSub}>
+            ~{dataStats?.overallStreamMinutes || 0}m all-time
+          </Text>
         </View>
       </View>
 
-      {/* Action Buttons Grid */}
-      <View style={styles.actionsContainer}>
-        {/* 1. Clear All Downloads Button */}
+      {/* ── 3. Manage & Cleanup List ─────────────────────────────── */}
+      <Text style={styles.sectionHeading}>CLEANUP</Text>
+      <View style={styles.groupedList}>
+        {/* Downloads */}
         <TouchableOpacity
-          style={[styles.actionBtn, { borderColor: theme.primary + '3A', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}
+          style={styles.listItem}
           onPress={handleClearDownloads}
           disabled={actionInProgress !== null}
           activeOpacity={0.7}
         >
-          <View style={[styles.actionIconWrap, { backgroundColor: theme.primary + '18' }]}>
-            {actionInProgress === 'downloads' ? (
-              <ActivityIndicator size="small" color={theme.primary} />
-            ) : (
-              <Ionicons name="arrow-down-circle-outline" size={18} color={theme.primary} />
-            )}
+          <View style={[styles.itemIcon, { backgroundColor: '#0a84ff1C' }]}>
+            <Ionicons name="arrow-down-circle" size={18} color="#0a84ff" />
           </View>
-          <View style={styles.actionTextWrap}>
-            <Text style={styles.actionBtnTitle}>Clear All Downloads</Text>
-            <Text style={styles.actionBtnSub}>Delete offline TamilMV & YouTube files</Text>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>Downloads</Text>
+            <Text style={styles.itemSub}>
+              {totalDownloadItems > 0 ? `${totalDownloadItems} files • ${downloadsFormatted}` : 'Empty'}
+            </Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
+          {actionInProgress === 'downloads' ? (
+            <ActivityIndicator size="small" color="#0a84ff" />
+          ) : (
+            <View style={styles.actionPill}>
+              <Text style={styles.actionPillText}>Clear</Text>
+            </View>
+          )}
         </TouchableOpacity>
 
-        {/* 2. Clear Cache Button */}
+        <View style={styles.listDivider} />
+
+        {/* Cache */}
         <TouchableOpacity
-          style={[styles.actionBtn, { borderColor: theme.primary + '3A', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}
+          style={styles.listItem}
           onPress={handleClearCache}
           disabled={actionInProgress !== null}
           activeOpacity={0.7}
         >
-          <View style={[styles.actionIconWrap, { backgroundColor: theme.primary + '18' }]}>
-            {actionInProgress === 'cache' ? (
-              <ActivityIndicator size="small" color={theme.primary} />
-            ) : (
-              <Ionicons name="trash-bin-outline" size={18} color={theme.primary} />
-            )}
+          <View style={[styles.itemIcon, { backgroundColor: '#ff9f0a1C' }]}>
+            <Ionicons name="trash-bin" size={18} color="#ff9f0a" />
           </View>
-          <View style={styles.actionTextWrap}>
-            <Text style={styles.actionBtnTitle}>Clear App Cache</Text>
-            <Text style={styles.actionBtnSub}>Free temporary image & stream buffer memory</Text>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>App Cache</Text>
+            <Text style={styles.itemSub}>{cacheFormatted} temporary buffer</Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
+          {actionInProgress === 'cache' ? (
+            <ActivityIndicator size="small" color="#ff9f0a" />
+          ) : (
+            <View style={styles.actionPill}>
+              <Text style={styles.actionPillText}>Clear</Text>
+            </View>
+          )}
         </TouchableOpacity>
 
-        {/* 3. Clear My List Button */}
+        <View style={styles.listDivider} />
+
+        {/* Watchlists */}
         <TouchableOpacity
-          style={[styles.actionBtn, { borderColor: theme.primary + '3A', backgroundColor: 'rgba(255, 255, 255, 0.04)' }]}
+          style={styles.listItem}
           onPress={handleClearMyLists}
           disabled={actionInProgress !== null}
           activeOpacity={0.7}
         >
-          <View style={[styles.actionIconWrap, { backgroundColor: theme.primary + '18' }]}>
-            {actionInProgress === 'mylist' ? (
-              <ActivityIndicator size="small" color={theme.primary} />
-            ) : (
-              <Ionicons name="bookmark-outline" size={18} color={theme.primary} />
-            )}
+          <View style={[styles.itemIcon, { backgroundColor: '#af52de1C' }]}>
+            <Ionicons name="bookmark" size={18} color="#af52de" />
           </View>
-          <View style={styles.actionTextWrap}>
-            <Text style={styles.actionBtnTitle}>Clear Watchlists & My List</Text>
-            <Text style={styles.actionBtnSub}>Reset saved TamilMV & YouTube lists</Text>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>Saved Watchlists</Text>
+            <Text style={styles.itemSub}>
+              {totalListItems > 0 ? `${totalListItems} saved items` : 'Empty'}
+            </Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
+          {actionInProgress === 'mylist' ? (
+            <ActivityIndicator size="small" color="#af52de" />
+          ) : (
+            <View style={styles.actionPill}>
+              <Text style={styles.actionPillText}>Clear</Text>
+            </View>
+          )}
         </TouchableOpacity>
 
-        {/* 4. Master Deep Clean Button */}
+        <View style={styles.listDivider} />
+
+        {/* Reset Data Counters */}
         <TouchableOpacity
-          style={[
-            styles.deepCleanBtn,
-            {
-              backgroundColor: theme.primary,
-              shadowColor: theme.primary,
-            },
-          ]}
-          onPress={handleClearEverything}
+          style={styles.listItem}
+          onPress={handleResetDataTracking}
           disabled={actionInProgress !== null}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
         >
-          {actionInProgress === 'everything' ? (
-            <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+          <View style={[styles.itemIcon, { backgroundColor: '#30d1581C' }]}>
+            <Ionicons name="refresh-circle" size={18} color="#30d158" />
+          </View>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>Reset Data Tracking</Text>
+            <Text style={styles.itemSub}>Clear usage stats back to 0 B</Text>
+          </View>
+          {actionInProgress === 'resetData' ? (
+            <ActivityIndicator size="small" color="#30d158" />
           ) : (
-            <Ionicons name="sparkles" size={16} color="#ffffff" style={{ marginRight: 8 }} />
+            <View style={[styles.actionPill, styles.actionPillGreen]}>
+              <Text style={[styles.actionPillText, { color: '#30d158' }]}>Reset</Text>
+            </View>
           )}
-          <Text style={styles.deepCleanBtnText}>
-            {actionInProgress === 'everything' ? 'Cleaning All Storage...' : 'Deep Clean & Free Everything'}
-          </Text>
         </TouchableOpacity>
       </View>
+
+      {/* ── 4. Deep Clean Button (Subtle & Clean) ─────────────────── */}
+      <TouchableOpacity
+        style={styles.deepCleanBtn}
+        onPress={handleClearEverything}
+        disabled={actionInProgress !== null}
+        activeOpacity={0.75}
+      >
+        {actionInProgress === 'everything' ? (
+          <ActivityIndicator size="small" color="#ff453a" />
+        ) : (
+          <>
+            <Ionicons name="sparkles-outline" size={16} color="#ff453a" />
+            <Text style={styles.deepCleanText}>Deep Clean (Wipe All App Storage)</Text>
+          </>
+        )}
+      </TouchableOpacity>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  cardContainer: {
-    backgroundColor: '#101012',
+  container: {
+    paddingVertical: 4,
+    gap: 14,
+  },
+
+  /* Overview Card */
+  overviewCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 16,
     padding: 16,
-    borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  headerRow: {
+  overviewHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 14,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.2,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 2,
-  },
-  refreshBtn: {
-    padding: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  storageBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 14,
-  },
-  storageBannerLeft: {
-    gap: 2,
-  },
-  storageBannerLabel: {
-    fontSize: 10,
+  overviewSub: {
+    fontSize: 11,
     fontWeight: '700',
     color: '#8E8E93',
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
+    marginBottom: 4,
   },
-  storageBannerValue: {
-    fontSize: 24,
+  overviewTitle: {
+    fontSize: 26,
     fontWeight: '800',
     letterSpacing: -0.5,
   },
-  storageBannerRight: {
-    gap: 4,
-    alignItems: 'flex-end',
+  refreshBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  storagePillRow: {
+  barTrack: {
+    height: 7,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 4,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  barSegment: {
+    height: '100%',
+  },
+  legendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+  },
+  legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  statDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  statPillText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#D1D1D6',
-  },
-  breakdownGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 14,
-  },
-  breakdownItem: {
-    flex: 1,
-    minWidth: '47%',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  breakdownLabel: {
-    fontSize: 11,
+  legendLabel: {
+    fontSize: 12,
     color: '#8E8E93',
+    fontWeight: '500',
+  },
+  legendValue: {
+    fontSize: 12,
+    color: '#ffffff',
+    fontWeight: '600',
+  },
+
+  /* Data KPI Cards */
+  dataRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  dataCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  dataCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  dataCardLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  dataCardValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
     marginBottom: 2,
   },
-  breakdownValue: {
+  dataCardSub: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontWeight: '500',
+  },
+
+  /* Grouped List */
+  sectionHeading: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#8E8E93',
+    letterSpacing: 0.6,
+    marginLeft: 4,
+    marginTop: 2,
+  },
+  groupedList: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    overflow: 'hidden',
+  },
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  itemIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemContent: {
+    flex: 1,
+  },
+  itemTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 2,
+  },
+  itemSub: {
+    fontSize: 12,
+    color: '#8E8E93',
+  },
+  listDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    marginLeft: 58,
+  },
+  actionPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  actionPillGreen: {
+    backgroundColor: 'rgba(48, 209, 88, 0.12)',
+  },
+  actionPillText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#ffffff',
   },
-  actionsContainer: {
-    gap: 8,
-  },
-  actionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  actionIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  actionTextWrap: {
-    flex: 1,
-  },
-  actionBtnTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  actionBtnSub: {
-    fontSize: 11,
-    color: '#8E8E93',
-    marginTop: 1,
-  },
+
+  /* Deep Clean */
   deepCleanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 10,
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 69, 58, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.22)',
     marginTop: 4,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 3,
   },
-  deepCleanBtnText: {
-    color: '#ffffff',
-    fontSize: 14,
+  deepCleanText: {
+    fontSize: 13,
     fontWeight: '700',
-    letterSpacing: 0.2,
+    color: '#ff453a',
   },
 });

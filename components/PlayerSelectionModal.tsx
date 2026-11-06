@@ -87,7 +87,7 @@ export const PlayerSelectionModal: React.FC = () => {
     <Modal
       visible={Boolean(data)}
       transparent
-      animationType="fade"
+      animationType="slide"
       onRequestClose={handleClose}
       statusBarTranslucent
     >
@@ -100,12 +100,12 @@ export const PlayerSelectionModal: React.FC = () => {
             isTabletOrDesktop && styles.sheetContainerTablet,
           ]}
         >
-          {/* Top Grab Handle */}
+          {/* Subtle Top Grab Handle */}
           <View style={styles.handleWrap}>
             <View style={styles.handle} />
           </View>
 
-          {/* Movie Header Card */}
+          {/* Compact Movie Header Card */}
           <View style={styles.movieHeader}>
             {data.poster ? (
               <Image
@@ -129,7 +129,7 @@ export const PlayerSelectionModal: React.FC = () => {
                   <Ionicons
                     name="checkmark-circle"
                     size={12}
-                    color="#00e676"
+                    color="#34c759"
                     style={{ marginRight: 4 }}
                   />
                   <Text style={styles.offlineBadgeText}>Downloaded</Text>
@@ -149,7 +149,7 @@ export const PlayerSelectionModal: React.FC = () => {
               activeOpacity={0.7}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="close" size={18} color="#8E8E93" />
+              <Ionicons name="close" size={17} color="rgba(255, 255, 255, 0.75)" />
             </TouchableOpacity>
           </View>
 
@@ -158,16 +158,16 @@ export const PlayerSelectionModal: React.FC = () => {
           {/* Section Header */}
           <Text style={styles.sectionLabel}>CHOOSE VIDEO PLAYER</Text>
 
-          {/* Player Options List */}
+          {/* Player Options Cards */}
           <View style={styles.optionsList}>
-            {/* 1. In-App Player */}
+            {/* 1. In-App Player (Recommended) */}
             <TouchableOpacity
               style={[styles.playerOption, styles.playerOptionFeatured]}
               onPress={handlePlayInternal}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
             >
               <View style={[styles.iconBox, { backgroundColor: '#535aff' }]}>
-                <Ionicons name="play" size={20} color="#ffffff" />
+                <Ionicons name="play" size={22} color="#ffffff" style={{ marginLeft: 2 }} />
               </View>
 
               <View style={styles.optionContent}>
@@ -182,17 +182,17 @@ export const PlayerSelectionModal: React.FC = () => {
                 </Text>
               </View>
 
-              <Ionicons name="chevron-forward" size={18} color="#535aff" />
+              <Ionicons name="chevron-forward" size={18} color="#7b82ff" />
             </TouchableOpacity>
 
             {/* 2. VLC Media Player */}
             <TouchableOpacity
               style={styles.playerOption}
               onPress={handleOpenVLC}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
             >
-              <View style={[styles.iconBox, { backgroundColor: '#ff8800' }]}>
-                <Ionicons name="film" size={20} color="#ffffff" />
+              <View style={[styles.iconBox, { backgroundColor: '#ff9500' }]}>
+                <Ionicons name="film" size={21} color="#ffffff" />
               </View>
 
               <View style={styles.optionContent}>
@@ -202,7 +202,7 @@ export const PlayerSelectionModal: React.FC = () => {
                 </Text>
               </View>
 
-              <Ionicons name="chevron-forward" size={18} color="#48484a" />
+              <Ionicons name="chevron-forward" size={17} color="rgba(255, 255, 255, 0.3)" />
             </TouchableOpacity>
 
             {/* 3. MX Player (Android) */}
@@ -210,7 +210,7 @@ export const PlayerSelectionModal: React.FC = () => {
               <TouchableOpacity
                 style={styles.playerOption}
                 onPress={handleOpenMX}
-                activeOpacity={0.7}
+                activeOpacity={0.75}
               >
                 <View style={[styles.iconBox, { backgroundColor: '#007aff' }]}>
                   <Ionicons name="play-forward" size={20} color="#ffffff" />
@@ -223,11 +223,11 @@ export const PlayerSelectionModal: React.FC = () => {
                   </Text>
                 </View>
 
-                <Ionicons name="chevron-forward" size={18} color="#48484a" />
+                <Ionicons name="chevron-forward" size={17} color="rgba(255, 255, 255, 0.3)" />
               </TouchableOpacity>
             )}
 
-            {/* 4. Infuse (iOS) */}
+            {/* 4. Infuse Player (iOS) */}
             {Platform.OS === 'ios' && (
               <TouchableOpacity
                 style={styles.playerOption}
@@ -239,10 +239,10 @@ export const PlayerSelectionModal: React.FC = () => {
                   setData(null);
                   await externalPlayerService.openInInfuse(fileUri, title);
                 }}
-                activeOpacity={0.7}
+                activeOpacity={0.75}
               >
                 <View style={[styles.iconBox, { backgroundColor: '#ff2d55' }]}>
-                  <Ionicons name="flame" size={20} color="#ffffff" />
+                  <Ionicons name="flame" size={21} color="#ffffff" />
                 </View>
 
                 <View style={styles.optionContent}>
@@ -252,17 +252,17 @@ export const PlayerSelectionModal: React.FC = () => {
                   </Text>
                 </View>
 
-                <Ionicons name="chevron-forward" size={18} color="#48484a" />
+                <Ionicons name="chevron-forward" size={17} color="rgba(255, 255, 255, 0.3)" />
               </TouchableOpacity>
             )}
 
-            {/* 5. System Chooser / Other Apps */}
+            {/* 5. Other Video Players... */}
             <TouchableOpacity
               style={styles.playerOption}
               onPress={handleOpenSystem}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
             >
-              <View style={[styles.iconBox, { backgroundColor: '#2c2c2e' }]}>
+              <View style={[styles.iconBox, { backgroundColor: '#343438' }]}>
                 <Ionicons name="open-outline" size={20} color="#ffffff" />
               </View>
 
@@ -273,15 +273,15 @@ export const PlayerSelectionModal: React.FC = () => {
                 </Text>
               </View>
 
-              <Ionicons name="chevron-forward" size={18} color="#48484a" />
+              <Ionicons name="chevron-forward" size={17} color="rgba(255, 255, 255, 0.3)" />
             </TouchableOpacity>
           </View>
 
-          {/* Cancel Button */}
+          {/* Full-width Cancel Button */}
           <TouchableOpacity
             style={styles.cancelButton}
             onPress={handleClose}
-            activeOpacity={0.7}
+            activeOpacity={0.75}
           >
             <Text style={styles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>
@@ -294,7 +294,7 @@ export const PlayerSelectionModal: React.FC = () => {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    backgroundColor: 'rgba(0, 0, 0, 0.68)',
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
@@ -303,48 +303,54 @@ const styles = StyleSheet.create({
   },
   sheetContainer: {
     width: '100%',
-    backgroundColor: '#161618',
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
+    backgroundColor: '#18181a',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 10,
     paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    borderWidth: 1,
-    borderColor: '#262628',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.09)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 18,
-    elevation: 24,
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 24,
+    elevation: 25,
   },
   sheetContainerTablet: {
-    maxWidth: 500,
-    borderRadius: 26,
-    marginBottom: 40,
+    maxWidth: 480,
+    width: '92%',
+    borderRadius: 28,
+    marginBottom: 'auto',
+    marginTop: 'auto',
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   handleWrap: {
     alignItems: 'center',
-    paddingVertical: 4,
-    marginBottom: 10,
+    paddingVertical: 2,
+    marginBottom: 12,
   },
   handle: {
     width: 38,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#3a3a3c',
+    height: 4.5,
+    borderRadius: 2.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
   },
   movieHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: 4,
   },
   posterThumbnail: {
-    width: 50,
-    height: 72,
-    borderRadius: 8,
-    backgroundColor: '#202022',
+    width: 52,
+    height: 74,
+    borderRadius: 10,
+    backgroundColor: '#242428',
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   posterFallback: {
     justifyContent: 'center',
@@ -353,67 +359,69 @@ const styles = StyleSheet.create({
   movieInfo: {
     flex: 1,
     marginLeft: 14,
-    marginRight: 8,
+    marginRight: 10,
+    justifyContent: 'center',
   },
   movieTitle: {
-    fontSize: 16,
+    fontSize: 15.5,
     fontWeight: '700',
     color: '#ffffff',
-    letterSpacing: -0.2,
-    lineHeight: 22,
+    letterSpacing: -0.3,
+    lineHeight: 21,
   },
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
+    marginTop: 7,
     gap: 8,
   },
   offlineBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 230, 118, 0.12)',
+    backgroundColor: 'rgba(52, 199, 89, 0.12)',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 3.5,
     borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 230, 118, 0.28)',
   },
   offlineBadgeText: {
-    fontSize: 11,
+    fontSize: 11.5,
     fontWeight: '700',
-    color: '#00e676',
+    color: '#34c759',
     letterSpacing: -0.1,
   },
   sizeBadge: {
-    backgroundColor: '#26262a',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 3.5,
     borderRadius: 6,
   },
   sizeBadgeText: {
-    fontSize: 11,
+    fontSize: 11.5,
     fontWeight: '600',
-    color: '#8E8E93',
+    color: 'rgba(255, 255, 255, 0.65)',
   },
   closeCircleButton: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#26262a',
+    backgroundColor: 'rgba(255, 255, 255, 0.09)',
     justifyContent: 'center',
     alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 2,
   },
   divider: {
-    height: 1,
-    backgroundColor: '#232326',
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.09)',
     marginVertical: 14,
   },
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#8E8E93',
+    color: 'rgba(255, 255, 255, 0.42)',
     letterSpacing: 0.8,
     marginBottom: 12,
+    textTransform: 'uppercase',
   },
   optionsList: {
     gap: 10,
@@ -421,20 +429,21 @@ const styles = StyleSheet.create({
   playerOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1f1f22',
-    paddingVertical: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    paddingVertical: 13,
     paddingHorizontal: 14,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2a2a2e',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   playerOptionFeatured: {
-    backgroundColor: 'rgba(83, 90, 255, 0.08)',
-    borderColor: 'rgba(83, 90, 255, 0.35)',
+    backgroundColor: 'rgba(83, 90, 255, 0.09)',
+    borderWidth: 1.5,
+    borderColor: '#535aff',
   },
   iconBox: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -450,42 +459,42 @@ const styles = StyleSheet.create({
   },
   optionTitle: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#ffffff',
     letterSpacing: -0.2,
   },
   recommendedPill: {
-    backgroundColor: 'rgba(83, 90, 255, 0.2)',
-    paddingHorizontal: 6,
+    backgroundColor: '#535aff',
+    paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(83, 90, 255, 0.45)',
   },
   recommendedText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#7d83ff',
-    letterSpacing: 0.2,
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: 0.3,
   },
   optionSubtitle: {
     fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 2,
+    color: 'rgba(255, 255, 255, 0.52)',
+    marginTop: 2.5,
     lineHeight: 16,
   },
   cancelButton: {
-    backgroundColor: '#202024',
-    paddingVertical: 13,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 14,
     borderWidth: 1,
-    borderColor: '#2e2e32',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   cancelButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#c7c7cc',
+    color: '#ffffff',
+    letterSpacing: -0.2,
   },
 });

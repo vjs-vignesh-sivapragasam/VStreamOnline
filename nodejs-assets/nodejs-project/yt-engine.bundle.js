@@ -29,7 +29,11 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var import_http = __toESM(require("http"));
 
 // node_modules/youtubei.js/dist/src/platform/node.js
-var import_web = require("stream/web");
+var import_web = (function() {
+  try { return require("stream/web"); } catch (_) {}
+  try { return require("stream"); } catch (_) {}
+  return globalThis;
+})();
 
 // node_modules/youtubei.js/dist/src/utils/Log.js
 var Log_exports = {};
@@ -39005,7 +39009,7 @@ async function isUrlPlayable(url) {
   }
 }
 async function resolveVideoWithClients(videoId) {
-  const clientTypes = ["TV", "IOS", "MWEB", "ANDROID", "VR"];
+  const clientTypes = ["ANDROID", "IOS", "MWEB", "TV", "VR"];
   let lastInfo = null;
   let bestCandidate = null;
   for (const cType of clientTypes) {
@@ -39478,32 +39482,88 @@ var server = import_http.default.createServer(async (req, res) => {
       return;
     }
     try {
-      const yt = await getClient("WEB");
-      const downloadOptions = {
-        type: downloadType === "audio" ? "audio" : "video+audio",
-        quality: "best",
-        format: "mp4"
-      };
-      if (itagParam) {
-        downloadOptions.itag = parseInt(itagParam, 10);
-      }
-      console.log(`[yt-server] 📥 Starting download for ${v}, type=${downloadType}, itag=${itagParam || "auto"}`);
-      const stream = await yt.download(v, downloadOptions);
-      res.writeHead(200, {
-        "Content-Type": downloadType === "audio" ? "audio/mp4" : "video/mp4",
-        "Access-Control-Allow-Origin": "*",
-        "Content-Disposition": `attachment; filename="${v}.${downloadType === "audio" ? "mp3" : "mp4"}"`
-      });
-      for await (const chunk of stream) {
-        if (req.destroyed || res.destroyed || res.writableEnded) break;
-        const ok = res.write(chunk);
-        if (!ok) {
-          await new Promise((resolve) => res.once("drain", resolve));
+      const { progressive, adaptive } = await resolveVideoWithClients(v);
+      let targetStreamUrl = null;
+      const contentType = downloadType === "audio" ? "audio/mp4" : "video/mp4";
+
+      if (downloadType === "audio") {
+        let audioFormat = null;
+        if (itagParam) {
+          const numItag = parseInt(itagParam, 10);
+          audioFormat = (adaptive || []).find((f) => f.itag === numItag && f.url) ||
+                        (progressive || []).find((f) => f.itag === numItag && f.url);
+        }
+        if (!audioFormat) {
+          audioFormat = (adaptive || []).find((f) => f.has_audio && f.url) || (progressive || []).find((f) => f.has_audio && f.url);
+        }
+        if (audioFormat && audioFormat.url) targetStreamUrl = audioFormat.url;
+      } else {
+        let matched = null;
+        if (itagParam) {
+          const numItag = parseInt(itagParam, 10);
+          matched = (progressive || []).find((f) => f.itag === numItag && f.url) ||
+                    (adaptive || []).find((f) => f.itag === numItag && f.url);
+        }
+        const qualityParam = parsedUrl.searchParams.get("quality");
+        if (!matched && qualityParam) {
+          const cleanQ = String(qualityParam).replace(/\D/g, "");
+          if (cleanQ) {
+            matched = (progressive || []).find((f) => String(f.quality_label || f.quality || "").includes(cleanQ) && f.url) ||
+                      (adaptive || []).find((f) => String(f.quality_label || f.quality || "").includes(cleanQ) && f.url);
+          }
+        }
+        if (!matched) {
+          matched = (progressive || []).find((f) => f.itag === 22 && f.url) ||
+                    (progressive || []).find((f) => f.has_audio && f.has_video && f.url) ||
+                    (progressive || [])[0] ||
+                    (adaptive || []).find((f) => f.url);
+        }
+        if (matched && matched.url) {
+          console.log(`[yt-server] 🎯 Matched download format for ${v}: itag=${matched.itag}, quality=${matched.quality_label || matched.quality}`);
+          targetStreamUrl = matched.url;
         }
       }
-      if (!res.writableEnded) {
-        res.end();
+
+      if (targetStreamUrl) {
+        console.log(`[yt-server] 📥 Proxying download stream for ${v} (${downloadType}) with guaranteed audio`);
+        const upstream = await fetch(targetStreamUrl, {
+          headers: {
+            "User-Agent": "com.google.ios.youtube/19.29.1 (iPhone14,3; U; CPU OS 17_5_1 like Mac OS X)",
+            "Accept": "*/*"
+          }
+        });
+        const headers = {
+          "Content-Type": contentType,
+          "Access-Control-Allow-Origin": "*",
+          "Content-Disposition": `attachment; filename="${v}.${downloadType === "audio" ? "mp3" : "mp4"}"`
+        };
+        if (upstream.headers.get("content-length")) headers["Content-Length"] = upstream.headers.get("content-length");
+        res.writeHead(upstream.status, headers);
+        if (!upstream.body) {
+          try { res.end(); } catch (_) {}
+          return;
+        }
+        if (typeof upstream.body.getReader === "function") {
+          const reader = upstream.body.getReader();
+          while (true) {
+            if (req.destroyed || res.destroyed || res.writableEnded) {
+              try { reader.cancel(); } catch (_) {}
+              break;
+            }
+            const { done, value } = await reader.read();
+            if (done) break;
+            const ok = res.write(value);
+            if (!ok) await new Promise((r) => res.once("drain", r));
+          }
+          if (!res.writableEnded) res.end();
+          return;
+        } else if (typeof upstream.body.pipe === "function") {
+          upstream.body.pipe(res);
+          return;
+        }
       }
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "No stream available" }));
     } catch (dErr) {
       console.warn("[yt-server] Download endpoint error:", dErr.message);
       if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
@@ -39693,7 +39753,11 @@ server.on("error", (err) => {
     console.error("[yt-server] Server error:", err);
   }
 });
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`YouTube engine listening on http://0.0.0.0:${PORT}`);
-});
+try {
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`YouTube engine listening on http://127.0.0.1:${PORT}`);
+  });
+} catch (e) {
+  console.warn('[yt-server] listen on 11472 error:', e);
+}
 module.exports = { getClient, server };

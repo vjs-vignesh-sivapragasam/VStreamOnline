@@ -926,17 +926,33 @@ export default function BrowserScreen() {
 
     try {
       const client = getActiveStreamingClient();
-      const streamUrl = await client.getStreamingURL(infoHash, 0);
+
+      // Quick 800ms check to inspect if torrent metadata is already available
+      let targetFileIdx = 0;
+      let targetFileName = finalFileName;
+      let targetFileLength = params.fileLength;
+
+      try {
+        const initialFiles = await client.getTorrentFiles(infoHash, 800);
+        if (initialFiles && initialFiles.length > 0) {
+          const mainFile = initialFiles.reduce((prev, curr) => (curr.length > prev.length ? curr : prev), initialFiles[0]);
+          targetFileIdx = mainFile.id ?? 0;
+          targetFileName = mainFile.name || finalFileName;
+          targetFileLength = mainFile.length || params.fileLength;
+        }
+      } catch {}
+
+      const streamUrl = await client.getStreamingURL(infoHash, targetFileIdx);
 
       // 1. Start download immediately in downloadService (persisted & broadcasting)
       await downloadService.startDownload({
         infoHash,
-        fileIdx: 0,
+        fileIdx: targetFileIdx,
         title: clean,
         poster: initialPoster,
-        fileName: finalFileName,
+        fileName: targetFileName,
         streamUrl,
-        fileLength: params.fileLength,
+        fileLength: targetFileLength,
       });
 
       // 2. Background poster resolution from TMDB (fetches official HD movie poster)
@@ -948,15 +964,21 @@ export default function BrowserScreen() {
         })
         .catch(() => {});
 
-      // 3. Background file metadata resolution (pick largest video file)
-      client.getTorrentFiles(infoHash, 4000)
-        .then((files) => {
-          if (files && files.length > 0) {
-            const mainFile = files.reduce((prev, curr) => (curr.length > prev.length ? curr : prev), files[0]);
-            downloadService.updateItemMetadata(infoHash, mainFile.id ?? 0, mainFile.name, mainFile.length);
-          }
-        })
-        .catch(() => {});
+      // 3. Background file metadata resolution (pick largest video file if not resolved yet)
+      if (targetFileIdx === 0) {
+        client.getTorrentFiles(infoHash, 6000)
+          .then((files) => {
+            if (files && files.length > 0) {
+              const mainFile = files.reduce((prev, curr) => (curr.length > prev.length ? curr : prev), files[0]);
+              if (mainFile.id !== undefined && mainFile.id !== 0) {
+                downloadService.switchDownloadFileIndex(infoHash, mainFile.id, mainFile.name, mainFile.length);
+              } else {
+                downloadService.updateItemMetadata(infoHash, mainFile.id ?? 0, mainFile.name, mainFile.length);
+              }
+            }
+          })
+          .catch(() => {});
+      }
 
       // 4. Immediately show notification banner with "View in Library" button
       showDownloadToast(clean);

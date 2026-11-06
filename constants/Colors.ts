@@ -1,4 +1,4 @@
-export type ThemeId = 'purple' | 'yellow' | 'red' | 'accent';
+export type ThemeId = 'purple' | 'blue' | 'green' | 'yellow' | 'red' | 'accent';
 
 export interface AppTheme {
   id: ThemeId;
@@ -31,6 +31,36 @@ export const THEMES: Record<ThemeId, AppTheme> = {
     ripple: 'rgba(83, 90, 255, 0.2)',
     glow: 'rgba(83, 90, 255, 0.45)',
     gradientColors: ['#000000', '#0a0b1f', '#121438'],
+  },
+  blue: {
+    id: 'blue',
+    name: 'Blue',
+    displayName: 'Ocean Blue',
+    subtitle: 'Ocean Blue',
+    primary: '#0A84FF',
+    primaryLight: '#409CFF',
+    primaryDark: '#0062CC',
+    cardBorder: 'rgba(10, 132, 255, 0.25)',
+    iconBg: 'rgba(10, 132, 255, 0.15)',
+    indicator: 'rgba(10, 132, 255, 0.35)',
+    ripple: 'rgba(10, 132, 255, 0.2)',
+    glow: 'rgba(10, 132, 255, 0.4)',
+    gradientColors: ['#000000', '#001126', '#001c3d'],
+  },
+  green: {
+    id: 'green',
+    name: 'Green',
+    displayName: 'Emerald Green',
+    subtitle: 'Emerald Mint',
+    primary: '#10B981',
+    primaryLight: '#34D399',
+    primaryDark: '#059669',
+    cardBorder: 'rgba(16, 185, 129, 0.25)',
+    iconBg: 'rgba(16, 185, 129, 0.15)',
+    indicator: 'rgba(16, 185, 129, 0.35)',
+    ripple: 'rgba(16, 185, 129, 0.2)',
+    glow: 'rgba(16, 185, 129, 0.4)',
+    gradientColors: ['#000000', '#001a0e', '#012817'],
   },
   yellow: {
     id: 'yellow',

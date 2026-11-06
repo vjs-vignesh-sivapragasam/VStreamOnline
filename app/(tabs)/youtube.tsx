@@ -13,6 +13,7 @@ import {
   Alert,
   Platform,
   Modal,
+  ToastAndroid,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,9 +27,10 @@ import {
   YouTubeFormatOption,
   YouTubeAuthStatus,
   extractYouTubeVideoId,
+  formatPublishedTime,
 } from '@/services/YouTubeService';
 import { youTubeListService, SavedYouTubeItem } from '@/services/YouTubeListService';
-import { downloadService } from '@/services/DownloadService';
+import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
 import { YouTubeAuthModal } from '@/components/youtube/YouTubeAuthModal';
 import { useTheme } from '@/hooks/useTheme';
@@ -42,7 +44,7 @@ const { width } = Dimensions.get('window');
 
 const CATEGORY_CHIPS = [
   'All',
-  'Shorts',
+  'Today Tamil Live News',
   'Trending',
   'Tamil Movies',
   'Trailers',
@@ -65,8 +67,10 @@ const CATEGORY_MAP: Record<string, CategoryConfig> = {
     sp: 'CAMSBAgDEAE%253D', // This week's top trending & viral videos
     refreshSp: 'CAMSBAgCEAE%253D', // Today's trending / newly viral videos (updates daily)
   },
-  Shorts: {
-    query: '#shorts',
+  'Today Tamil Live News': {
+    query: 'today tamil live news',
+    sp: 'EgJAAQ%253D%253D', // Live filter / today live streams
+    refreshSp: 'CAI%253D',
   },
   Trending: {
     query: 'trending',
@@ -102,111 +106,31 @@ const CATEGORY_MAP: Record<string, CategoryConfig> = {
   },
 };
 
-interface ShortCardProps {
-  item: YouTubeVideoItem;
-  isLoading: boolean;
-  onPress: (item: YouTubeVideoItem) => void;
-  width?: number;
-}
-
-const ShortCard = memo<ShortCardProps>(({ item, isLoading, onPress, width: customWidth }) => {
-  const cardWidth = customWidth || 148;
-  const cardHeight = Math.round(cardWidth * (16 / 9));
-
-  return (
-    <TouchableOpacity
-      style={[styles.shortCardContainer, { width: cardWidth, height: cardHeight }]}
-      activeOpacity={0.88}
-      onPress={() => onPress(item)}
-      disabled={isLoading}
-    >
-      <Image source={{ uri: item.thumbnail }} style={styles.shortThumbnailImage} />
-
-      {/* Smooth Bottom Gradient for text readability without any harsh box shadow */}
-      <LinearGradient
-        colors={['transparent', 'rgba(0, 0, 0, 0.35)', 'rgba(0, 0, 0, 0.88)']}
-        locations={[0, 0.5, 1]}
-        style={styles.shortGradientOverlay}
-        pointerEvents="none"
-      />
-
-      {/* Top Shorts Logo Badge */}
-      <View style={styles.shortBadgeContainer}>
-        <View style={styles.shortBadgeIconBox}>
-          <Ionicons name="play" size={9} color="#ffffff" />
-        </View>
-        <Text style={styles.shortBadgeText}>Shorts</Text>
-      </View>
-
-      {/* Bottom Title & Views */}
-      <View style={styles.shortMetaContainer}>
-        <Text style={styles.shortTitle} numberOfLines={2}>
-          {item.title}
-        </Text>
-        {item.views ? (
-          <Text style={styles.shortViewsText} numberOfLines={1}>
-            {item.views}
-          </Text>
-        ) : null}
-      </View>
-    </TouchableOpacity>
-  );
-});
-
-interface ShortsShelfProps {
-  shorts: YouTubeVideoItem[];
-  isLoading: boolean;
-  onPressShort: (item: YouTubeVideoItem) => void;
-  onSeeAll?: () => void;
-}
-
-const ShortsShelf = memo<ShortsShelfProps>(({ shorts, isLoading, onPressShort, onSeeAll }) => {
-  if (shorts.length === 0) return null;
-
-  return (
-    <View style={styles.shortsShelfContainer}>
-      <View style={styles.shortsShelfHeader}>
-        <View style={styles.shortsShelfTitleRow}>
-          <View style={styles.shortsLogoIconBox}>
-            <Ionicons name="play" size={13} color="#ffffff" />
-          </View>
-          <Text style={styles.shortsShelfTitle}>Shorts</Text>
-        </View>
-        {onSeeAll && (
-          <TouchableOpacity
-            onPress={onSeeAll}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.shortsSeeAllText}>View all</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      <FlatList
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        data={shorts}
-        keyExtractor={(item) => `shelf_short_${item.id}`}
-        contentContainerStyle={styles.shortsShelfContent}
-        renderItem={({ item }) => (
-          <ShortCard item={item} isLoading={isLoading} onPress={onPressShort} />
-        )}
-      />
-    </View>
-  );
-});
-
 interface VideoCardProps {
   item: YouTubeVideoItem;
   isLoading: boolean;
   isSaved: boolean;
+  downloadItem?: DownloadItem;
   onPress: (item: YouTubeVideoItem) => void;
   onDownload: (item: YouTubeVideoItem) => void;
+  onResumeDownload?: (item: YouTubeVideoItem) => void;
+  onPauseDownload?: (item: YouTubeVideoItem) => void;
   onToggleSave: (item: YouTubeVideoItem) => void;
   onCopyLink: (item: YouTubeVideoItem) => void;
 }
 
-const VideoCard = memo<VideoCardProps>(({ item, isLoading, isSaved, onPress, onDownload, onToggleSave, onCopyLink }) => {
+const VideoCard = memo<VideoCardProps>(({
+  item,
+  isLoading,
+  isSaved,
+  downloadItem,
+  onPress,
+  onDownload,
+  onResumeDownload,
+  onPauseDownload,
+  onToggleSave,
+  onCopyLink,
+}) => {
   const { theme } = useTheme();
   return (
     <TouchableOpacity
@@ -245,7 +169,7 @@ const VideoCard = memo<VideoCardProps>(({ item, isLoading, isSaved, onPress, onD
             {item.title}
           </Text>
           <Text style={styles.videoSubtitle} numberOfLines={1}>
-            {item.channel} {item.views ? `• ${item.views}` : ''} {item.published ? `• ${item.published}` : ''}
+            {item.channel}{item.published ? ` • ${formatPublishedTime(item.published)}` : ''}
           </Text>
         </View>
 
@@ -276,14 +200,54 @@ const VideoCard = memo<VideoCardProps>(({ item, isLoading, isSaved, onPress, onD
             />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.cardDownloadButton}
-            onPress={() => onDownload(item)}
-            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="arrow-down-circle-outline" size={18} color="#ffffff" />
-          </TouchableOpacity>
+          {/* Download Button with Peer Health Indicator / Active Progress / Resume State */}
+          {downloadItem?.status === 'downloading' ? (
+            <TouchableOpacity
+              style={[
+                styles.cardActiveDownloadBtn,
+                {
+                  borderColor: theme.primary,
+                  backgroundColor: `${theme.primary}18`,
+                },
+              ]}
+              onPress={() => onPauseDownload ? onPauseDownload(item) : onDownload(item)}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              activeOpacity={0.7}
+            >
+              <ActivityIndicator size={11} color={theme.primary} style={{ marginRight: 4 }} />
+              <Text style={[styles.cardProgressText, { color: theme.primaryLight || theme.primary }]}>
+                {downloadItem.progress}%
+              </Text>
+            </TouchableOpacity>
+          ) : downloadItem?.status === 'paused' ? (
+            <TouchableOpacity
+              style={[styles.cardActiveDownloadBtn, styles.cardResumeBtn]}
+              onPress={() => onResumeDownload ? onResumeDownload(item) : onDownload(item)}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="play" size={11} color="#ffb300" style={{ marginRight: 3 }} />
+              <Text style={[styles.cardProgressText, { color: '#ffb300' }]}>Resume</Text>
+            </TouchableOpacity>
+          ) : downloadItem?.status === 'completed' ? (
+            <TouchableOpacity
+              style={[styles.cardActiveDownloadBtn, styles.cardCompletedBtn]}
+              onPress={() => onDownload(item)}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="checkmark-circle" size={16} color="#00e676" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.cardDownloadButton}
+              onPress={() => onDownload(item)}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-down-circle-outline" size={18} color="#ffffff" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </TouchableOpacity>
@@ -339,7 +303,25 @@ export default function YouTubeScreen() {
   // My List modal state
   const [myListModalVisible, setMyListModalVisible] = useState(false);
 
-  // Downloads tracking for header badge
+  // Header Filter Modal state:
+  // "in the filters always selected lastest vidoe at top, language selection - tamil, english by default select"
+  const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
+  const [sortBy, setSortBy] = useState<'latest' | 'relevance' | 'views'>('latest');
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['Tamil', 'English']);
+
+  // Download Toast State
+  const [downloadToast, setDownloadToast] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+
+  const showDownloadToast = useCallback((msg: string) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setDownloadToast(msg);
+    toastTimeoutRef.current = setTimeout(() => {
+      setDownloadToast(null);
+    }, 2800);
+  }, []);
+
+  // Downloads tracking for header badge & real-time card state
   const [downloadsCount, setDownloadsCount] = useState<number>(() => {
     try {
       return downloadService.getDownloads().filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct').length;
@@ -347,14 +329,36 @@ export default function YouTubeScreen() {
       return 0;
     }
   });
+  const [downloadsMap, setDownloadsMap] = useState<Map<string, DownloadItem>>(new Map());
+
+
+  // Auto-resume pending downloads on app start
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      downloadService.autoResumePendingDownloads();
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
-    try {
-      const unsub = downloadService.addListener((items) => {
-        setDownloadsCount(items.filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct').length);
-      });
-      return unsub;
-    } catch {}
+    const updateDownloads = (items: DownloadItem[]) => {
+      setDownloadsCount(items.filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct').length);
+      const map = new Map<string, DownloadItem>();
+      for (const d of items) {
+        if (d.id.startsWith('yt_')) {
+          const parts = d.id.split('_');
+          const videoId = parts[1];
+          if (videoId) {
+            map.set(videoId, d);
+          }
+        }
+      }
+      setDownloadsMap(map);
+    };
+
+    updateDownloads(downloadService.getDownloads());
+    const unsub = downloadService.addListener(updateDownloads);
+    return unsub;
   }, []);
 
   // Saved YouTube List state & subscription
@@ -388,24 +392,10 @@ export default function YouTubeScreen() {
     return () => { mounted = false; };
   }, []);
 
-  // Shorts Shelf state
-  const [shortsList, setShortsList] = useState<YouTubeVideoItem[]>([]);
-
-  // Load Shorts on mount
-  useEffect(() => {
-    let mounted = true;
-    youTubeService.getShortsFeed().then((res) => {
-      if (mounted && res.videos?.length) {
-        setShortsList(res.videos);
-      }
-    }).catch(() => {});
-    return () => { mounted = false; };
-  }, []);
-
   // Dynamic Category Chips reflecting Google Account feeds
   const dynamicCategoryChips = useMemo(() => {
     if (authStatus.authenticated) {
-      return ['Home', 'Shorts', 'Subscriptions', 'History', ...CATEGORY_CHIPS.filter((c) => c !== 'All' && c !== 'Shorts')];
+      return ['Home', 'Subscriptions', 'History', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
     }
     return CATEGORY_CHIPS;
   }, [authStatus.authenticated]);
@@ -420,10 +410,6 @@ export default function YouTubeScreen() {
 
     if (!isPullToRefresh) {
       setIsLoading(true);
-    } else {
-      youTubeService.getShortsFeed().then((res) => {
-        if (res.videos?.length) setShortsList(res.videos);
-      }).catch(() => {});
     }
 
     try {
@@ -431,8 +417,6 @@ export default function YouTubeScreen() {
 
       if (target === 'Home') {
         result = await youTubeService.getHomeFeed();
-      } else if (target === 'Shorts') {
-        result = await youTubeService.getShortsFeed();
       } else if (target === 'Subscriptions') {
         result = await youTubeService.getSubscriptionsFeed();
       } else if (target === 'History') {
@@ -451,12 +435,32 @@ export default function YouTubeScreen() {
             sp = catConfig.sp;
           }
         }
+
+        // Apply "Latest videos at top" sort parameter (CAI%253D) if selected
+        if (sortBy === 'latest') {
+          if (!sp || sp.includes('CAMSBAg')) {
+            sp = 'CAI%253D';
+          }
+        } else if (sortBy === 'views') {
+          if (!sp || sp.includes('CAMSBAg')) {
+            sp = 'CAM%253D';
+          }
+        }
+
+        // Apply language preferences to general / broad categories
+        if ((target === 'All' || target === 'Trending' || target === 'Trailers') && selectedLanguages.length > 0) {
+          const langKeywords = selectedLanguages.map((l) => l.toLowerCase()).join(' ');
+          resolvedQuery = `${resolvedQuery} ${langKeywords}`;
+        }
+
         result = await youTubeService.searchWithContinuation(resolvedQuery, sp);
       }
 
       if (activeQueryRef.current !== target) return;
 
-      const allFetched = result.videos || [];
+      const allFetched = (result.videos || []).filter(
+        (v) => !v.isShort && !v.title?.toLowerCase().includes('#short')
+      );
       seenIdsRef.current = new Set(allFetched.map((v) => v.id));
       continuationTokenRef.current = result.continuationToken;
       apiKeyRef.current = result.apiKey;
@@ -499,7 +503,9 @@ export default function YouTubeScreen() {
           apiKeyRef.current
         );
 
-        const fetchedVideos = continuationResult.videos || [];
+        const fetchedVideos = (continuationResult.videos || []).filter(
+          (v) => !v.isShort && !v.title?.toLowerCase().includes('#short')
+        );
         continuationTokenRef.current = continuationResult.continuationToken;
         if (continuationResult.apiKey) {
           apiKeyRef.current = continuationResult.apiKey;
@@ -676,6 +682,26 @@ export default function YouTubeScreen() {
     }
   }, []);
 
+  const handleResumeDownload = useCallback(async (item: YouTubeVideoItem) => {
+    const dl = downloadsMap.get(item.id);
+    if (dl) {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      await downloadService.resumeDownload(dl.id);
+    }
+  }, [downloadsMap]);
+
+  const handlePauseDownload = useCallback(async (item: YouTubeVideoItem) => {
+    const dl = downloadsMap.get(item.id);
+    if (dl) {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      await downloadService.pauseDownload(dl.id);
+    }
+  }, [downloadsMap]);
+
   const handlePlaySpecificFormat = useCallback(
     (format: YouTubeFormatOption) => {
       setDownloadModalVisible(false);
@@ -729,60 +755,53 @@ export default function YouTubeScreen() {
       const fileName = `${cleanTitle}_${cleanQuality}.${ext}`;
       const downloadId = `yt_${targetVideoItem.id}_${format.itag}_${ext}`;
 
+      // Guarantee that downloaded video ALWAYS has an audio track
+      const downloadStreamUrl = await youTubeService.resolveDownloadStreamUrl(targetVideoItem.id, format);
+
+      if (!downloadStreamUrl) {
+        throw new Error('Unable to resolve download URL. Please try another quality.');
+      }
+
       await downloadService.startDirectDownload({
         id: downloadId,
         title: targetVideoItem.title,
         poster: targetVideoItem.thumbnail,
         fileName,
-        streamUrl: format.url || format.proxyUrl || '',
+        streamUrl: downloadStreamUrl,
         fileLength: format.contentLength,
       });
 
-      Alert.alert(
-        'Download Started',
-        `Downloading "${cleanTitle}" (${isAudio ? 'MP3 Audio' : format.quality + ' MP4'}) to YouTube Downloads.`,
-        [
-          {
-            text: 'View Downloads',
-            onPress: () => router.push({ pathname: '/(tabs)/library' as any, params: { tab: 'YouTube' } }),
-          },
-          { text: 'OK', style: 'cancel' },
-        ]
-      );
+      showDownloadToast(`Download started (${isAudio ? 'MP3 Audio' : format.quality})`);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Download started', ToastAndroid.SHORT);
+      }
+      if (await isHapticsSupported()) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
     } catch (err: any) {
-      Alert.alert('Download Failed', err?.message || 'Could not start download.');
+      showDownloadToast(err?.message || 'Could not start download');
     }
   };
 
   const renderVideoCard = useCallback(
-    ({ item, index }: { item: YouTubeVideoItem; index: number }) => {
-      const isShelfIndex = index === 1 && shortsList.length > 0 && selectedCategory !== 'Shorts' && !searchQuery.trim();
+    ({ item }: { item: YouTubeVideoItem; index: number }) => {
       return (
-        <View key={item.id}>
-          {isShelfIndex && (
-            <ShortsShelf
-              shorts={shortsList}
-              isLoading={loadingVideoId !== null}
-              onPressShort={handlePlayVideo}
-              onSeeAll={() => {
-                setSearchQuery('');
-                setSelectedCategory('Shorts');
-              }}
-            />
-          )}
-          <VideoCard
-            item={item}
-            isLoading={loadingVideoId === item.id}
-            isSaved={savedIds.has(item.id)}
-            onPress={handlePlayVideo}
-            onDownload={handleOpenDownloadModal}
-            onToggleSave={handleToggleSave}
-            onCopyLink={handleCopyLink}
-          />
-        </View>
+        <VideoCard
+          key={item.id}
+          item={item}
+          isLoading={loadingVideoId === item.id}
+          isSaved={savedIds.has(item.id)}
+          downloadItem={downloadsMap.get(item.id)}
+          onPress={handlePlayVideo}
+          onDownload={handleOpenDownloadModal}
+          onResumeDownload={handleResumeDownload}
+          onPauseDownload={handlePauseDownload}
+          onToggleSave={handleToggleSave}
+          onCopyLink={handleCopyLink}
+        />
       );
     },
-    [loadingVideoId, savedIds, shortsList, selectedCategory, searchQuery, handlePlayVideo, handleOpenDownloadModal, handleToggleSave, handleCopyLink]
+    [loadingVideoId, savedIds, downloadsMap, handlePlayVideo, handleOpenDownloadModal, handleResumeDownload, handlePauseDownload, handleToggleSave, handleCopyLink]
   );
 
   const keyExtractor = useCallback((item: YouTubeVideoItem) => item.id, []);
@@ -844,11 +863,30 @@ export default function YouTubeScreen() {
               <Ionicons name="play" size={14} color="#ffffff" />
             </View>
             <Text style={styles.logoText}>Premium</Text>
+
+
           </TouchableOpacity>
 
-          {/* Top Header Icons in requested order: Search, My List, Download, User Profile Avatar */}
+          {/* Top Header Icons: Downloads, Search, My List, Profile Avatar */}
           <View style={styles.headerActionsRow}>
-            {/* 1. Search Icon */}
+            {/* 1. Downloads Shortcut with real-time Badge */}
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => router.push({ pathname: '/(tabs)/library' as any, params: { tab: 'YouTube' } })}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+            >
+              <Ionicons name="cloud-download-outline" size={20} color="#ffffff" />
+              {downloadsCount > 0 && (
+                <View style={[styles.headerBadge, { backgroundColor: theme.primary }]}>
+                  <Text style={styles.headerBadgeText}>
+                    {downloadsCount > 99 ? '99+' : downloadsCount}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {/* 2. Search Icon */}
             <TouchableOpacity
               style={[
                 styles.headerActionBtn,
@@ -980,6 +1018,30 @@ export default function YouTubeScreen() {
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
+          ListFooterComponent={
+            <TouchableOpacity
+              style={[
+                styles.filterChipRoundBtn,
+                (sortBy === 'latest' || selectedLanguages.length > 0) && [
+                  styles.filterChipBtnActive,
+                  { borderColor: theme.primary },
+                ],
+              ]}
+              onPress={async () => {
+                if (await isHapticsSupported()) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }
+                setIsFilterModalVisible(true);
+              }}
+              activeOpacity={0.8}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="options-outline" size={16} color="#ffffff" />
+              {(sortBy === 'latest' || selectedLanguages.length > 0) && (
+                <View style={[styles.filterIndicatorDot, { backgroundColor: theme.primary }]} />
+              )}
+            </TouchableOpacity>
+          }
           data={dynamicCategoryChips}
           keyExtractor={(item) => item}
           contentContainerStyle={styles.chipsContent}
@@ -1005,10 +1067,10 @@ export default function YouTubeScreen() {
                     style={{ marginRight: 5 }}
                   />
                 )}
-                {item === 'Shorts' && (
+                {item === 'Today Tamil Live News' && (
                   <Ionicons
-                    name="play-circle"
-                    size={14}
+                    name="radio"
+                    size={13}
                     color={isSelected ? '#000000' : '#FF0000'}
                     style={{ marginRight: 5 }}
                   />
@@ -1081,36 +1143,6 @@ export default function YouTubeScreen() {
             </TouchableOpacity>
           )}
         </View>
-      ) : selectedCategory === 'Shorts' ? (
-        <FlatList
-          key="shorts_grid"
-          ref={flatListRef}
-          data={videos}
-          keyExtractor={keyExtractor}
-          numColumns={2}
-          columnWrapperStyle={styles.shortsGridColumnWrapper}
-          contentContainerStyle={styles.shortsGridContent}
-          showsVerticalScrollIndicator={false}
-          initialNumToRender={8}
-          maxToRenderPerBatch={8}
-          windowSize={7}
-          renderItem={({ item }) => (
-            <ShortCard
-              item={item}
-              isLoading={loadingVideoId === item.id}
-              onPress={handlePlayVideo}
-              width={(width - 42) / 2}
-            />
-          )}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="#FF0000"
-              colors={['#FF0000']}
-            />
-          }
-        />
       ) : (
         <FlatList
           key="videos_list"
@@ -1276,12 +1308,155 @@ export default function YouTubeScreen() {
           setAuthStatus(s);
           if (s.authenticated) {
             setSelectedCategory('Home');
+            fetchVideos('Home', true);
           } else {
             setSelectedCategory('All');
+            fetchVideos('All', true);
           }
         }}
         onSelectFeed={(feed) => setSelectedCategory(feed)}
       />
+
+      {/* Search & Feed Filter Settings Modal */}
+      <Modal
+        visible={isFilterModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsFilterModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setIsFilterModalVisible(false)}
+          />
+
+          <View style={styles.filterModalCard}>
+            {/* Drag Handle Indicator */}
+            <View style={styles.myListDragHandle} />
+
+            {/* Modal Header */}
+            <View style={styles.filterModalHeader}>
+              <View style={styles.filterModalHeaderLeft}>
+                <Ionicons name="options-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+                <Text style={styles.filterModalTitle}>Search & Feed Filters</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsFilterModalVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={22} color="#aaaaaa" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Section 1: Sort Order (Latest video at top is always selected by default) */}
+            <Text style={styles.filterSectionTitle}>Sort Order (Latest videos at top)</Text>
+            <View style={styles.filterOptionsGroup}>
+              {[
+                { id: 'latest', label: 'Latest videos at top (Newest first)', desc: 'Newly uploaded videos appear first' },
+                { id: 'relevance', label: 'Relevance', desc: 'Standard YouTube ranking' },
+                { id: 'views', label: 'View count (Most popular)', desc: 'Highest views first' },
+              ].map((opt) => {
+                const isSelected = sortBy === opt.id;
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    style={[styles.filterRadioRow, isSelected && styles.filterRadioRowActive]}
+                    onPress={async () => {
+                      if (await isHapticsSupported()) {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      }
+                      setSortBy(opt.id as any);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.filterRadioTextCol}>
+                      <Text style={[styles.filterRadioLabel, isSelected && { color: '#ffffff', fontWeight: '700' }]}>
+                        {opt.label}
+                      </Text>
+                      <Text style={styles.filterRadioDesc}>{opt.desc}</Text>
+                    </View>
+                    <View style={[styles.radioCircle, isSelected && { borderColor: theme.primary }]}>
+                      {isSelected && <View style={[styles.radioCircleFill, { backgroundColor: theme.primary }]} />}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Section 2: Languages (Tamil, English default selected) */}
+            <Text style={[styles.filterSectionTitle, { marginTop: 16 }]}>
+              Language Selection (Tamil & English by default)
+            </Text>
+            <View style={styles.languagesWrap}>
+              {['Tamil', 'English', 'Hindi', 'Telugu', 'Malayalam', 'Kannada'].map((lang) => {
+                const isChecked = selectedLanguages.includes(lang);
+                return (
+                  <TouchableOpacity
+                    key={lang}
+                    style={[
+                      styles.langChip,
+                      isChecked && [styles.langChipActive, { backgroundColor: `${theme.primary}25`, borderColor: theme.primary }],
+                    ]}
+                    onPress={async () => {
+                      if (await isHapticsSupported()) {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      }
+                      setSelectedLanguages((prev) =>
+                        prev.includes(lang) ? prev.filter((l) => l !== lang) : [...prev, lang]
+                      );
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name={isChecked ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={15}
+                      color={isChecked ? theme.primary : '#777777'}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={[styles.langChipText, isChecked && { color: '#ffffff', fontWeight: '600' }]}>
+                      {lang}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Footer Action Buttons */}
+            <View style={styles.filterModalFooter}>
+              <TouchableOpacity
+                style={styles.filterResetBtn}
+                onPress={() => {
+                  setSortBy('latest');
+                  setSelectedLanguages(['Tamil', 'English']);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.filterResetBtnText}>Reset Defaults</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.filterApplyBtn, { backgroundColor: theme.primary }]}
+                onPress={() => {
+                  setIsFilterModalVisible(false);
+                  fetchVideos(searchQuery.trim() || selectedCategory, true);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.filterApplyBtnText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Floating Download Toast Pill */}
+      {downloadToast && (
+        <View style={styles.downloadToastPill} pointerEvents="none">
+          <Ionicons name="arrow-down-circle" size={18} color="#00e5ff" style={{ marginRight: 8 }} />
+          <Text style={styles.downloadToastText}>{downloadToast}</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1477,124 +1652,6 @@ const styles = StyleSheet.create({
   },
   chipTextSelected: {
     color: '#000000',
-  },
-
-  // Shorts Shelf & Grid Styles (Real YouTube Look)
-  shortsShelfContainer: {
-    paddingVertical: 14,
-    marginBottom: 16,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
-    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-  },
-  shortsShelfHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    marginBottom: 12,
-  },
-  shortsShelfTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  shortsLogoIconBox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    backgroundColor: '#FF0000',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shortsShelfTitle: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: -0.3,
-  },
-  shortsSeeAllText: {
-    color: '#7b82ff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  shortsShelfContent: {
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  shortCardContainer: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#1c1c20',
-    position: 'relative',
-  },
-  shortThumbnailImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  shortGradientOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '46%',
-  },
-  shortBadgeContainer: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    gap: 4,
-  },
-  shortBadgeIconBox: {
-    width: 14,
-    height: 14,
-    borderRadius: 4,
-    backgroundColor: '#FF0000',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shortBadgeText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  shortMetaContainer: {
-    position: 'absolute',
-    bottom: 10,
-    left: 10,
-    right: 10,
-  },
-  shortTitle: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 17,
-    textShadowColor: 'rgba(0,0,0,0.85)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-    marginBottom: 4,
-  },
-  shortViewsText: {
-    color: '#dddddd',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  shortsGridColumnWrapper: {
-    paddingHorizontal: 14,
-    gap: 10,
-    marginBottom: 14,
-  },
-  shortsGridContent: {
-    paddingTop: 12,
-    paddingBottom: 110,
   },
   feedScrollContent: {
     paddingBottom: 110,
@@ -1996,5 +2053,226 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 24,
     lineHeight: 18,
+  },
+  filterIndicatorDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  filterChipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  filterChipBtnActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  filterChipRoundBtn: {
+    width: 36,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 4,
+    marginRight: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  filterChipText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  filterModalCard: {
+    backgroundColor: '#16161a',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    marginTop: 8,
+  },
+  filterModalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  filterModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  filterSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#aaaaaa',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  filterOptionsGroup: {
+    gap: 8,
+  },
+  filterRadioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  filterRadioRowActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.09)',
+  },
+  filterRadioTextCol: {
+    flex: 1,
+  },
+  filterRadioLabel: {
+    fontSize: 14,
+    color: '#dddddd',
+    fontWeight: '500',
+  },
+  filterRadioDesc: {
+    fontSize: 11,
+    color: '#888888',
+    marginTop: 2,
+  },
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#666666',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  radioCircleFill: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  languagesWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  langChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  langChipActive: {
+    borderWidth: 1,
+  },
+  langChipText: {
+    fontSize: 13,
+    color: '#cccccc',
+    fontWeight: '500',
+  },
+  filterModalFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 22,
+  },
+  filterResetBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterResetBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#cccccc',
+  },
+  filterApplyBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterApplyBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  cardActiveDownloadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  cardResumeBtn: {
+    backgroundColor: 'rgba(255, 179, 0, 0.15)',
+    borderColor: 'rgba(255, 179, 0, 0.4)',
+  },
+  cardCompletedBtn: {
+    backgroundColor: 'rgba(0, 230, 118, 0.15)',
+    borderColor: 'rgba(0, 230, 118, 0.4)',
+    paddingHorizontal: 6,
+  },
+  cardProgressText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  downloadToastPill: {
+    position: 'absolute',
+    bottom: 30,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(20, 20, 24, 0.95)',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 10,
+    zIndex: 999999,
+  },
+  downloadToastText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
