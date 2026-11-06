@@ -27,8 +27,6 @@ import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
 import { youTubeService } from '@/services/YouTubeService';
 
-const { width } = Dimensions.get('window');
-
 export type ScreenFitMode = 'cover' | 'stretch' | 'contain';
 
 export interface FeedbackPillData {
@@ -178,8 +176,8 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         top: 10px !important;
         left: 0 !important;
         right: 0 !important;
-        width: 100vw !important;
-        max-width: 100vw !important;
+        width: 100% !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
         padding-top: 0 !important;
         padding-left: 56px !important; /* Leave space for native Go Back button */
@@ -226,8 +224,8 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         bottom: 0 !important;
         left: 0 !important;
         right: 0 !important;
-        width: 100vw !important;
-        max-width: 100vw !important;
+        width: 100% !important;
+        max-width: 100% !important;
         min-width: 100% !important;
         height: 100% !important;
         min-height: 100% !important;
@@ -327,8 +325,8 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         bottom: 8px !important;
         left: 0 !important;
         right: 0 !important;
-        width: 100vw !important;
-        max-width: 100vw !important;
+        width: 100% !important;
+        max-width: 100% !important;
         box-sizing: border-box !important;
         padding-left: 12px !important;
         padding-right: 12px !important;
@@ -941,8 +939,8 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
           el.style.setProperty('padding-bottom', '0px', 'important');
           el.style.setProperty('top', '0px', 'important');
           el.style.setProperty('bottom', '0px', 'important');
-          el.style.setProperty('width', '100vw', 'important');
-          el.style.setProperty('max-width', '100vw', 'important');
+          el.style.setProperty('width', '100%', 'important');
+          el.style.setProperty('max-width', '100%', 'important');
           el.style.setProperty('min-width', '100%', 'important');
           el.style.setProperty('left', '0px', 'important');
           el.style.setProperty('right', '0px', 'important');
@@ -957,8 +955,8 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         '.player-control-overlay, .player-control-container, .player-controls-content, ytm-custom-control'
       );
       overlays.forEach(function(el) {
-        el.style.setProperty('width', '100vw', 'important');
-        el.style.setProperty('max-width', '100vw', 'important');
+        el.style.setProperty('width', '100%', 'important');
+        el.style.setProperty('max-width', '100%', 'important');
         el.style.setProperty('left', '0px', 'important');
         el.style.setProperty('right', '0px', 'important');
         el.style.setProperty('margin', '0 auto', 'important');
@@ -1211,24 +1209,20 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     setUseWebFallback(false);
   }, [videoId]);
 
-  // Seamless auto-fallback: if direct stream fails (e.g. 403 or engine starting), immediately play via web player
-  
+  // When a valid direct stream URL is available, ensure native player is active
   useEffect(() => {
-    if (!streamUrl && videoId && !useWebFallback) {
-      const timer = setTimeout(() => {
-        console.log('[YouTubeInlinePlayer] ⏱️ Engine stream pending, seamlessly playing via clean Web Player');
-        setUseWebFallback(true);
-      }, 500);
-      return () => clearTimeout(timer);
+    if (streamUrl) {
+      setUseWebFallback(false);
     }
-  }, [streamUrl, videoId, useWebFallback]);
+  }, [streamUrl]);
 
+  // Only fallback to web player if stream extraction encounters a fatal error and streamUrl is unavailable
   useEffect(() => {
-    if (playbackError && videoId) {
-      console.log('[YouTubeInlinePlayer] 🔄 Error encountered, seamlessly auto-playing via Web Player:', playbackError);
+    if (playbackError && videoId && !streamUrl) {
+      console.log('[YouTubeInlinePlayer] 🔄 Fatal stream error encountered without streamUrl, falling back to Web Player:', playbackError);
       setUseWebFallback(true);
     }
-  }, [playbackError, videoId]);
+  }, [playbackError, videoId, streamUrl]);
 
   const handleOpenYouTubeApp = useCallback(async () => {
     if (!videoId) return;
@@ -1345,6 +1339,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    // Synchronously toggle parent player context
+    onTogglePlay();
+
     if (isWebActive) {
       const nextPlaying = !effectiveIsPlaying;
       setWebIsPlaying(nextPlaying);
@@ -1362,8 +1359,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         })();
         true;
       `);
-    } else {
-      onTogglePlay();
     }
   }, [isWebActive, effectiveIsPlaying, onTogglePlay]);
 
@@ -1822,6 +1817,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             }}
             onLoad={(e) => {
               console.log('[YouTubeInlinePlayer] ✅ KSPlayer onLoad event fired! Duration:', e.duration, 'currentTime:', e.currentTime);
+              setShowPosterShield(false);
               setIsBuffering(false);
               onProgress(e.currentTime || 0, e.duration || duration);
             }}
@@ -1854,6 +1850,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             enterPictureInPictureOnLeave={true}
             ignoreSilentSwitch="ignore"
             progressUpdateInterval={250}
+            onReadyForDisplay={() => {
+              console.log('[YouTubeInlinePlayer] 📺 First frame ready for display!');
+              setShowPosterShield(false);
+              setIsBuffering(false);
+            }}
             onProgress={(e) => {
               if (!isSliding) {
                 onProgress(e.currentTime, e.seekableDuration || duration);
@@ -1861,6 +1862,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             }}
             onLoad={(e) => {
               console.log('[YouTubeInlinePlayer] ✅ react-native-video onLoad fired! Duration:', e.duration, 'currentTime:', currentTime);
+              setShowPosterShield(false);
               setIsBuffering(false);
               if (seekTarget !== null && seekTarget > 0) {
                 videoRef.current?.seek(seekTarget);
@@ -1938,6 +1940,22 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 )}
               </View>
             ) : null}
+          </View>
+        </View>
+      )}
+
+      {/* Loading Poster Shield: prevents any white screen flash while video or web player loads, kept BEHIND controls */}
+      {showPosterShield && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]} pointerEvents="none">
+          {poster ? (
+            <Image
+              source={{ uri: poster }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+          ) : null}
+          <View style={[StyleSheet.absoluteFill, styles.loadingBackdrop]}>
+            <ActivityIndicator size="small" color="#ffffff" />
           </View>
         </View>
       )}
@@ -2203,22 +2221,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             />
           </View>
         )
-      )}
-
-      {/* Loading Poster Shield: prevents any white screen flash while video or web player loads */}
-      {showPosterShield && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]} pointerEvents="none">
-          {poster ? (
-            <Image
-              source={{ uri: poster }}
-              style={StyleSheet.absoluteFill}
-              resizeMode="cover"
-            />
-          ) : null}
-          <View style={[StyleSheet.absoluteFill, styles.loadingBackdrop]}>
-            <ActivityIndicator size="small" color="#ffffff" />
-          </View>
-        </View>
       )}
 
       {/* Go Back Left Arrow Icon: In front of the inline player at left corner, only when controls are active */}
@@ -2690,9 +2692,15 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   containerFullScreen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: '100%',
     height: '100%',
     aspectRatio: undefined,
+    backgroundColor: '#000000',
   },
   topBarRight: {
     flexDirection: 'row',

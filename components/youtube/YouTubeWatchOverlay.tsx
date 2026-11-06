@@ -592,15 +592,42 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       <View
         style={[
           styles.fullWatchOverlay,
-          { bottom: 0 },
           isMinimized && styles.hiddenOverlay,
+          isFullScreen && {
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100%',
+            height: '100%',
+          },
         ]}
         pointerEvents={isMinimized ? 'none' : 'auto'}
       >
         {!isMinimized && <StatusBar style="light" hidden={isFullScreen} />}
-        <View style={[styles.safeArea, { paddingTop: isFullScreen ? 0 : insets.top }]}>
+        <View
+          style={[
+            styles.safeArea,
+            {
+              paddingTop: isFullScreen ? 0 : insets.top,
+              paddingBottom: 0,
+              paddingLeft: 0,
+              paddingRight: 0,
+            },
+            isFullScreen && {
+              width: '100%',
+              height: '100%',
+            },
+          ]}
+        >
           {/* Top 16:9 Video Player: swipe down or left on the player minimizes/goes back */}
-          <View style={[styles.playerContainer, isFullScreen && styles.fullScreenPlayerContainer]} {...playerPanResponder.panHandlers}>
+          <View
+            style={[
+              styles.playerContainer,
+              isFullScreen && styles.fullScreenPlayerContainer,
+            ]}
+            {...playerPanResponder.panHandlers}
+          >
           <YouTubeInlinePlayer
             videoId={currentVideo.id}
             title={currentVideo.title}
@@ -1203,6 +1230,9 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
     backgroundColor: '#0a0a0c',
     zIndex: 99999,
   },
