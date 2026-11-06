@@ -90,9 +90,10 @@ const LibraryScreen: React.FC = () => {
     }, []);
 
     // Automatically resolve missing posters for downloads in background via TMDB
+    // ONLY for torrent items that have an infoHash and are not YouTube items, and only when item count changes
     useEffect(() => {
         downloads.forEach((item) => {
-            if (!item.poster || !item.poster.trim()) {
+            if (item.infoHash && item.sourceType !== 'direct' && !item.id.startsWith('yt_') && (!item.poster || !item.poster.trim())) {
                 tmdbService.getMovieFullInfo(item.title)
                     .then((info) => {
                         if (info?.posterUrl) {
@@ -102,7 +103,7 @@ const LibraryScreen: React.FC = () => {
                     .catch(() => {});
             }
         });
-    }, [downloads]);
+    }, [downloads.length]);
 
     // ── Data ──────────────────────────────────────────────────────────────────────
 

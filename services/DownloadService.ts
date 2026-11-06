@@ -851,6 +851,7 @@ class DownloadManager {
     // Track download progress from native download task
     let lastProgressBytes = item.downloadedBytes;
     let lastProgressTime = Date.now();
+    let lastNotifyTime = 0;
 
     // Localhost loopback downloads must use 'foreground' on iOS because nsurlsessiond cannot route loopback.
     // Remote streaming server URLs can use 'background'.
@@ -1016,6 +1017,7 @@ class DownloadManager {
 
     let lastProgressBytes = item.downloadedBytes;
     let lastProgressTime = Date.now();
+    let lastNotifyTime = 0;
 
     let downloadUrl = params.streamUrl;
 
@@ -1093,8 +1095,12 @@ class DownloadManager {
 
         item!.statusDetail = `Downloading (${item!.progress}%)`;
 
-        this.notifyListeners();
-        this.persistDownloadsThrottled();
+        // Throttle UI listener updates to at most once per 500ms to keep JS thread silky smooth and responsive
+        if (now - lastNotifyTime >= 500 || item!.progress === 100) {
+          lastNotifyTime = now;
+          this.notifyListeners();
+          this.persistDownloadsThrottled();
+        }
       },
     });
 
@@ -1145,8 +1151,12 @@ class DownloadManager {
                     item!.progress = Math.min(Math.round((item!.downloadedBytes / item!.totalBytes) * 100), 100);
                   }
                   item!.statusDetail = `Downloading (${item!.progress}%)`;
-                  this.notifyListeners();
-                  this.persistDownloadsThrottled();
+                  const nowRetry = Date.now();
+                  if (nowRetry - lastNotifyTime >= 500 || item!.progress === 100) {
+                    lastNotifyTime = nowRetry;
+                    this.notifyListeners();
+                    this.persistDownloadsThrottled();
+                  }
                 },
               });
 
