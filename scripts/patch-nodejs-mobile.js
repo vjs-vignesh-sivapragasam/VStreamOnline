@@ -237,3 +237,57 @@ if (fs.existsSync(menuViewManagerPath)) {
     console.log('✅ Patched @react-native-menu/menu MenuViewManager.mm for React Native 0.88+ header compatibility');
   }
 }
+
+
+// ── 6. Patch @expo/ui & expo-router StackToolbar for missing ExpoUI native module ──
+const expoUIModulePath = path.join(rootDir, 'node_modules', '@expo', 'ui', 'src', 'jetpack-compose', 'ExpoUIModule.ts');
+if (fs.existsSync(expoUIModulePath)) {
+  let content = fs.readFileSync(expoUIModulePath, 'utf8');
+  if (content.includes("export const ExpoUIModule = requireNativeModule('ExpoUI');")) {
+    content = content.replace(
+      "export const ExpoUIModule = requireNativeModule('ExpoUI');",
+      `import { requireOptionalNativeModule } from 'expo';\nlet _mod: any = null;\ntry {\n  _mod = typeof requireOptionalNativeModule === 'function' ? requireOptionalNativeModule('ExpoUI') : null;\n} catch (e) {}\nexport const ExpoUIModule = _mod || {};`
+    );
+    fs.writeFileSync(expoUIModulePath, content, 'utf8');
+    console.log('✅ Patched @expo/ui ExpoUIModule.ts for missing native module fallback');
+  }
+}
+
+const otherExpoUIFiles = [
+  path.join(rootDir, 'node_modules', '@expo', 'ui', 'src', 'State', 'useNativeState.ts'),
+  path.join(rootDir, 'node_modules', '@expo', 'ui', 'src', 'State', 'useWorkletProp.ts'),
+  path.join(rootDir, 'node_modules', '@expo', 'ui', 'src', 'swift-ui', 'withAnimation.ts'),
+  path.join(rootDir, 'node_modules', '@expo', 'ui', 'src', 'swift-ui', 'modifiers', 'index.ts'),
+];
+
+for (const f of otherExpoUIFiles) {
+  if (fs.existsSync(f)) {
+    let content = fs.readFileSync(f, 'utf8');
+    if (content.includes("requireNativeModule('ExpoUI')")) {
+      content = content.replace(
+        "const ExpoUI = requireNativeModule('ExpoUI');",
+        `import { requireOptionalNativeModule } from 'expo';\nlet ExpoUI: any = null;\ntry {\n  ExpoUI = typeof requireOptionalNativeModule === 'function' ? requireOptionalNativeModule('ExpoUI') : null;\n} catch (e) {}\nif (!ExpoUI) ExpoUI = {};`
+      );
+      content = content.replace(
+        "const ExpoUI = requireNativeModule('ExpoUI')",
+        `import { requireOptionalNativeModule } from 'expo';\nlet ExpoUI: any = null;\ntry {\n  ExpoUI = typeof requireOptionalNativeModule === 'function' ? requireOptionalNativeModule('ExpoUI') : null;\n} catch (e) {}\nif (!ExpoUI) ExpoUI = {};`
+      );
+      fs.writeFileSync(f, content, 'utf8');
+      console.log(`✅ Patched @expo/ui ${path.basename(f)} for missing native module fallback`);
+    }
+  }
+}
+
+const stackJsPath = path.join(rootDir, 'node_modules', 'expo-router', 'build', 'layouts', 'Stack.js');
+if (fs.existsSync(stackJsPath)) {
+  let content = fs.readFileSync(stackJsPath, 'utf8');
+  if (content.includes('const StackToolbar_1 = require("./stack-utils/toolbar/StackToolbar");') &&
+      !content.includes('try {')) {
+    content = content.replace(
+      'const StackToolbar_1 = require("./stack-utils/toolbar/StackToolbar");\nStackClient_1.default.Screen = stack_utils_1.StackScreen;\nStackClient_1.default.Header = stack_utils_1.StackHeader;\nStackClient_1.default.Title = stack_utils_1.StackTitle;\nStackClient_1.default.Toolbar = StackToolbar_1.StackToolbar;',
+      `let StackToolbar_1;\ntry {\n  StackToolbar_1 = require("./stack-utils/toolbar/StackToolbar");\n} catch (e) {\n  StackToolbar_1 = { StackToolbar: () => null };\n}\nStackClient_1.default.Screen = stack_utils_1.StackScreen;\nStackClient_1.default.Header = stack_utils_1.StackHeader;\nStackClient_1.default.Title = stack_utils_1.StackTitle;\nStackClient_1.default.Toolbar = StackToolbar_1.StackToolbar || (() => null);`
+    );
+    fs.writeFileSync(stackJsPath, content, 'utf8');
+    console.log('✅ Patched expo-router Stack.js toolbar error boundary');
+  }
+}
