@@ -17,9 +17,9 @@ function recordLog(level: string, ...args: any[]) {
 }
 
 // Hook into console to record breadcrumbs
-const originalLog = console.log;
-const originalWarn = console.warn;
-const originalError = console.error;
+const originalLog = console.log.bind(console);
+const originalWarn = console.warn.bind(console);
+const originalError = console.error.bind(console);
 
 console.log = (...args: any[]) => {
   recordLog('LOG', ...args);
@@ -42,7 +42,9 @@ if (typeof (global as any).ErrorUtils !== 'undefined') {
   (global as any).ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
     const errorMsg = `FATAL JS ERROR (isFatal=${isFatal}): ${error?.message || error}\nStack: ${error?.stack || 'No stack'}`;
     recordLog('FATAL', errorMsg);
-    originalError('[CRASH_LOGGER]', errorMsg);
+    try {
+      originalError('[CRASH_LOGGER] ' + errorMsg);
+    } catch {}
 
     if (defaultHandler) {
       defaultHandler(error, isFatal);

@@ -66,6 +66,7 @@ export interface CinemaBottomBarProps {
   descriptors?: any;
   emitter?: any;
   navigateToTab?: (routeKey: string) => void;
+  navigation?: any;
   insets?: {
     top: number;
     bottom: number;
@@ -78,12 +79,13 @@ export default function CinemaBottomBar({
   state,
   emitter,
   navigateToTab,
+  navigation,
   insets: propInsets,
 }: CinemaBottomBarProps) {
   const { theme } = useTheme();
   const safeAreaInsets = useSafeAreaInsets();
   const insets = propInsets || safeAreaInsets;
-  const bottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 10 : 8);
+  const bottomPadding = Math.max(insets?.bottom ?? 0, Platform.OS === 'android' ? 10 : 8);
 
   return (
     <View style={[styles.wrapper, { paddingBottom: bottomPadding }]}>
@@ -126,25 +128,43 @@ export default function CinemaBottomBar({
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
             }
 
-            const event = emitter?.emit({
-              type: 'tabPress',
-              target: route.key,
-              canPreventDefault: true,
-              data: undefined,
-            });
+            const event = emitter?.emit
+              ? emitter.emit({
+                  type: 'tabPress',
+                  target: route.key,
+                  canPreventDefault: true,
+                  data: undefined,
+                })
+              : navigation?.emit?.({
+                  type: 'tabPress',
+                  target: route.key,
+                  canPreventDefault: true,
+                });
 
-            if (!isFocused && !event?.defaultPrevented && navigateToTab) {
-              navigateToTab(route.key);
+            if (!isFocused && !event?.defaultPrevented) {
+              if (navigateToTab) {
+                navigateToTab(route.key);
+              } else if (navigation?.navigate) {
+                navigation.navigate(route.name, route.params);
+              }
             }
           };
 
           const handleLongPress = () => {
-            emitter?.emit({
-              type: 'tabLongPress',
-              target: route.key,
-              canPreventDefault: false,
-              data: undefined,
-            });
+            if (emitter?.emit) {
+              emitter.emit({
+                type: 'tabLongPress',
+                target: route.key,
+                canPreventDefault: false,
+                data: undefined,
+              });
+            } else if (navigation?.emit) {
+              navigation.emit({
+                type: 'tabLongPress',
+                target: route.key,
+                canPreventDefault: false,
+              });
+            }
           };
 
           return (
