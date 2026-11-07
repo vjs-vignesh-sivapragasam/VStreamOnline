@@ -330,72 +330,76 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
 
   const changeQuality = useCallback(
     async (quality: string) => {
-      console.log(`[YouTubePlayer] 🎯 changeQuality requested: ${quality}`);
-      setCurrentQuality(quality);
+      try {
+        console.log(`[YouTubePlayer] 🎯 changeQuality requested: ${quality}`);
+        setCurrentQuality(quality);
 
-      if (!videoDetails?.formats) return;
+        if (!videoDetails?.formats) return;
 
-      // Preserve current playback position accurately
-      const resumePosition = currentTime;
-      console.log(`[YouTubePlayer] ⏱️ Preserving playback position: ${resumePosition}s`);
+        // Preserve current playback position accurately
+        const resumePosition = currentTime;
+        console.log(`[YouTubePlayer] ⏱️ Preserving playback position: ${resumePosition}s`);
 
-      let chosenFormat: any = null;
+        let chosenFormat: any = null;
 
-      const allVideoFormats = [
-        ...videoDetails.formats.progressive,
-        ...videoDetails.formats.videoAdaptive,
-      ];
+        const progressiveList = videoDetails.formats.progressive || [];
+        const adaptiveList = videoDetails.formats.videoAdaptive || [];
 
-      if (quality === 'Auto') {
-        chosenFormat =
-          videoDetails.formats.progressive.find((f) => f.quality.includes('720') || f.quality.includes('1080')) ||
-          videoDetails.formats.progressive[0] ||
-          videoDetails.formats.videoAdaptive.find((f) => f.container === 'mp4') ||
-          videoDetails.formats.videoAdaptive[0];
-      } else {
-        const cleanQuality = quality.replace(/\D/g, ''); // e.g. "1080"
-
-        // 1. First look for combined progressive format matching quality
-        chosenFormat = videoDetails.formats.progressive.find((f) => f.quality.includes(cleanQuality));
-
-        // 2. If not found in progressive, check if any progressive format exists before falling back to adaptive without audio
-        if (!chosenFormat && videoDetails.formats.progressive.length > 0) {
-          const targetNum = parseInt(cleanQuality, 10) || 480;
-          const sorted = [...videoDetails.formats.progressive].sort((a, b) => {
-            const numA = parseInt((a.quality.match(/\d+/) || ['360'])[0], 10);
-            const numB = parseInt((b.quality.match(/\d+/) || ['360'])[0], 10);
-            return Math.abs(numA - targetNum) - Math.abs(numB - targetNum);
-          });
-          chosenFormat = sorted[0];
-        }
-
-        // 3. If no progressive format at all, look in videoAdaptive
-        if (!chosenFormat) {
+        if (quality === 'Auto') {
+          // Priority to combined audio+video progressive streams
           chosenFormat =
-            videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality) && f.container === 'mp4') ||
-            videoDetails.formats.videoAdaptive.find((f) => f.quality.includes(cleanQuality)) ||
-            videoDetails.formats.videoAdaptive[0];
+            progressiveList.find((f) => f.quality && (f.quality.includes('720') || f.quality.includes('1080'))) ||
+            progressiveList.find((f) => f.quality && (f.quality.includes('480') || f.quality.includes('360'))) ||
+            progressiveList[0] ||
+            adaptiveList.find((f) => f.container === 'mp4') ||
+            adaptiveList[0];
+        } else {
+          const cleanQuality = quality.replace(/\D/g, ''); // e.g. "1080"
+
+          // 1. First look for combined progressive format matching quality
+          chosenFormat = progressiveList.find((f) => f.quality && f.quality.includes(cleanQuality));
+
+          // 2. If not found in progressive, check if any progressive format exists before falling back to adaptive without audio
+          if (!chosenFormat && progressiveList.length > 0) {
+            const targetNum = parseInt(cleanQuality, 10) || 480;
+            const sorted = [...progressiveList].sort((a, b) => {
+              const numA = parseInt((a.quality.match(/\d+/) || ['360'])[0], 10);
+              const numB = parseInt((b.quality.match(/\d+/) || ['360'])[0], 10);
+              return Math.abs(numA - targetNum) - Math.abs(numB - targetNum);
+            });
+            chosenFormat = sorted[0];
+          }
+
+          // 3. If no progressive format at all, look in videoAdaptive
+          if (!chosenFormat && adaptiveList.length > 0) {
+            chosenFormat =
+              adaptiveList.find((f) => f.quality && f.quality.includes(cleanQuality) && f.container === 'mp4') ||
+              adaptiveList.find((f) => f.quality && f.quality.includes(cleanQuality)) ||
+              adaptiveList[0];
+          }
         }
+
+        if (!chosenFormat) {
+          console.warn(`[YouTubePlayer] ⚠️ No format found specifically matching ${quality}`);
+          return;
+        }
+
+        const targetUrl = chosenFormat.url || chosenFormat.proxyUrl;
+        console.log(`[YouTubePlayer] 🔄 New format chosen: ${chosenFormat.quality} (${chosenFormat.container})`);
+
+        if (!targetUrl || targetUrl === streamUrl) {
+          console.log(`[YouTubePlayer] ℹ️ Already playing this URL or targetUrl empty, skipping reload`);
+          return;
+        }
+
+        // Seamlessly switch stream and queue seek to resumePosition
+        setSeekTarget(resumePosition);
+        setStreamUrl(targetUrl);
+        setIsBuffering(true);
+        setPlaybackError(null);
+      } catch (err) {
+        console.error('[YouTubePlayer] ❌ Error in changeQuality:', err);
       }
-
-      if (!chosenFormat) {
-        console.warn(`[YouTubePlayer] ⚠️ No format found specifically matching ${quality}`);
-        return;
-      }
-
-      const targetUrl = chosenFormat.url || chosenFormat.proxyUrl;
-      console.log(`[YouTubePlayer] 🔄 New format chosen: ${chosenFormat.quality} (${chosenFormat.container})`);
-
-      if (targetUrl === streamUrl) {
-        console.log(`[YouTubePlayer] ℹ️ Already playing this URL, skipping reload`);
-        return;
-      }
-
-      // Seamlessly switch stream and queue seek to resumePosition
-      setSeekTarget(resumePosition);
-      setStreamUrl(targetUrl || null);
-      setIsBuffering(true);
-      setPlaybackError(null);
     },
     [videoDetails, currentTime, streamUrl]
   );

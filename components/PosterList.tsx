@@ -16,7 +16,6 @@ import { isHapticsSupported } from '@/utils/platform';
 import { DefaultPosterImgXml } from '@/utils/Svg';
 import { Ionicons } from '@expo/vector-icons';
 import { TorrentItem, GroupedItem, Language, Category } from '@/hooks/useTamilMv';
-import { myListService } from '@/services/MyListService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,34 +66,7 @@ const PosterItem = ({
 }) => {
   const [imgError, setImgError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
-  const [inList, setInList] = useState(() => myListService.isInMyList(item.name));
 
-  useEffect(() => {
-    setInList(myListService.isInMyList(item.name));
-    return myListService.subscribe(() => {
-      setInList(myListService.isInMyList(item.name));
-    });
-  }, [item.name]);
-
-  const handleToggleMyList = async (e: any) => {
-    e.stopPropagation?.();
-    if (await isHapticsSupported()) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-    const added = await myListService.toggleMyList({
-      id: item.name,
-      title: item.name,
-      poster: item.poster ?? '',
-      publishDate: item.publishDate,
-      type: item.type,
-      guid: item.guid,
-      groupid: item.groupid,
-      infoHash: item.infoHash,
-      magnetUrl: item.magnetUrl,
-      allItems: item.allItems,
-    });
-    setInList(added);
-  };
 
   const handlePress = async () => {
     if (await isHapticsSupported()) {
@@ -146,18 +118,7 @@ const PosterItem = ({
           </View>
         )}
 
-        <TouchableOpacity
-          style={[styles.bookmarkBadge, inList && styles.bookmarkBadgeActive]}
-          onPress={handleToggleMyList}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name={inList ? 'bookmark' : 'bookmark-outline'}
-            size={13}
-            color={inList ? '#ffffff' : 'rgba(255,255,255,0.7)'}
-          />
-        </TouchableOpacity>
+
       </View>
       <Text numberOfLines={2} style={[styles.posterTitle, { width: posterWidth }]}>
         {item.name}

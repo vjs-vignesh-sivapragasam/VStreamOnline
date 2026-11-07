@@ -1,5 +1,6 @@
 import { Linking } from 'react-native';
 import { StorageKeys, storageService } from '@/utils/StorageService';
+import appSettings from '@/appsettings.json';
 
 export interface TmdbCastMember {
   id: number;
@@ -122,6 +123,10 @@ class TmdbService {
   }
 
   private getApiKey(): string {
+    // 1. Hardcoded appsettings.json key (always active by default)
+    if (appSettings?.tmdb?.apiKey && appSettings.tmdb.apiKey.trim()) {
+      return appSettings.tmdb.apiKey.trim();
+    }
     // Check user configured key first
     const saved = storageService.getItem(StorageKeys.TMDB_API_KEY as any);
     if (saved && saved.trim()) return saved.trim();

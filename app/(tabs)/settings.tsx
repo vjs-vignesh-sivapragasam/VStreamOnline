@@ -39,12 +39,11 @@ const SettingsScreen = () => {
   }, [loadDataStats, storageModalVisible]);
 
   const sourceList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'TamilMV Source', route: '/settings/tamilmv', icon: 'globe-outline' },
+    { title: 'Connection', route: '/settings/tamilmv', icon: 'globe-outline' },
   ];
 
   const integrationList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'TMDB (Movies & Trailers)', route: '/settings/tmdb', icon: 'film-outline' },
-    { title: 'Stremio', route: '/settings/stremioserver', icon: 'magnet-outline' },
+    { title: 'Server', route: '/settings/stremioserver', icon: 'server-outline' },
     { title: 'OpenSubtitles', route: '/settings/opensubtitles', icon: 'chatbox-ellipses-outline' },
   ];
 
@@ -198,7 +197,7 @@ const SettingsScreen = () => {
         {/* Content Sources Section */}
         {sourceList.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionHeader}>CONTENT SOURCES</Text>
+            <Text style={styles.sectionHeader}>CONNECTION</Text>
             <View style={styles.settingsGroup}>
               {sourceList.map((item, index) => (
                 <SettingItem

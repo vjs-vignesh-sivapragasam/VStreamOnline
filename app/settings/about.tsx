@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import BottomSpacing from '@/components/BottomSpacing';
 import { useTheme } from '@/contexts/ThemeContext';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const AboutUsScreen: React.FC = () => {
   const { theme } = useTheme();
@@ -27,7 +28,7 @@ const AboutUsScreen: React.FC = () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    await Clipboard.setStringAsync(`NetFlix v${appVersion}`);
+    await Clipboard.setStringAsync(`VPLEX v${appVersion}`);
     showAlert('Copied', `App version v${appVersion} copied to clipboard.`);
   };
 
@@ -49,14 +50,37 @@ const AboutUsScreen: React.FC = () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    const telUrl = 'tel:8122396125';
+    const telUrl = 'tel:+918122396125';
     const canOpen = await Linking.canOpenURL(telUrl).catch(() => false);
     if (canOpen) {
       await Linking.openURL(telUrl);
     } else {
-      await Clipboard.setStringAsync('8122396125');
-      showAlert('Copied', 'Mobile number copied to clipboard:\n8122396125');
+      await Clipboard.setStringAsync('+918122396125');
+      showAlert('Copied', 'Mobile number copied to clipboard:\n+91 8122396125');
     }
+  };
+
+  const handleWhatsAppPress = async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    const waUrl = 'https://wa.me/918122396125';
+    const canOpen = await Linking.canOpenURL(waUrl).catch(() => false);
+    if (canOpen) {
+      await Linking.openURL(waUrl);
+    } else {
+      await Clipboard.setStringAsync('+918122396125');
+      showAlert('Copied', 'WhatsApp number copied to clipboard:\n+91 8122396125');
+    }
+  };
+
+  const handleCopyAllContact = async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    const fullContact = 'Developer: S Vignesh (VIKI)\nEmail: vigneshsivapragasam28@gmail.com\nPhone: +91 8122396125\nApplication: VPLEX Media Platform';
+    await Clipboard.setStringAsync(fullContact);
+    showAlert('Contact Copied', 'Developer contact card copied to clipboard.');
   };
 
   return (
@@ -66,209 +90,209 @@ const AboutUsScreen: React.FC = () => {
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
+        {/* Navigation Bar */}
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
             activeOpacity={0.7}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="chevron-back" size={24} color="#ffffff" />
+            <Ionicons name="arrow-back" size={22} color="#ffffff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>About Us</Text>
-          <View style={{ width: 40 }} />
+          <Text style={styles.headerTitle}>Developer & About</Text>
+          <TouchableOpacity
+            style={styles.shareContactBtn}
+            onPress={handleCopyAllContact}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="share-outline" size={20} color="#ffffff" />
+          </TouchableOpacity>
         </View>
 
-        {/* Hero Section */}
-        <View style={styles.heroSection}>
-          <View style={styles.iconWrap}>
+        {/* 1. HERO DEVELOPER PROFILE CARD */}
+        <View style={styles.developerHeroCard}>
+          <LinearGradient
+            colors={['rgba(255, 255, 255, 0.08)', 'rgba(255, 255, 255, 0.02)']}
+            style={styles.heroGradient}
+          />
+          <View style={styles.developerProfileHeader}>
+            <View style={styles.avatarWrap}>
+              <View style={[styles.avatarGlow, { backgroundColor: theme.primary }]} />
+              <View style={styles.avatarCircle}>
+                <Text style={styles.avatarInitials}>SV</Text>
+              </View>
+            </View>
+
+            <View style={styles.developerIdentity}>
+              <View style={styles.nameRow}>
+                <Text style={styles.developerName}>S Vignesh</Text>
+                <View style={[styles.vikiBadge, { backgroundColor: '#e5a83225', borderColor: '#e5a83260' }]}>
+                  <Text style={styles.vikiBadgeText}>VIKI</Text>
+                </View>
+              </View>
+              <Text style={styles.developerRole}>Lead Mobile & Core Architect</Text>
+              <View style={styles.availabilityRow}>
+                <View style={styles.statusDot} />
+                <Text style={styles.availabilityText}>Creator of VPLEX • Open for Feedback</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Quick Action Touch Buttons */}
+          <View style={styles.quickActionsGrid}>
+            <TouchableOpacity
+              style={styles.actionPill}
+              onPress={handleEmailPress}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIconBox, { backgroundColor: '#00e67618' }]}>
+                <Ionicons name="mail" size={18} color="#00e676" />
+              </View>
+              <Text style={styles.actionPillLabel}>Send Email</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionPill}
+              onPress={handlePhonePress}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIconBox, { backgroundColor: '#2979ff18' }]}>
+                <Ionicons name="call" size={18} color="#2979ff" />
+              </View>
+              <Text style={styles.actionPillLabel}>Call Directly</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionPill}
+              onPress={handleWhatsAppPress}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIconBox, { backgroundColor: '#25D36620' }]}>
+                <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+              </View>
+              <Text style={styles.actionPillLabel}>WhatsApp</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Detailed Contact List Rows */}
+          <View style={styles.contactDetailsBox}>
+            {/* Email Row */}
+            <TouchableOpacity
+              style={styles.contactItemRow}
+              onPress={handleEmailPress}
+              activeOpacity={0.7}
+            >
+              <View style={styles.contactItemLeft}>
+                <Ionicons name="mail-outline" size={18} color="#8E8E93" style={{ marginRight: 10 }} />
+                <View>
+                  <Text style={styles.contactItemLabel}>Email</Text>
+                  <Text style={styles.contactItemValue}>vigneshsivapragasam28@gmail.com</Text>
+                </View>
+              </View>
+              <Ionicons name="copy-outline" size={16} color="#666666" />
+            </TouchableOpacity>
+
+            <View style={styles.contactDivider} />
+
+            {/* Phone Row */}
+            <TouchableOpacity
+              style={styles.contactItemRow}
+              onPress={handlePhonePress}
+              activeOpacity={0.7}
+            >
+              <View style={styles.contactItemLeft}>
+                <Ionicons name="call-outline" size={18} color="#8E8E93" style={{ marginRight: 10 }} />
+                <View>
+                  <Text style={styles.contactItemLabel}>Mobile Phone</Text>
+                  <Text style={styles.contactItemValue}>+91 8122396125</Text>
+                </View>
+              </View>
+              <Ionicons name="copy-outline" size={16} color="#666666" />
+            </TouchableOpacity>
+
+            <View style={styles.contactDivider} />
+
+            {/* WhatsApp Row */}
+            <TouchableOpacity
+              style={styles.contactItemRow}
+              onPress={handleWhatsAppPress}
+              activeOpacity={0.7}
+            >
+              <View style={styles.contactItemLeft}>
+                <Ionicons name="logo-whatsapp" size={18} color="#25D366" style={{ marginRight: 10 }} />
+                <View>
+                  <Text style={styles.contactItemLabel}>Instant Message</Text>
+                  <Text style={styles.contactItemValue}>Chat on WhatsApp (+91 8122396125)</Text>
+                </View>
+              </View>
+              <Ionicons name="open-outline" size={16} color="#666666" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 2. APP SPECIFICATION CARD */}
+        <View style={styles.card}>
+          <View style={styles.appHeaderRow}>
             <Image
               source={require('@/assets/images/icon.png')}
-              style={styles.appIcon}
+              style={styles.appIconSmall}
               resizeMode="cover"
             />
-          </View>
-          <Text style={styles.appName}>NetFlix</Text>
-          <TouchableOpacity
-            style={[styles.versionBadge, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' }]}
-            onPress={copyVersion}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.versionText, { color: theme.primaryLight || theme.primary }]}>Version {appVersion}</Text>
-          </TouchableOpacity>
-          <Text style={styles.appTagline}>
-            Your unified streaming and offline media hub
-          </Text>
-        </View>
-
-        {/* Mission / Overview Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardHeading}>About NetFlix</Text>
-          <Text style={styles.cardBody}>
-            NetFlix is a modern, high-performance media hub crafted for seamless discovery and playback. Stream movies, TV series, and multi-audio releases in crisp 4K, 1080p, and 720p resolutions, or save them directly to internal storage for offline viewing without data connection.
-          </Text>
-        </View>
-
-        {/* Developer Contact Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardHeading}>Developer Contact</Text>
-
-          {/* Name */}
-          <View style={styles.contactRow}>
-            <View style={[styles.contactIconWrap, { backgroundColor: theme.iconBg }]}>
-              <Ionicons name="person-outline" size={18} color={theme.primary} />
-            </View>
-            <View style={styles.contactTextWrap}>
-              <Text style={styles.contactLabel}>Name</Text>
-              <Text style={styles.contactValue}>S Vignesh</Text>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.appName}>VPLEX</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.versionBadge,
+                    { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' },
+                  ]}
+                  onPress={copyVersion}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.versionText, { color: theme.primaryLight || theme.primary }]}>
+                    v{appVersion}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.appTagline}>Next-Gen High-Performance Streaming Platform</Text>
             </View>
           </View>
 
-          {/* Email */}
-          <TouchableOpacity
-            style={styles.contactRow}
-            onPress={handleEmailPress}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.contactIconWrap, { backgroundColor: '#00e67620' }]}>
-              <Ionicons name="mail-outline" size={18} color="#00e676" />
+          <View style={styles.specRowsContainer}>
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Developer & Maintainer</Text>
+              <Text style={styles.specValue}>S Vignesh (VIKI)</Text>
             </View>
-            <View style={styles.contactTextWrap}>
-              <Text style={styles.contactLabel}>Email ID</Text>
-              <Text style={styles.contactValueInteractive}>
-                vigneshsivapragasam28@gmail.com
+            <View style={styles.specDivider} />
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Architecture</Text>
+              <Text style={styles.specValue}>React Native & Embedded Engine</Text>
+            </View>
+            <View style={styles.specDivider} />
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Platform</Text>
+              <Text style={styles.specValue}>
+                {Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : 'Web'}
               </Text>
             </View>
-            <Ionicons name="open-outline" size={16} color="#8E8E93" />
-          </TouchableOpacity>
-
-          {/* Mobile No */}
-          <TouchableOpacity
-            style={[styles.contactRow, styles.contactRowLast]}
-            onPress={handlePhonePress}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.contactIconWrap, { backgroundColor: '#ff980020' }]}>
-              <Ionicons name="call-outline" size={18} color="#ff9800" />
-            </View>
-            <View style={styles.contactTextWrap}>
-              <Text style={styles.contactLabel}>Mobile No</Text>
-              <Text style={styles.contactValueInteractive}>8122396125</Text>
-            </View>
-            <Ionicons name="open-outline" size={16} color="#8E8E93" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Features Highlights */}
-        <View style={styles.card}>
-          <Text style={styles.cardHeading}>Key Features</Text>
-
-          <View style={styles.featureRow}>
-            <View style={[styles.featureIconWrap, { backgroundColor: theme.iconBg }]}>
-              <Ionicons name="film-outline" size={20} color={theme.primary} />
-            </View>
-            <View style={styles.featureTextWrap}>
-              <Text style={styles.featureTitle}>TMDB Integration & Trailers</Text>
-              <Text style={styles.featureDescription}>
-                Rich movie details, release dates, Cast & Crew avatars, official YouTube trailers, and personalized recommendations.
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.featureRow}>
-            <View style={[styles.featureIconWrap, { backgroundColor: '#00e67620' }]}>
-              <Ionicons name="cloud-download-outline" size={20} color="#00e676" />
-            </View>
-            <View style={styles.featureTextWrap}>
-              <Text style={styles.featureTitle}>Internal Offline Downloads</Text>
-              <Text style={styles.featureDescription}>
-                Download movies directly into internal device storage with real-time speed, peer counts, and progress tracking.
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.featureRow}>
-            <View style={[styles.featureIconWrap, { backgroundColor: '#ff980020' }]}>
-              <Ionicons name="open-outline" size={20} color="#ff9800" />
-            </View>
-            <View style={styles.featureTextWrap}>
-              <Text style={styles.featureTitle}>External Players (VLC & MX)</Text>
-              <Text style={styles.featureDescription}>
-                Play downloaded movies directly in VLC, MX Player, Infuse, or any preferred player on your device.
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.featureRow}>
-            <View style={[styles.featureIconWrap, { backgroundColor: theme.primary + '20' }]}>
-              <Ionicons name="bookmark-outline" size={20} color={theme.primary} />
-            </View>
-            <View style={styles.featureTextWrap}>
-              <Text style={styles.featureTitle}>My List</Text>
-              <Text style={styles.featureDescription}>
-                Bookmark your favorite titles and launch them with 1 tap directly from your Library without searching.
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.featureRow}>
-            <View style={[styles.featureIconWrap, { backgroundColor: '#00bcd420' }]}>
-              <Ionicons name="globe-outline" size={20} color="#00bcd4" />
-            </View>
-            <View style={styles.featureTextWrap}>
-              <Text style={styles.featureTitle}>Multi-Domain Mirror Resolution</Text>
-              <Text style={styles.featureDescription}>
-                Continuous health check and auto-switching across active TamilMV mirrors to guarantee uninterrupted access.
-              </Text>
+            <View style={styles.specDivider} />
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Stream Quality</Text>
+              <Text style={styles.specValue}>4K Ultra HD • 1080p • 720p</Text>
             </View>
           </View>
         </View>
 
-        {/* Technical Specs Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardHeading}>App Information</Text>
-
-          <View style={styles.specRow}>
-            <Text style={styles.specLabel}>Developer</Text>
-            <Text style={styles.specValue}>S Vignesh</Text>
-          </View>
-
-          <View style={styles.specRow}>
-            <Text style={styles.specLabel}>Application</Text>
-            <Text style={styles.specValue}>NetFlix</Text>
-          </View>
-
-          <View style={styles.specRow}>
-            <Text style={styles.specLabel}>Version</Text>
-            <Text style={styles.specValue}>{appVersion}</Text>
-          </View>
-
-          <View style={styles.specRow}>
-            <Text style={styles.specLabel}>Platform</Text>
-            <Text style={styles.specValue}>
-              {Platform.OS === 'ios' ? 'iOS' : Platform.OS === 'android' ? 'Android' : 'Web'}
-            </Text>
-          </View>
-
-          <View style={styles.specRow}>
-            <Text style={styles.specLabel}>Metadata Source</Text>
-            <Text style={styles.specValue}>The Movie Database (TMDB)</Text>
-          </View>
-
-          <View style={styles.specRow}>
-            <Text style={styles.specLabel}>Feed Provider</Text>
-            <Text style={styles.specValue}>1TamilMV Engine</Text>
-          </View>
-        </View>
-
-        {/* Disclaimer Card */}
+        {/* 3. LEGAL & DISCLAIMER */}
         <View style={[styles.card, styles.disclaimerCard]}>
           <View style={styles.disclaimerHeader}>
-            <Ionicons name="shield-checkmark-outline" size={18} color="#8E8E93" />
-            <Text style={styles.disclaimerTitle}>Disclaimer</Text>
+            <Ionicons name="shield-checkmark-outline" size={17} color="#8E8E93" />
+            <Text style={styles.disclaimerTitle}>Platform Disclaimer</Text>
           </View>
           <Text style={styles.disclaimerText}>
-            NetFlix is a media indexing tool and media player. It does not host, upload, or own any video files on its servers. All metadata and media streams are resolved from publicly accessible feeds and user-configured torrent streaming engines.
+            VPLEX is an open media indexer and player designed to organize media streams and offline downloads. It does not host, upload, or broadcast any video files. All content is fetched from user-connected feeds and public catalog mirrors.
           </Text>
         </View>
 
@@ -281,220 +305,307 @@ const AboutUsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#0a0a0a',
   },
   scrollView: {
     flex: 1,
   },
   contentContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 40,
+    maxWidth: 780,
+    width: '100%',
+    marginHorizontal: 'auto',
   },
 
-  /* Header */
+  /* Navigation Header */
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    paddingVertical: 12,
+    marginBottom: 12,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#1a1a1a',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-
-  /* Hero */
-  heroSection: {
-    alignItems: 'center',
-    marginBottom: 26,
-  },
-  iconWrap: {
-    width: 88,
-    height: 88,
-    borderRadius: 22,
-    overflow: 'hidden',
-    backgroundColor: '#1c1c1e',
-    marginBottom: 14,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  appIcon: {
-    width: '100%',
-    height: '100%',
-  },
-  appName: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#ffffff',
-    letterSpacing: -0.3,
-    marginBottom: 6,
-  },
-  versionBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    marginBottom: 10,
-  },
-  versionText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  appTagline: {
-    fontSize: 14,
-    color: '#8E8E93',
-    textAlign: 'center',
-  },
-
-  /* Card */
-  card: {
-    backgroundColor: '#121212',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#222222',
-  },
-  cardHeading: {
     fontSize: 17,
     fontWeight: '700',
     color: '#ffffff',
-    marginBottom: 12,
-    letterSpacing: -0.2,
+    letterSpacing: 0.2,
   },
-  cardBody: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.75)',
-    lineHeight: 22,
-  },
-
-  /* Contact Rows */
-  contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#242426',
-    gap: 12,
-  },
-  contactRowLast: {
-    borderBottomWidth: 0,
-    paddingBottom: 4,
-  },
-  contactIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+  shareContactBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  contactTextWrap: {
-    flex: 1,
-  },
-  contactLabel: {
-    fontSize: 12,
-    color: '#8E8E93',
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  contactValue: {
-    fontSize: 14,
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  contactValueInteractive: {
-    fontSize: 14,
-    color: '#ffffff', // replaced static 535aff
-    fontWeight: '600',
-  },
 
-  /* Feature Rows */
-  featureRow: {
+  /* Developer Hero Card */
+  developerHeroCard: {
+    backgroundColor: '#121212',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 16,
+    marginBottom: 16,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  heroGradient: {
+    ...StyleSheet.absoluteFill,
+  },
+  developerProfileHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 14,
+    alignItems: 'center',
     marginBottom: 16,
   },
-  featureIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+  avatarWrap: {
+    width: 58,
+    height: 58,
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarGlow: {
+    position: 'absolute',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    opacity: 0.25,
+  },
+  avatarCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#1c1c1e',
+    borderWidth: 2,
+    borderColor: '#e5a832',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitials: {
+    fontSize: 19,
+    fontWeight: '900',
+    color: '#e5a832',
+    letterSpacing: 0.5,
+  },
+  developerIdentity: {
+    flex: 1,
+    marginLeft: 14,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  developerName: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: 0.2,
+  },
+  vikiBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  vikiBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#e5a832',
+    letterSpacing: 0.8,
+  },
+  developerRole: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontWeight: '500',
     marginTop: 2,
   },
-  featureTextWrap: {
-    flex: 1,
+  availabilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
   },
-  featureTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 3,
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#30d158',
+    marginRight: 6,
   },
-  featureDescription: {
-    fontSize: 13,
-    color: '#8E8E93',
-    lineHeight: 18,
+  availabilityText: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontWeight: '500',
   },
 
-  /* Specs */
-  specRow: {
+  /* Quick Actions Grid */
+  quickActionsGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  actionPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a1a1c',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    gap: 6,
+  },
+  actionIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionPillLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+
+  /* Contact Details Box */
+  contactDetailsBox: {
+    backgroundColor: '#171717',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  contactItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#242426',
+    paddingVertical: 8,
   },
-  specLabel: {
-    fontSize: 14,
+  contactItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  contactItemLabel: {
+    fontSize: 11,
     color: '#8E8E93',
+    fontWeight: '500',
   },
-  specValue: {
-    fontSize: 14,
-    fontWeight: '600',
+  contactItemValue: {
+    fontSize: 13,
     color: '#ffffff',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  contactDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
   },
 
-  /* Disclaimer */
-  disclaimerCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+  /* Standard Card */
+  card: {
+    backgroundColor: '#121212',
+    borderRadius: 16,
+    borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 16,
+    marginBottom: 16,
+  },
+  appHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  appIconSmall: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+  },
+  appName: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+  versionBadge: {
+    paddingVertical: 2,
+    paddingHorizontal: 7,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  versionText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  appTagline: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 2,
+  },
+
+  specRowsContainer: {
+    backgroundColor: '#171717',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  specRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  specDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  specLabel: {
+    fontSize: 12,
+    color: '#8E8E93',
+    fontWeight: '500',
+  },
+  specValue: {
+    fontSize: 12,
+    color: '#ffffff',
+    fontWeight: '600',
+  },
+
+  /* Disclaimer Card */
+  disclaimerCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
   disclaimerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
     marginBottom: 8,
   },
   disclaimerTitle: {
     fontSize: 13,
     fontWeight: '700',
     color: '#8E8E93',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    marginLeft: 6,
   },
   disclaimerText: {
     fontSize: 12,
-    color: '#6e6e73',
+    color: '#777777',
     lineHeight: 18,
   },
 });

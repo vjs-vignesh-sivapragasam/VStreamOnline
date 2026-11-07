@@ -1266,7 +1266,7 @@ export default function BrowserScreen() {
               triggerHaptic();
               showAlert(
                 'Ad & Popup Shield Active',
-                `NetFlix built-in shield has prevented ${blockedAdCount} unwanted advertising popups, click-jackers, and tracker scripts during this session.`
+                `VPLEX built-in shield has prevented ${blockedAdCount} unwanted advertising popups, click-jackers, and tracker scripts during this session.`
               );
             }}
             activeOpacity={0.8}
