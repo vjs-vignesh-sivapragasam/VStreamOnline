@@ -8,7 +8,7 @@ const StremioServerScreen = () => {
         <SafeAreaView style={styles.container}>
             <StatusBar />
             <ServerConfiguration
-                serverName="Stremio"
+                serverName="Server"
                 serverType="stremio"
                 defaultUrl="http://127.0.0.1:11470"
             />

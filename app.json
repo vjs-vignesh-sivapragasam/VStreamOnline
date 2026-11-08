@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "NetFlix by Viki",
+    "name": "vplex",
     "slug": "vstreamonline",
     "version": "1.0.0",
     "orientation": "default",
@@ -15,7 +15,7 @@
     "splash": {
       "image": "assets/images/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#ffffff"
     },
     "ios": {
       "icon": "assets/images/icon.png",
@@ -23,6 +23,9 @@
       "backgroundColor": "#000000",
       "bundleIdentifier": "com.vijayyuvi.vstreamonline",
       "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
@@ -36,9 +39,6 @@
           "infuse",
           "outplayer",
           "open-vidhub"
-        ],
-        "UIBackgroundModes": [
-          "audio"
         ]
       }
     },
@@ -48,8 +48,13 @@
         "backgroundColor": "#000000"
       },
       "package": "com.vijayyuvi.vstreamonline",
+      "supportsPictureInPicture": true,
       "icon": "assets/images/icon.png",
-      "supportsPictureInPicture": true
+      "permissions": [
+        "android.permission.VIBRATE",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "bundler": "metro",

@@ -16,6 +16,7 @@ import {
   Pressable,
   PanResponder,
   ToastAndroid,
+  StatusBar as RNStatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -171,6 +172,92 @@ const YouTubeWatchOverlayInner: React.FC = () => {
     }
   }, [expand]);
 
+    const isFullScreenRef = useRef(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
+  useEffect(() => {
+    isFullScreenRef.current = isFullScreen;
+  }, [isFullScreen]);
+
+  const handleFullScreen = useCallback(async (forced?: boolean) => {
+    const next = forced !== undefined ? forced : !isFullScreenRef.current;
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setIsFullScreen(next);
+    try {
+      if (Platform.OS === 'android') {
+        RNStatusBar.setHidden(next, 'none');
+        try {
+          const ImmersiveMode = require('react-native-immersive-mode').default || require('react-native-immersive-mode');
+          if (ImmersiveMode) {
+            if (next) {
+              ImmersiveMode.fullLayout(true);
+              ImmersiveMode.setBarMode('FullSticky');
+            } else {
+              ImmersiveMode.fullLayout(false);
+              ImmersiveMode.setBarMode('Normal');
+            }
+          }
+        } catch (_) {}
+      }
+      if (next) {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+      } else {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      }
+    } catch (e) {
+      console.warn('[YouTubeWatchOverlay] ScreenOrientation error:', e);
+    }
+  }, []);
+
+  // Cleanup immersive mode and status bar on overlay unmount
+  useEffect(() => {
+    return () => {
+      if (Platform.OS === 'android') {
+        try {
+          RNStatusBar.setHidden(false, 'none');
+          const ImmersiveMode = require('react-native-immersive-mode').default || require('react-native-immersive-mode');
+          if (ImmersiveMode) {
+            ImmersiveMode.fullLayout(false);
+            ImmersiveMode.setBarMode('Normal');
+          }
+        } catch (_) {}
+      }
+    };
+  }, []);
+
+  // Auto-detect physical device rotation to enter/exit fullscreen automatically
+  useEffect(() => {
+    let sub: ScreenOrientation.Subscription | null = null;
+    const setupListener = async () => {
+      try {
+        sub = ScreenOrientation.addOrientationChangeListener((evt) => {
+          const o = evt.orientationInfo.orientation;
+          const isLandscape =
+            o === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+            o === ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
+          if (!isMinimized && currentVideo) {
+            if (isLandscape && !isFullScreenRef.current) {
+              handleFullScreen(true);
+            } else if (!isLandscape && isFullScreenRef.current) {
+              handleFullScreen(false);
+            }
+          }
+        });
+      } catch (err) {
+        console.warn('[YouTubeWatchOverlay] addOrientationChangeListener error:', err);
+      }
+    };
+    setupListener();
+    return () => {
+      if (sub) {
+        ScreenOrientation.removeOrientationChangeListener(sub);
+      }
+    };
+  }, [isMinimized, currentVideo, handleFullScreen]);
+
+
   // Dedicated PanResponder on the inline player: only swipe down or swipe left on the player minimizes/goes back
   const playerPanResponder = useRef(
     PanResponder.create({
@@ -198,11 +285,11 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         const isSwipeLeft =
           gestureState.dx < -50 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4;
         if (isSwipeUp) {
-          if (!isFullScreen) {
+          if (!isFullScreenRef.current) {
             handleFullScreen(true);
           }
         } else if (isSwipeDown) {
-          if (isFullScreen) {
+          if (isFullScreenRef.current) {
             handleFullScreen(false);
           } else {
             handleGoBackPrevious();
@@ -213,6 +300,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       },
     })
   ).current;
+
 
   // Related videos state
   const [relatedVideos, setRelatedVideos] = useState<YouTubeVideoItem[]>([]);
@@ -226,7 +314,6 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   const [screenFitMode, setScreenFitMode] = useState<ScreenFitMode>('cover');
   const [modalVideoDetails, setModalVideoDetails] = useState<YouTubeVideoDetails | null>(null);
   const [activeDownload, setActiveDownload] = useState<DownloadItem | null>(null);
-  const [isFullScreen, setIsFullScreen] = useState(false);
 
   useEffect(() => {
     if (!currentVideo?.id) {
@@ -463,19 +550,6 @@ const YouTubeWatchOverlayInner: React.FC = () => {
     [currentVideo, activeDownloadItem, videoDetails, modalVideoDetails, showDownloadToast]
   );
 
-  const handleFullScreen = useCallback(async (forced?: boolean) => {
-    const next = forced !== undefined ? forced : !isFullScreen;
-    setIsFullScreen(next);
-    try {
-      if (next) {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-      } else {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      }
-    } catch (e) {
-      console.warn('[YouTubeWatchOverlay] ScreenOrientation error:', e);
-    }
-  }, [isFullScreen]);
 
   useEffect(() => {
     if (isMinimized && isFullScreen) {
@@ -592,42 +666,15 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       <View
         style={[
           styles.fullWatchOverlay,
+          isFullScreen && styles.fullWatchOverlayFullScreen,
           isMinimized && styles.hiddenOverlay,
-          isFullScreen && {
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            width: '100%',
-            height: '100%',
-          },
         ]}
         pointerEvents={isMinimized ? 'none' : 'auto'}
       >
         {!isMinimized && <StatusBar style="light" hidden={isFullScreen} />}
-        <View
-          style={[
-            styles.safeArea,
-            {
-              paddingTop: isFullScreen ? 0 : insets.top,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              paddingRight: 0,
-            },
-            isFullScreen && {
-              width: '100%',
-              height: '100%',
-            },
-          ]}
-        >
-          {/* Top 16:9 Video Player: swipe down or left on the player minimizes/goes back */}
-          <View
-            style={[
-              styles.playerContainer,
-              isFullScreen && styles.fullScreenPlayerContainer,
-            ]}
-            {...playerPanResponder.panHandlers}
-          >
+        <View style={isFullScreen ? styles.safeAreaFullScreen : [styles.safeArea, { paddingTop: insets.top }]}>
+          {/* Top Video Player: in fullscreen it covers edge-to-edge completely */}
+          <View style={isFullScreen ? styles.fullScreenPlayerContainer : styles.playerContainer} {...playerPanResponder.panHandlers}>
           <YouTubeInlinePlayer
             videoId={currentVideo.id}
             title={currentVideo.title}
@@ -1231,9 +1278,18 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    backgroundColor: '#0a0a0c',
+    zIndex: 99999,
+  },
+  fullWatchOverlayFullScreen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: '100%',
     height: '100%',
-    backgroundColor: '#0a0a0c',
+    backgroundColor: '#000000',
     zIndex: 99999,
   },
   hiddenOverlay: {
@@ -1257,6 +1313,18 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#000000',
+  },
+  safeAreaFullScreen: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#000000',
+    paddingTop: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    paddingRight: 0,
+    paddingHorizontal: 0,
+    margin: 0,
   },
   contentScroll: {
     flex: 1,

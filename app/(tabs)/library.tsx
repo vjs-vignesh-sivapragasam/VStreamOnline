@@ -40,6 +40,28 @@ type LibraryTab = 'All' | 'Movies' | 'Downloads' | 'YouTube' | 'History';
 
 const CARD_SPACING = 16;
 
+const isAudioDownload = (item: DownloadItem): boolean => {
+    const fileName = (item.fileName || '').toLowerCase();
+    const fileUri = (item.fileUri || '').toLowerCase();
+    const id = (item.id || '').toLowerCase();
+    const title = (item.title || '').toLowerCase();
+    return (
+        fileName.endsWith('.mp3') ||
+        fileName.endsWith('.m4a') ||
+        fileName.endsWith('.aac') ||
+        fileName.endsWith('.wav') ||
+        fileName.endsWith('.flac') ||
+        fileName.endsWith('.opus') ||
+        fileUri.endsWith('.mp3') ||
+        fileUri.endsWith('.m4a') ||
+        fileUri.endsWith('.aac') ||
+        id.includes('_mp3') ||
+        id.includes('_audio') ||
+        title.endsWith('.mp3') ||
+        title.endsWith('.m4a')
+    );
+};
+
 const LibraryScreen: React.FC = () => {
     const { theme } = useTheme();
     const [watchHistory, setWatchHistory] = useState<WatchHistoryItem[]>([]);
@@ -204,6 +226,18 @@ const LibraryScreen: React.FC = () => {
 
     const handleDownloadItemPress = (item: DownloadItem) => {
         if (item.status === 'completed') {
+            if (isAudioDownload(item)) {
+                router.push({
+                    pathname: '/music/player' as any,
+                    params: {
+                        id: item.id,
+                        fileUri: item.fileUri,
+                        title: item.title,
+                        poster: item.poster,
+                    },
+                });
+                return;
+            }
             // Directly start in-app player immediately - no modal selection popup!
             router.push({
                 pathname: '/stream/player' as any,
@@ -606,13 +640,60 @@ const LibraryScreen: React.FC = () => {
                     </Text>
                 </View>
 
+
+                {/* Offline Music Player Quick Access Banner */}
+                {downloads.filter((d) => d.status === 'completed' && isAudioDownload(d)).length > 0 && (
+                    <TouchableOpacity
+                        style={[
+                            styles.musicHeroBanner,
+                            {
+                                borderColor: theme.cardBorder || 'rgba(0, 229, 255, 0.35)',
+                                backgroundColor: theme.iconBg || 'rgba(0, 229, 255, 0.08)',
+                            },
+                        ]}
+                        onPress={() => {
+                            const firstSong = downloads.find((d) => d.status === 'completed' && isAudioDownload(d));
+                            if (firstSong) {
+                                router.push({
+                                    pathname: '/music/player' as any,
+                                    params: {
+                                        id: firstSong.id,
+                                        fileUri: firstSong.fileUri,
+                                        title: firstSong.title,
+                                        poster: firstSong.poster,
+                                    },
+                                });
+                            }
+                        }}
+                        activeOpacity={0.8}
+                    >
+                        <View style={[styles.musicHeroIconWrap, { backgroundColor: theme.primary }]}>
+                            <Ionicons name="disc" size={24} color="#ffffff" />
+                        </View>
+                        <View style={styles.musicHeroTextWrap}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={styles.musicHeroTitle}>Music Player</Text>
+                                <View style={styles.musicHeroBadge}>
+                                    <Text style={styles.musicHeroBadgeText}>
+                                        {downloads.filter((d) => d.status === 'completed' && isAudioDownload(d)).length} Songs
+                                    </Text>
+                                </View>
+                            </View>
+                            <Text style={styles.musicHeroSub}>
+                                Play downloaded MP3 tracks with audio visualizer & background playback
+                            </Text>
+                        </View>
+                        <Ionicons name="play-circle" size={34} color={theme.primaryLight || '#00e5ff'} />
+                    </TouchableOpacity>
+                )}
+
                 {/* Active in-progress YouTube downloads */}
                 {activeYouTubeDownloads.length > 0 && (
                     <View style={styles.activeDownloadsContainer}>
                         {activeYouTubeDownloads.map((item) => {
                             const isDownloading = item.status === 'downloading';
                             const isPaused = item.status === 'paused';
-                            const isAudio = item.fileName?.endsWith('.mp3') || item.fileName?.endsWith('.m4a');
+                            const isAudio = isAudioDownload(item);
 
                             return (
                                 <View key={item.id} style={styles.activeDownloadCard}>
@@ -1721,6 +1802,54 @@ const styles = StyleSheet.create({
     },
 
     // ── YouTube Downloads Section ─────────────────────────────────────────────────
+    musicHeroBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 14,
+        borderRadius: 16,
+        borderWidth: 1,
+        marginBottom: 16,
+        gap: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    musicHeroIconWrap: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    musicHeroTextWrap: {
+        flex: 1,
+    },
+    musicHeroTitle: {
+        color: '#ffffff',
+        fontSize: 15,
+        fontWeight: '800',
+    },
+    musicHeroBadge: {
+        backgroundColor: 'rgba(0, 229, 255, 0.2)',
+        paddingVertical: 2,
+        paddingHorizontal: 7,
+        borderRadius: 10,
+        borderWidth: 0.8,
+        borderColor: '#00e5ff',
+    },
+    musicHeroBadgeText: {
+        color: '#00e5ff',
+        fontSize: 10,
+        fontWeight: '800',
+    },
+    musicHeroSub: {
+        color: 'rgba(255, 255, 255, 0.6)',
+        fontSize: 12,
+        marginTop: 3,
+        lineHeight: 16,
+    },
     ytCompletedList: {
         gap: 12,
     },

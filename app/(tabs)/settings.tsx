@@ -15,6 +15,7 @@ import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
 
+
 const PopupSheet: React.FC<{ children: React.ReactNode; style: any }> = ({ children, style }) => {
   if (Platform.OS === 'ios') {
     return (
@@ -50,12 +51,11 @@ const SettingsScreen = () => {
   }, [loadDataStats, storageModalVisible]);
 
   const sourceList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'TamilMV Source', route: '/settings/tamilmv', icon: 'globe-outline' },
+    { title: 'Connection', route: '/settings/tamilmv', icon: 'globe-outline' },
   ];
 
   const integrationList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'TMDB (Movies & Trailers)', route: '/settings/tmdb', icon: 'film-outline' },
-    { title: 'Stremio', route: '/settings/stremioserver', icon: 'magnet-outline' },
+    { title: 'Server', route: '/settings/stremioserver', icon: 'server-outline' },
     { title: 'OpenSubtitles', route: '/settings/opensubtitles', icon: 'chatbox-ellipses-outline' },
   ];
 
@@ -209,7 +209,7 @@ const SettingsScreen = () => {
         {/* Content Sources Section */}
         {sourceList.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionHeader}>CONTENT SOURCES</Text>
+            <Text style={styles.sectionHeader}>CONNECTION</Text>
             <View style={styles.settingsGroup}>
               {sourceList.map((item, index) => (
                 <SettingItem

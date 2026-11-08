@@ -390,11 +390,22 @@ const SearchScreen = () => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.webViewBtn}
+                style={[
+                  styles.webViewBtn,
+                  {
+                    backgroundColor: theme.iconBg,
+                    borderColor: theme.indicator || theme.cardBorder,
+                  },
+                ]}
                 onPress={handleOpenWebView}
                 activeOpacity={0.8}
               >
-                <Ionicons name="globe-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                <Ionicons
+                  name="globe-outline"
+                  size={16}
+                  color={theme.primaryLight || theme.primary}
+                  style={{ marginRight: 6 }}
+                />
                 <Text style={styles.webViewBtnText}>Web view</Text>
               </TouchableOpacity>
             </View>
@@ -616,9 +627,7 @@ const styles = StyleSheet.create({
   webViewBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(83, 90, 255, 0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(83, 90, 255, 0.4)',
     paddingVertical: 11,
     paddingHorizontal: 20,
     borderRadius: 22,

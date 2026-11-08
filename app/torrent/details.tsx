@@ -11,7 +11,7 @@ import {
   FlatList,
   Image,
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { StatusBar, Text, View } from '../../components/Themed';
 import BottomSpacing from '@/components/BottomSpacing';
 import * as Haptics from 'expo-haptics';
@@ -514,6 +514,7 @@ const TorrentDetails = () => {
 
   return (
     <>
+      <Stack.Screen options={{ headerShown: false }} />
       <ScrollView
         ref={scrollRef}
         style={styles.container}

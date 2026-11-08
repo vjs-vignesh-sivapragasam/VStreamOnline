@@ -5,7 +5,7 @@ import { DarkTheme, Theme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from 'react';
 import 'react-native-reanimated';
 import { View, StyleSheet, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,6 +16,7 @@ import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
 import { YouTubePlayerProvider } from '@/contexts/YouTubePlayerContext';
 import { YouTubeWatchOverlay } from '@/components/youtube/YouTubeWatchOverlay';
 import { AppThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { VplexCinematicSplash } from '@/components/splash/VplexCinematicSplash';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -38,11 +39,32 @@ SplashScreen.preventAutoHideAsync().catch((e) => {
   console.warn('[APP_BOOT] preventAutoHideAsync warning:', e);
 });
 
+class SplashErrorBoundary extends Component<{ children: ReactNode; onFallback: () => void }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.warn('[SplashErrorBoundary] Handled splash screen error safely:', error, errorInfo);
+    this.props.onFallback();
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return null;
+    }
+    return this.props.children;
+  }
+}
+
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
   });
+  const [splashFinished, setSplashFinished] = useState(false);
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
@@ -66,7 +88,16 @@ export default function RootLayout() {
   return (
     <AppCrashErrorBoundary>
       <AppThemeProvider>
-        <RootLayoutNav />
+        <View style={{ flex: 1 }}>
+          <RootLayoutNav />
+          {!splashFinished && (
+            <SplashErrorBoundary onFallback={() => setSplashFinished(true)}>
+              <VplexCinematicSplash
+                onAnimationComplete={() => setSplashFinished(true)}
+              />
+            </SplashErrorBoundary>
+          )}
+        </View>
       </AppThemeProvider>
     </AppCrashErrorBoundary>
   );
@@ -191,6 +222,15 @@ function RootLayoutNav() {
                   headerTransparent: true,
                   headerBackground: InvisibleHeaderBackground,
                   contentStyle: { backgroundColor: '#000000' },
+                }}
+              />
+              <Stack.Screen
+                name="music/player"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                  contentStyle: { backgroundColor: '#0a0a0c' },
                 }}
               />
               <Stack.Screen

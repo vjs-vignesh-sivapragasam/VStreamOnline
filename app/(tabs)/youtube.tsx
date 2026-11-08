@@ -288,7 +288,7 @@ export default function YouTubeScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const searchInputRef = useRef<any>(null);
+  const searchInputRef = useRef<TextInput>(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [videos, setVideos] = useState<YouTubeVideoItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -315,7 +315,7 @@ export default function YouTubeScreen() {
   // "in the filters always selected lastest vidoe at top, language selection - tamil, english by default select"
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const [sortBy, setSortBy] = useState<'latest' | 'relevance' | 'views'>('latest');
-  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['Tamil', 'English']);
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
 
   // Download Toast State
   const [downloadToast, setDownloadToast] = useState<string | null>(null);
@@ -1030,7 +1030,7 @@ export default function YouTubeScreen() {
             <TouchableOpacity
               style={[
                 styles.filterChipRoundBtn,
-                (sortBy === 'latest' || selectedLanguages.length > 0) && [
+                (sortBy !== 'latest' || selectedLanguages.length > 0) && [
                   styles.filterChipBtnActive,
                   { borderColor: theme.primary },
                 ],
@@ -1045,7 +1045,7 @@ export default function YouTubeScreen() {
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Ionicons name="options-outline" size={16} color="#ffffff" />
-              {(sortBy === 'latest' || selectedLanguages.length > 0) && (
+              {(sortBy !== 'latest' || selectedLanguages.length > 0) && (
                 <View style={[styles.filterIndicatorDot, { backgroundColor: theme.primary }]} />
               )}
             </TouchableOpacity>
@@ -1394,7 +1394,7 @@ export default function YouTubeScreen() {
 
             {/* Section 2: Languages (Tamil, English default selected) */}
             <Text style={[styles.filterSectionTitle, { marginTop: 16 }]}>
-              Language Selection (Tamil & English by default)
+              Language Selection (Optional)
             </Text>
             <View style={styles.languagesWrap}>
               {['Tamil', 'English', 'Hindi', 'Telugu', 'Malayalam', 'Kannada'].map((lang) => {
@@ -1436,11 +1436,11 @@ export default function YouTubeScreen() {
                 style={styles.filterResetBtn}
                 onPress={() => {
                   setSortBy('latest');
-                  setSelectedLanguages(['Tamil', 'English']);
+                  setSelectedLanguages([]);
                 }}
                 activeOpacity={0.7}
               >
-                <Text style={styles.filterResetBtnText}>Reset Defaults</Text>
+                <Text style={styles.filterResetBtnText}>Clear All</Text>
               </TouchableOpacity>
 
               <TouchableOpacity

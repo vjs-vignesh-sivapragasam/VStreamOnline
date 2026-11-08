@@ -2,7 +2,8 @@ import { getPlatformSpecificPlayers, Players } from "@/utils/MediaPlayer";
 import { showAlert } from "@/utils/platform";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image, StatusBar } from "react-native";
+import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image } from "react-native";
+import { StatusBar } from "expo-status-bar";
 import { ServerConfig } from "@/components/ServerConfig";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StreamingServerClient, resolveStreamingServerClient } from "@/clients/stremio";
@@ -113,6 +114,17 @@ const MediaPlayerScreen: React.FC = () => {
 
       if (cancelled) return;
 
+      if (streamsParam) {
+        try {
+          const parsedStreams = JSON.parse(streamsParam as string);
+          setStreams(parsedStreams);
+          const initialIndex = selectedStreamIndex ? parseInt(selectedStreamIndex as string, 10) : 0;
+          setCurrentStreamIndex(initialIndex);
+        } catch (e) {
+          console.warn('Failed to parse streamsParam:', e);
+        }
+      }
+
       if (directVideoUrl) {
         setVideoUrl(directVideoUrl as string);
         setIsLoadingStream(false);
@@ -122,9 +134,7 @@ const MediaPlayerScreen: React.FC = () => {
       if (streamsParam) {
         try {
           const parsedStreams = JSON.parse(streamsParam as string);
-          setStreams(parsedStreams);
-          const initialIndex = selectedStreamIndex ? parseInt(selectedStreamIndex as string) : 0;
-          setCurrentStreamIndex(initialIndex);
+          const initialIndex = selectedStreamIndex ? parseInt(selectedStreamIndex as string, 10) : 0;
           const savedPlayer = loadDefaultPlayer();
           if (!savedPlayer) {
             const platformPlayers = getPlatformSpecificPlayers();
@@ -339,14 +349,12 @@ const MediaPlayerScreen: React.FC = () => {
     if (newIndex < 0 || newIndex >= streams.length) return;
     setCurrentStreamIndex(newIndex);
     const s = streams[newIndex];
-    if (selectedPlayer === Players.Default) {
-      if (s.url) {
-        setVideoUrl(s.url);
-        setCurrentPlayerType("native");
-        setHasTriedNative(false);
-      } else {
-        loadStream(newIndex);
-      }
+    if (s.url) {
+      setVideoUrl(s.url);
+      setStreamError('');
+      setIsLoadingStream(false);
+    } else {
+      loadStream(newIndex);
     }
   };
 
@@ -440,7 +448,8 @@ const MediaPlayerScreen: React.FC = () => {
 
   if (isLoadingStream) {
     return (
-      <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000000' }}>
+      <GestureHandlerRootView style={styles.rootContainer}>
+        <StatusBar hidden={true} style="light" />
         <View style={styles.loadingContainer}>
           {artwork ? <Image source={{ uri: artwork }} style={styles.backdropImage} /> : null}
           <View style={styles.loadingOverlay}>
@@ -455,7 +464,8 @@ const MediaPlayerScreen: React.FC = () => {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000000' }}>
+    <GestureHandlerRootView style={styles.rootContainer}>
+      <StatusBar hidden={true} style="light" />
       <Player
         videoUrl={videoUrl}
         isTorrent={isTorrent}
@@ -474,6 +484,7 @@ const MediaPlayerScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  rootContainer: { flex: 1, backgroundColor: '#000000' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
   backdropImage: { position: 'absolute', width: '100%', height: '100%', resizeMode: 'cover', opacity: 0.5 },
   loadingOverlay: { justifyContent: 'center', alignItems: 'center' },

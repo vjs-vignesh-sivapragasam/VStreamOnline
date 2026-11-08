@@ -27,6 +27,8 @@ import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
 import { youTubeService } from '@/services/YouTubeService';
 
+const { width } = Dimensions.get('window');
+
 export type ScreenFitMode = 'cover' | 'stretch' | 'contain';
 
 export interface FeedbackPillData {
@@ -95,9 +97,11 @@ const INJECTED_BEFORE_CONTENT_JS = `
   (function() {
     try {
       // 1. Dark background + immediately hide bottom navigation bars, headers, clutters + full width progress bar styles
-      var css = 'html, body, #player, .player-container, #player-container-id, .html5-video-player { background: #000000 !important; background-color: #000000 !important; } ' +
+      var css = 'html, body { width: 100vw !important; height: 100vh !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: #000000 !important; } ' +
+        '#player, .player-container, #player-container-id, .html5-video-player, .html5-video-container { background: #000000 !important; background-color: #000000 !important; width: 100vw !important; height: 100vh !important; position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; margin: 0 !important; padding: 0 !important; } ' +
+        'video, video.video-stream, video.html5-main-video { width: 100vw !important; height: 100vh !important; max-width: none !important; max-height: none !important; position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; object-fit: cover !important; object-position: center center !important; } ' +
         'ytm-reel-shelf-renderer, ytd-reel-shelf-renderer, ytm-shorts-lockup-view-model, ytd-shorts-lockup-view-model, [reel-shelf], .reel-shelf, [class*="shorts-shelf"], [class*="reel-shelf"], ytm-pivot-bar-renderer, ytm-pivot-bar, .pivot-bar, [role="tablist"], ytm-mobile-bottom-bar-renderer, #pivot-bar, .ytm-pivot-bar-renderer, [class*="pivot-bar"], [class*="pivot_bar"], [class*="bottom-nav"], [class*="bottom_bar"], [class*="bottomNavigation"], ytm-navigation-bar, ytm-bottom-sheet-layout, .ytm-bottom-sheet-renderer, ytm-browse[tab-identifier], ytm-mobile-topbar-renderer, ytm-header, header, .mobile-topbar-header, .ghost-header { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; overflow: hidden !important; opacity: 0 !important; pointer-events: none !important; margin: 0 !important; padding: 0 !important; } ' +
-        'yt-progress-bar, .watch-page-progress-bar, .ytPlayerProgressBarHost, .ytPlayerProgressBarHostLowerPlayer, .ytPlayerProgressBarHostBottomEdge, .ytPlayerProgressBarHostBottomInset, .ytPlayerProgressBarHostCustom, .ytPlayerProgressBarDragContainer, .ytPlayerProgressBarProgressBar, .ytPlayerProgressBarProgressBarInset, .ytChapteredProgressBarHost, .ytFocusedChapterProgressBarLineHost, .ytProgressBarLineHost, .yt-progress-bar-line, .yt-chaptered-progress-bar-line, .yt-focused-chapter-progress-bar-line, .ytp-chrome-bottom, .ytp-progress-bar-container, .ytp-progress-bar, .ytp-progress-list, [class*="ytPlayerProgressBarHost"], [class*="ytPlayerProgressBarProgressBar"], [class*="ytPlayerProgressBarDragContainer"], [class*="watch-page-progress-bar"] { left: 0px !important; right: 0px !important; margin-left: 0px !important; margin-right: 0px !important; padding-left: 0px !important; padding-right: 0px !important; width: 100% !important; max-width: 100% !important; min-width: 100% !important; box-sizing: border-box !important; }';
+        'yt-progress-bar, .watch-page-progress-bar, .ytPlayerProgressBarHost, .ytPlayerProgressBarHostLowerPlayer, .ytPlayerProgressBarHostBottomEdge, .ytPlayerProgressBarHostBottomInset, .ytPlayerProgressBarHostCustom, .ytPlayerProgressBarDragContainer, .ytPlayerProgressBarProgressBar, .ytPlayerProgressBarProgressBarInset, .ytChapteredProgressBarHost, .ytFocusedChapterProgressBarLineHost, .ytProgressBarLineHost, .yt-progress-bar-line, .yt-chaptered-progress-bar-line, .yt-focused-chapter-progress-bar-line, .ytp-chrome-bottom, .ytp-progress-bar-container, .ytp-progress-bar, .ytp-progress-list, .ytp-play-progress, .ytp-load-progress, .ytp-hover-progress, [class*="ytPlayerProgressBarHost"], [class*="ytPlayerProgressBarProgressBar"], [class*="ytPlayerProgressBarDragContainer"], [class*="watch-page-progress-bar"], .ytm-progress-bar, ytm-progress-bar, .thin-scrubber { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; overflow: hidden !important; opacity: 0 !important; pointer-events: none !important; margin: 0 !important; padding: 0 !important; border: none !important; }';
       var style = document.createElement('style');
       style.type = 'text/css';
       style.appendChild(document.createTextNode(css));
@@ -144,10 +148,12 @@ const INJECTED_BEFORE_CONTENT_JS = `
   true;
 `;
 
-function getInjectedCleanPlayerJs(topInset?: number): string {
+function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'cover'): string {
   const topOffset = 10;
+  const initialFitCss = fitMode === 'contain' ? 'contain' : fitMode === 'stretch' ? 'fill' : 'cover';
   return `
   (function() {
+    window.__agyDesiredFitMode = '${fitMode || 'cover'}';
     var cleanCss = \`
       /* 1. Hide entire YouTube mobile top header (logo, search, 3 dots, open app) */
       ytm-mobile-topbar-renderer,
@@ -167,42 +173,41 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         padding: 0 !important;
       }
 
-      /* 1b. Position YouTube top controls safely below battery icon & status bar */
+      /* 1a. Ensure HTML and body fill complete window without boundaries */
+      html, body {
+        width: 100% !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        min-width: 100% !important;
+        height: 100% !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
+        min-height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        background: #000000 !important;
+      }
+
+      /* 1b. Completely hide ALL YouTube mobile web controls (React Native custom overlay handles all UI) */
       .ytp-chrome-top,
       .player-control-overlay .top-row,
       .ytm-custom-control-top,
-      .player-controls-top {
-        position: absolute !important;
-        top: 10px !important;
-        left: 0 !important;
-        right: 0 !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-        padding-top: 0 !important;
-        padding-left: 56px !important; /* Leave space for native Go Back button */
-        padding-right: 12px !important;
-        display: flex !important;
-        justify-content: flex-end !important;
-        align-items: center !important;
-        z-index: 25 !important;
-      }
-
-      .ytp-settings-button,
-      .player-control-overlay .top-row button,
-      .player-controls-top button {
-        position: relative !important;
-        top: auto !important;
-        right: auto !important;
-        margin-left: 6px !important;
-        display: inline-flex !important;
-        visibility: visible !important;
-      }
-
-      .player-control-overlay .top-row .player-controls-title,
-      .player-control-overlay .top-row .channel-name,
-      .player-control-overlay .top-row .ytm-video-title {
+      .player-controls-top,
+      .player-control-overlay,
+      .player-control-container,
+      .player-controls-content {
         display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        min-height: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden !important;
+        pointer-events: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
       }
 
       /* 2. Lock player container and player-size strictly to 100% viewport width and frame height */
@@ -225,11 +230,13 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         left: 0 !important;
         right: 0 !important;
         width: 100% !important;
-        max-width: 100% !important;
+        width: 100vw !important;
+        max-width: none !important;
         min-width: 100% !important;
         height: 100% !important;
+        height: 100vh !important;
         min-height: 100% !important;
-        max-height: 100% !important;
+        max-height: none !important;
         padding: 0 !important;
         margin: 0 !important;
         border: none !important;
@@ -250,93 +257,91 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         position: absolute !important;
         top: 0 !important;
         left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
         width: 100% !important;
+        width: 100vw !important;
         height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
+        height: 100vh !important;
+        max-width: none !important;
+        max-height: none !important;
         overflow: hidden !important;
       }
 
-      /* 3. Force video element to fill the inline player frame cleanly */
+      /* 3. Force video element to fill the inline player frame cleanly edge-to-edge */
       video,
       video.video-stream,
       video.html5-main-video {
         position: absolute !important;
         top: 0 !important;
         left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
         width: 100% !important;
+        width: 100vw !important;
         height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-        object-fit: contain !important;
+        height: 100vh !important;
+        max-width: none !important;
+        max-height: none !important;
+        object-fit: ${initialFitCss} !important;
+        object-position: center center !important;
       }
 
-      /* 3b. Center Controls: Play, Rewind, Fast Forward in the EXACT DEAD CENTER of the screen */
+      /* 3b. Completely hide ALL YouTube mobile web controls (center row, bottom row, progress bars, settings) */
       .player-control-overlay .middle-row,
       .player-control-overlay .player-controls-middle,
       .middle-row,
       .player-controls-middle,
       ytm-custom-control-middle,
       .player-controls-middle-inner,
-      [class*="controls-middle"] {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-        max-width: 100% !important;
-        margin: 0 auto !important;
-        padding: 0 !important;
-        transform: none !important;
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        justify-content: center !important;
-        z-index: 20 !important;
-        pointer-events: auto !important;
-      }
-
+      [class*="controls-middle"],
       .player-control-seek-button,
       .player-control-play-pause-icon,
       .middle-row button,
       .player-controls-middle button,
       .ytm-play-pause-button,
-      .player-control-button {
-        position: relative !important;
-        top: auto !important;
-        left: auto !important;
-        right: auto !important;
-        bottom: auto !important;
-        margin: 0 16px !important;
-        transform: none !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-      }
-
-      /* 3c. Bottom controls row (fullscreen, current time) positioned above the bottom line */
+      .player-control-button,
       .ytp-chrome-bottom,
       .player-control-overlay .bottom-row,
       .player-controls-bottom,
-      .ytm-time-display {
-        position: absolute !important;
-        bottom: 8px !important;
-        left: 0 !important;
-        right: 0 !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-        padding-left: 12px !important;
-        padding-right: 12px !important;
-        display: flex !important;
-        justify-content: space-between !important;
-        align-items: center !important;
-        z-index: 25 !important;
+      .ytm-time-display,
+      .ytm-fullscreen-button,
+      .player-control-fullscreen-button,
+      .fullscreen-icon,
+      .ytp-play-pause-button,
+      .ytp-settings-button,
+      .ytm-settings-button,
+      .ytp-subtitles-button,
+      .ytm-subtitles-button,
+      button[aria-label*="Settings" i],
+      button[aria-label*="Captions" i],
+      button[aria-label*="subtitles" i],
+      button[aria-label*="Full screen" i],
+      button[aria-label*="Fullscreen" i],
+      .ytp-cued-thumbnail-overlay,
+      .player-control-overlay.fadeout,
+      .player-control-overlay.fade-out,
+      .fadeout .middle-row,
+      .fadeout .player-controls-middle,
+      .fadeout .top-row,
+      .fadeout .bottom-row,
+      .fadeout button,
+      [aria-hidden="true"] .middle-row,
+      [aria-hidden="true"] button,
+      .ytp-autohide .ytp-chrome-top,
+      .ytp-autohide .ytp-chrome-bottom {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        pointer-events: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
       }
 
-      /* 4. Full width progress bar moved all the way down flush to the bottom black edge */
+      /* 4 & 5. Completely hide ALL YouTube web progress bars (React Native renders the single clean progress bar) */
       yt-progress-bar,
       .watch-page-progress-bar,
       .ytPlayerProgressBarHost,
@@ -353,6 +358,7 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
       .yt-progress-bar-line,
       .yt-chaptered-progress-bar-line,
       .yt-focused-chapter-progress-bar-line,
+      .ytp-chrome-bottom,
       .ytp-progress-bar-container,
       .ytp-progress-bar,
       .ytp-progress-list,
@@ -362,85 +368,36 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
       [class*="ytPlayerProgressBarHost"],
       [class*="ytPlayerProgressBarProgressBar"],
       [class*="ytPlayerProgressBarDragContainer"],
-      [class*="watch-page-progress-bar"] {
-        position: absolute !important;
-        bottom: 0px !important;
-        left: 0px !important;
-        right: 0px !important;
-        margin: 0px !important;
-        padding: 0px !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        min-width: 100% !important;
-        height: 3px !important;
-        box-sizing: border-box !important;
-        z-index: 35 !important;
-      }
-
+      [class*="watch-page-progress-bar"],
       body[faux-fullscreen=true] .watch-page-progress-bar,
-      .fullscreen-controls-always-on .watch-page-progress-bar {
-        left: 0px !important;
-        right: 0px !important;
-      }
-
+      .fullscreen-controls-always-on .watch-page-progress-bar,
       div:has(> yt-progress-bar),
       div:has(> .watch-page-progress-bar),
-      div:has(> [class*="ytPlayerProgressBar"]) {
-        left: 0px !important;
-        right: 0px !important;
-        margin-left: 0px !important;
-        margin-right: 0px !important;
-        padding-left: 0px !important;
-        padding-right: 0px !important;
-        width: 100% !important;
-        max-width: 100% !important;
-      }
-
-      .ytp-chrome-bottom {
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        width: 100% !important;
-        padding-left: 0 !important;
-        padding-right: 0 !important;
-        margin-left: 0 !important;
-        margin-right: 0 !important;
-      }
-
-      .ytp-progress-bar-container {
-        position: absolute !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        width: 100% !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        height: 4px !important;
-      }
-
-      .ytp-progress-bar,
-      .ytp-progress-list {
-        left: 0 !important;
-        right: 0 !important;
-        width: 100% !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border-radius: 0 !important;
-      }
-
-      /* 5. Hide duplicate/secondary progress bar and bottom borders */
+      div:has(> [class*="ytPlayerProgressBar"]),
       .ytm-progress-bar,
       ytm-progress-bar,
       .player-control-overlay .progress-bar,
       .player-control-container > .progress-bar,
       .player-control-overlay > .progress-bar,
       .thin-scrubber,
-      .ytp-cued-thumbnail-overlay {
+      .ytp-cued-thumbnail-overlay,
+      .ytp-speedmaster-overlay,
+      .ytp-speedmaster,
+      .ytp-speedmaster-indicator,
+      [class*="speedmaster"],
+      .ytp-doubletap-ui-legacy[data-speed],
+      .ytp-bezel[role="status"],
+      .ytp-bezel-text {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
         height: 0 !important;
+        min-height: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden !important;
         pointer-events: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
         border: none !important;
       }
 
@@ -591,11 +548,12 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
 
     injectStyle();
 
-    // Check if element or its ancestor matches settings trigger
+    // Strict settings button target detector: only matches actual button elements
     function isSettingsTarget(el) {
       if (!el) return false;
+      var btn = null;
       if (el.closest) {
-        var found = el.closest(
+        btn = el.closest(
           '.ytp-settings-button, ' +
           'button[aria-label*="Settings" i], ' +
           'button[aria-label*="settings" i], ' +
@@ -603,18 +561,38 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
           '[data-action="settings"], ' +
           '.ytm-settings-button'
         );
-        if (found) return true;
       }
-      var curr = el;
-      for (var i = 0; i < 4 && curr; i++) {
-        var aria = (curr.getAttribute && curr.getAttribute('aria-label')) || '';
-        var title = (curr.getAttribute && curr.getAttribute('title')) || '';
-        var cls = curr.className || '';
-        if (typeof cls === 'string' && cls.toLowerCase().includes('setting')) return true;
-        if (aria.toLowerCase().includes('setting')) return true;
-        if (title.toLowerCase().includes('setting')) return true;
-        curr = curr.parentElement;
+      if (!btn) {
+        var tag = (el.tagName || '').toLowerCase();
+        if (tag === 'button' || (el.getAttribute && el.getAttribute('role') === 'button')) {
+          btn = el;
+        } else if (el.parentElement) {
+          var pTag = (el.parentElement.tagName || '').toLowerCase();
+          if (pTag === 'button' || (el.parentElement.getAttribute && el.parentElement.getAttribute('role') === 'button')) {
+            btn = el.parentElement;
+          }
+        }
       }
+      if (!btn) return false;
+
+      var btnCls = (typeof btn.className === 'string') ? btn.className.toLowerCase() : '';
+      if (btnCls.includes('player-container') || btnCls.includes('html5-video-player')) {
+        return false;
+      }
+
+      if (btnCls.includes('ytp-settings-button') || btnCls.includes('ytm-settings-button')) {
+        return true;
+      }
+
+      var aria = ((btn.getAttribute && btn.getAttribute('aria-label')) || '').toLowerCase();
+      var title = ((btn.getAttribute && btn.getAttribute('title')) || '').toLowerCase();
+      if (aria.includes('setting') || title.includes('setting')) {
+        return true;
+      }
+
+      var action = ((btn.getAttribute && btn.getAttribute('data-action')) || '').toLowerCase();
+      if (action.includes('setting')) return true;
+
       return false;
     }
 
@@ -651,73 +629,211 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
       }
     }
 
-    window.addEventListener('click', function(e) {
-      if (isSettingsTarget(e.target)) {
-        handleSettingsIntercept(e);
+    // Strict fullscreen button target detector: ONLY matches dedicated fullscreen buttons
+    // NEVER matches video element, player containers, or control overlays!
+    function isFullscreenTarget(el) {
+      if (!el) return false;
+      var btn = null;
+      if (el.closest) {
+        btn = el.closest(
+          '.ytp-fullscreen-button, ' +
+          'button[aria-label*="Full screen" i], ' +
+          'button[aria-label*="Fullscreen" i], ' +
+          'button[aria-label*="fullscreen" i], ' +
+          '.fullscreen-icon, ' +
+          '.player-control-fullscreen-button, ' +
+          '.ytm-fullscreen-button'
+        );
       }
-    }, true);
-    window.addEventListener('touchend', function(e) {
-      if (isSettingsTarget(e.target)) {
-        handleSettingsIntercept(e);
+      if (!btn) {
+        var tag = (el.tagName || '').toLowerCase();
+        if (tag === 'button' || (el.getAttribute && el.getAttribute('role') === 'button')) {
+          btn = el;
+        } else if (el.parentElement) {
+          var pTag = (el.parentElement.tagName || '').toLowerCase();
+          if (pTag === 'button' || (el.parentElement.getAttribute && el.parentElement.getAttribute('role') === 'button')) {
+            btn = el.parentElement;
+          }
+        }
       }
-    }, true);
-    window.addEventListener('pointerup', handleSettingsIntercept, true);
-    document.addEventListener('click', handleSettingsIntercept, true);
-    document.addEventListener('touchend', handleSettingsIntercept, true);
-    document.addEventListener('pointerup', handleSettingsIntercept, true);
+      if (!btn) return false;
 
-    // Swipe left / right gesture on video to go back to home screen
+      // Ensure button is NOT an ancestor video container
+      var btnTag = (btn.tagName || '').toLowerCase();
+      var btnCls = (typeof btn.className === 'string') ? btn.className.toLowerCase() : '';
+      if (
+        btnCls.includes('player-container') ||
+        btnCls.includes('html5-video-player') ||
+        btnCls.includes('player-control-overlay') ||
+        btnCls.includes('middle-row') ||
+        btnTag === 'video'
+      ) {
+        return false;
+      }
+
+      // Check explicit fullscreen button classes
+      if (
+        btnCls.includes('ytp-fullscreen-button') ||
+        btnCls.includes('player-control-fullscreen-button') ||
+        btnCls.includes('fullscreen-icon') ||
+        btnCls.includes('ytm-fullscreen-button')
+      ) {
+        return true;
+      }
+
+      // Check aria-label / title strictly on the button itself
+      var aria = ((btn.getAttribute && btn.getAttribute('aria-label')) || '').toLowerCase().trim();
+      var title = ((btn.getAttribute && btn.getAttribute('title')) || '').toLowerCase().trim();
+      if (
+        aria === 'full screen' ||
+        aria === 'fullscreen' ||
+        aria === 'enter full screen' ||
+        aria === 'exit full screen' ||
+        title === 'full screen' ||
+        title === 'fullscreen'
+      ) {
+        return true;
+      }
+
+      var action = ((btn.getAttribute && btn.getAttribute('data-action')) || '').toLowerCase();
+      if (action === 'fullscreen') return true;
+
+      return false;
+    }
+
+    function handleFullscreenIntercept(e) {
+      if (isFullscreenTarget(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'TOGGLE_FULLSCREEN'
+          }));
+        }
+        return false;
+      }
+    }
+
+    var lastInterceptTime = 0;
+    function handleGlobalTap(e) {
+      var now = Date.now();
+      if (isSettingsTarget(e.target)) {
+        if (now - lastInterceptTime < 350) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+        lastInterceptTime = now;
+        return handleSettingsIntercept(e);
+      } else if (isFullscreenTarget(e.target)) {
+        if (now - lastInterceptTime < 350) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+        lastInterceptTime = now;
+        return handleFullscreenIntercept(e);
+      }
+      // Any other tap (screen click to show controls, center play/pause, rewind, forward, autoplay)
+      // passes through cleanly to YouTube mobile web player so controls appear smoothly!
+    }
+
+    document.addEventListener('click', handleGlobalTap, true);
+    document.addEventListener('touchend', handleGlobalTap, true);
+
+    // Web controls visibility sync is disabled; React Native controls overlay handles 100% of the UI
+    function syncControlsVisibility() {}
+
+    // ------------------------------------------------------------------
+    // 1. PREVENT YOUTUBE AUTO 2X SPEED ON SCREEN TOUCH / HOLD
+    // ------------------------------------------------------------------
+    window.__userDesiredPlaybackRate = 1.0;
+
+    function blockAuto2xSpeed() {
+      var v = document.querySelector('video');
+      if (!v) return;
+
+      if (!v.__rateGuardAttached) {
+        v.__rateGuardAttached = true;
+        v.addEventListener('ratechange', function() {
+          var desired = window.__userDesiredPlaybackRate || 1.0;
+          // If YouTube mobile web auto-accelerates to 2.0x due to touch/press-and-hold:
+          if (v.playbackRate === 2.0 && desired !== 2.0) {
+            v.playbackRate = desired;
+          }
+        });
+      }
+    }
+    setInterval(blockAuto2xSpeed, 250);
+
+    // ------------------------------------------------------------------
+    // 2. CALIBRATED SWIPE GESTURES (NO FALSE FULLSCREEN ON TAPS)
+    // ------------------------------------------------------------------
     var swipeStartX = 0;
     var swipeStartY = 0;
     var swipeStartTime = 0;
+    var isSwiping = false;
 
-    window.addEventListener('touchstart', function(e) {
+    function onTouchStartCapture(e) {
       if (e.touches && e.touches.length === 1) {
         swipeStartX = e.touches[0].clientX;
         swipeStartY = e.touches[0].clientY;
         swipeStartTime = Date.now();
+        isSwiping = true;
       }
-    }, { passive: true });
+    }
 
-    window.addEventListener('touchend', function(e) {
+    function onTouchEndCapture(e) {
+      if (!isSwiping) return;
+      isSwiping = false;
+
       if (e.changedTouches && e.changedTouches.length === 1) {
         var dX = e.changedTouches[0].clientX - swipeStartX;
         var dY = e.changedTouches[0].clientY - swipeStartY;
         var dTime = Date.now() - swipeStartTime;
+        var absX = Math.abs(dX);
+        var absY = Math.abs(dY);
 
-        // 1. Vertical swipe up -> Fullscreen
-        if (dTime < 800 && dY < -40 && Math.abs(dY) > Math.abs(dX) * 1.2) {
-          if (window.ReactNativeWebView) {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'SWIPE_UP_FULLSCREEN'
-            }));
+        // DELIBERATE SWIPE ONLY (70ms to 550ms flick duration)
+        // Normal taps (movement < 20px) or slow drags will NEVER trigger fullscreen!
+        if (dTime < 550 && dTime > 70) {
+          // 1. Vertical swipe up -> Fullscreen (requires at least 55px upward flick and clear vertical dominance)
+          if (dY < -55 && absY > absX * 1.5) {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'SWIPE_UP_FULLSCREEN'
+              }));
+            }
+            return;
           }
-          return;
-        }
 
-        // 2. Vertical swipe down -> Minimize
-        if (dTime < 800 && dY > 45 && dY > Math.abs(dX) * 1.2) {
-          if (window.ReactNativeWebView) {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'SWIPE_DOWN_MINIMIZE'
-            }));
+          // 2. Vertical swipe down -> Minimize / exit fullscreen (requires at least 55px downward flick)
+          if (dY > 55 && absY > absX * 1.5) {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'SWIPE_DOWN_MINIMIZE'
+              }));
+            }
+            return;
           }
-          return;
-        }
 
-        // 3. Horizontal swipe left / right -> Go back
-        if (dTime < 800 && Math.abs(dX) > 45 && Math.abs(dX) > Math.abs(dY) * 1.3) {
-          if (dX < -45 || dX > 60) {
+          // 3. Horizontal swipe left -> Go back / minimize
+          if (dX < -60 && absX > absY * 1.6) {
             if (window.ReactNativeWebView) {
               window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'SWIPE_EXIT',
-                direction: dX < 0 ? 'left' : 'right'
+                direction: 'left'
               }));
             }
+            return;
           }
         }
       }
-    }, { passive: true });
+    }
+
+    window.addEventListener('touchstart', onTouchStartCapture, { capture: true, passive: true });
+    window.addEventListener('touchend', onTouchEndCapture, { capture: true, passive: true });
 
     // Auto Picture-in-Picture trigger when user leaves the app or browser minimizes
     document.addEventListener('visibilitychange', function() {
@@ -853,11 +969,11 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
 
         v.addEventListener('timeupdate', function() {
           updatePositionState();
-          if (window.ReactNativeWebView && v.duration) {
+          if (window.ReactNativeWebView && typeof v.currentTime === 'number') {
             window.ReactNativeWebView.postMessage(JSON.stringify({
               type: 'PROGRESS',
               currentTime: v.currentTime,
-              duration: v.duration
+              duration: v.duration || 0
             }));
           }
         });
@@ -940,7 +1056,7 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
           el.style.setProperty('top', '0px', 'important');
           el.style.setProperty('bottom', '0px', 'important');
           el.style.setProperty('width', '100%', 'important');
-          el.style.setProperty('max-width', '100%', 'important');
+          el.style.setProperty('max-width', 'none', 'important');
           el.style.setProperty('min-width', '100%', 'important');
           el.style.setProperty('left', '0px', 'important');
           el.style.setProperty('right', '0px', 'important');
@@ -951,53 +1067,25 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         });
       });
 
-      var overlays = document.querySelectorAll(
-        '.player-control-overlay, .player-control-container, .player-controls-content, ytm-custom-control'
+      // Completely hide and disable all YouTube mobile web control elements
+      var webControls = document.querySelectorAll(
+        '.player-control-overlay, .player-control-container, .player-controls-content, ' +
+        '.player-controls-top, .player-controls-middle, .player-controls-bottom, ' +
+        '.player-control-overlay .top-row, .player-control-overlay .middle-row, .player-control-overlay .bottom-row, ' +
+        '.ytp-chrome-top, .ytp-chrome-bottom, ytm-custom-control, ytm-custom-control-top, ytm-custom-control-middle, ' +
+        '.ytm-time-display, .ytm-fullscreen-button, .player-control-fullscreen-button, ' +
+        '.player-control-play-pause-icon, .player-control-seek-button, .player-control-button, ' +
+        '.ytp-settings-button, .ytm-settings-button, .ytp-subtitles-button, .ytm-subtitles-button, ' +
+        'button[aria-label*="Settings" i], button[aria-label*="Captions" i], button[aria-label*="subtitles" i], ' +
+        'button[aria-label*="Full screen" i], button[aria-label*="Fullscreen" i], .ytp-cued-thumbnail-overlay'
       );
-      overlays.forEach(function(el) {
-        el.style.setProperty('width', '100%', 'important');
-        el.style.setProperty('max-width', '100%', 'important');
-        el.style.setProperty('left', '0px', 'important');
-        el.style.setProperty('right', '0px', 'important');
-        el.style.setProperty('margin', '0 auto', 'important');
-      });
-
-      var middleRows = document.querySelectorAll(
-        '.player-control-overlay .middle-row, .player-controls-middle, .middle-row, ytm-custom-control-middle'
-      );
-      middleRows.forEach(function(el) {
-        el.style.setProperty('position', 'absolute', 'important');
-        el.style.setProperty('top', '0px', 'important');
-        el.style.setProperty('left', '0px', 'important');
-        el.style.setProperty('right', '0px', 'important');
-        el.style.setProperty('bottom', '0px', 'important');
-        el.style.setProperty('width', '100%', 'important');
-        el.style.setProperty('height', '100%', 'important');
-        el.style.setProperty('max-width', '100%', 'important');
-        el.style.setProperty('transform', 'none', 'important');
-        el.style.setProperty('display', 'flex', 'important');
-        el.style.setProperty('flex-direction', 'row', 'important');
-        el.style.setProperty('justify-content', 'center', 'important');
-        el.style.setProperty('align-items', 'center', 'important');
-        el.style.setProperty('margin', '0 auto', 'important');
-        el.style.setProperty('padding', '0', 'important');
-      });
-      var hiddenPrev = document.querySelectorAll('.ytm-previous-button[disabled], [aria-label="Previous video"][disabled]');
-      hiddenPrev.forEach(function(el) {
+      webControls.forEach(function(el) {
         el.style.setProperty('display', 'none', 'important');
-      });
-
-      var centerBtns = document.querySelectorAll(
-        '.player-control-seek-button, .player-control-play-pause-icon, .middle-row button, .player-controls-middle button'
-      );
-      centerBtns.forEach(function(el) {
-        el.style.setProperty('position', 'relative', 'important');
-        el.style.setProperty('top', 'auto', 'important');
-        el.style.setProperty('left', 'auto', 'important');
-        el.style.setProperty('right', 'auto', 'important');
-        el.style.setProperty('bottom', 'auto', 'important');
-        el.style.setProperty('transform', 'none', 'important');
-        el.style.setProperty('margin', '0 16px', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('opacity', '0', 'important');
+        el.style.setProperty('height', '0px', 'important');
+        el.style.setProperty('width', '0px', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
       });
 
       // Remove bottom navigation bars & clutter
@@ -1009,15 +1097,24 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         try { el.remove(); } catch(e) {}
       });
 
+      var currentDesiredMode = window.__agyDesiredFitMode || 'cover';
+      var currentFitCss = currentDesiredMode === 'contain' ? 'contain' : currentDesiredMode === 'stretch' ? 'fill' : 'cover';
+
       var allVids = document.querySelectorAll('video');
       allVids.forEach(function(v) {
         v.muted = false;
         v.loop = true;
+        v.style.setProperty('position', 'absolute', 'important');
         v.style.setProperty('top', '0px', 'important');
         v.style.setProperty('left', '0px', 'important');
+        v.style.setProperty('right', '0px', 'important');
+        v.style.setProperty('bottom', '0px', 'important');
         v.style.setProperty('width', '100%', 'important');
         v.style.setProperty('height', '100%', 'important');
-        v.style.setProperty('object-fit', 'contain', 'important');
+        v.style.setProperty('max-width', 'none', 'important');
+        v.style.setProperty('max-height', 'none', 'important');
+        v.style.setProperty('object-fit', currentFitCss, 'important');
+        v.style.setProperty('object-position', 'center center', 'important');
         if (v.paused && !window._agyUserPaused && !window._agyInitialPlayDone) {
           window._agyInitialPlayDone = true;
           v.play().catch(function() {});
@@ -1044,27 +1141,22 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
         '.ytp-chrome-bottom',
         '.ytp-progress-bar-container',
         '.ytp-progress-bar',
-        '.ytp-progress-list'
+        '.ytp-progress-list',
+        '.ytp-play-progress',
+        '.ytp-load-progress',
+        '.ytp-hover-progress',
+        '.ytm-progress-bar',
+        'ytm-progress-bar',
+        '.thin-scrubber'
       ];
       pbSelectors.forEach(function(sel) {
         document.querySelectorAll(sel).forEach(function(el) {
-          el.style.setProperty('left', '0px', 'important');
-          el.style.setProperty('right', '0px', 'important');
-          el.style.setProperty('bottom', '0px', 'important');
-          el.style.setProperty('width', '100%', 'important');
-          el.style.setProperty('max-width', '100%', 'important');
-          el.style.setProperty('min-width', '100%', 'important');
-          el.style.setProperty('margin-left', '0px', 'important');
-          el.style.setProperty('margin-right', '0px', 'important');
-          el.style.setProperty('padding-left', '0px', 'important');
-          el.style.setProperty('padding-right', '0px', 'important');
-          el.style.setProperty('box-sizing', 'border-box', 'important');
+          el.style.setProperty('display', 'none', 'important');
+          el.style.setProperty('visibility', 'hidden', 'important');
+          el.style.setProperty('height', '0px', 'important');
+          el.style.setProperty('opacity', '0', 'important');
+          try { el.remove(); } catch(e) {}
         });
-      });
-
-      var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar, .thin-scrubber');
-      secondaryBars.forEach(function(el) {
-        el.style.setProperty('display', 'none', 'important');
       });
 
       var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
@@ -1096,6 +1188,7 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
 
       attachVideoListeners();
       setupBackgroundKeepAlive();
+      syncControlsVisibility();
     }
 
     forceFullVideoAndPlay();
@@ -1119,6 +1212,20 @@ function getInjectedCleanPlayerJs(topInset?: number): string {
       var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar, .thin-scrubber');
       secondaryBars.forEach(function(el) {
         el.style.setProperty('display', 'none', 'important');
+      });
+      var allWebControls = document.querySelectorAll(
+        '.player-control-overlay, .player-control-container, .player-controls-content, ' +
+        '.player-controls-top, .player-controls-middle, .player-controls-bottom, ' +
+        '.player-control-overlay .top-row, .player-control-overlay .middle-row, .player-control-overlay .bottom-row, ' +
+        '.ytp-chrome-top, .ytp-chrome-bottom, ytm-custom-control, .ytm-time-display, ' +
+        '.ytm-fullscreen-button, .player-control-fullscreen-button, .player-control-play-pause-icon, ' +
+        '.player-control-seek-button, .ytp-settings-button, .ytm-settings-button'
+      );
+      allWebControls.forEach(function(el) {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('opacity', '0', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
       });
       var navBars = document.querySelectorAll('ytm-pivot-bar-renderer, ytm-pivot-bar, .pivot-bar, [role="tablist"], ytm-mobile-bottom-bar-renderer, #pivot-bar, [class*="pivot-bar"], [class*="bottom-nav"], ytm-navigation-bar');
       navBars.forEach(function(el) {
@@ -1192,6 +1299,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [videoResizeMode, setVideoResizeMode] = useState<ScreenFitMode>(screenFitMode || 'cover');
   const [feedbackPill, setFeedbackPill] = useState<FeedbackPillData | null>(null);
   const feedbackTimerRef = useRef<any>(null);
+  const isSlidingRef = useRef(false);
   const [isSliding, setIsSliding] = useState(false);
   const [sliderPos, setSliderPos] = useState(0);
   // Default to react-native-video (AVPlayer on iOS, ExoPlayer on Android) for native MP4 streaming
@@ -1339,9 +1447,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    // Synchronously toggle parent player context
-    onTogglePlay();
-
     if (isWebActive) {
       const nextPlaying = !effectiveIsPlaying;
       setWebIsPlaying(nextPlaying);
@@ -1359,41 +1464,48 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         })();
         true;
       `);
+    } else {
+      onTogglePlay();
     }
   }, [isWebActive, effectiveIsPlaying, onTogglePlay]);
 
   const handleTogglePlayFromModal = handleTogglePlay;
 
   const handleChangeQualityFromModal = useCallback((q: string) => {
-    if (isWebActive) {
-      setWebQuality(q);
-      const qMap: Record<string, string> = {
-        '1080p': 'hd1080',
-        '720p': 'hd720',
-        '480p': 'large',
-        '360p': 'medium',
-        '240p': 'small',
-        '144p': 'tiny',
-        'Auto': 'auto',
-      };
-      const targetQ = qMap[q] || 'auto';
-      webViewRef.current?.injectJavaScript(`
-        (function() {
-          var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
-          if (p) {
-            if (typeof p.setPlaybackQualityRange === 'function') {
-              p.setPlaybackQualityRange('${targetQ}', '${targetQ}');
-            }
-            if (typeof p.setPlaybackQuality === 'function') {
-              p.setPlaybackQuality('${targetQ}');
-            }
-          }
-        })();
-        true;
-      `);
-      onChangeQuality?.(q);
-    } else {
-      onChangeQuality?.(q);
+    try {
+      if (isWebActive) {
+        setWebQuality(q);
+        const qMap: Record<string, string> = {
+          '1080p': 'hd1080',
+          '720p': 'hd720',
+          '480p': 'large',
+          '360p': 'medium',
+          '240p': 'small',
+          '144p': 'tiny',
+          'Auto': 'auto',
+        };
+        const targetQ = qMap[q] || 'auto';
+        webViewRef.current?.injectJavaScript(`
+          (function() {
+            try {
+              var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+              if (p) {
+                if (typeof p.setPlaybackQualityRange === 'function') {
+                  p.setPlaybackQualityRange('${targetQ}', '${targetQ}');
+                }
+                if (typeof p.setPlaybackQuality === 'function') {
+                  p.setPlaybackQuality('${targetQ}');
+                }
+              }
+            } catch(e) {}
+          })();
+          true;
+        `);
+      } else {
+        onChangeQuality?.(q);
+      }
+    } catch (err) {
+      console.warn('[YouTubeInlinePlayer] Error changing quality:', err);
     }
   }, [isWebActive, onChangeQuality]);
 
@@ -1407,6 +1519,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           if (p && typeof p.setPlaybackRate === 'function') {
             p.setPlaybackRate(${speed});
           }
+          window.__userDesiredPlaybackRate = ${speed};
           if (v) {
             v.playbackRate = ${speed};
           }
@@ -1523,7 +1636,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const scheduleControlsHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      setShowControls(false);
+      if (!isSlidingRef.current) {
+        setShowControls(false);
+      }
     }, 3500);
   }, []);
 
@@ -1552,10 +1667,26 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         const fitCss = next === 'contain' ? 'contain' : next === 'stretch' ? 'fill' : 'cover';
         webViewRef.current?.injectJavaScript(`
           (function() {
-            var v = document.querySelector('video');
-            if (v) {
-              v.style.setProperty('object-fit', '${fitCss}', 'important');
-            }
+            try {
+              window.__agyDesiredFitMode = '${next}';
+              var fit = '${fitCss}';
+              var allVids = document.querySelectorAll('video');
+              allVids.forEach(function(v) {
+                v.style.setProperty('position', 'absolute', 'important');
+                v.style.setProperty('top', '0px', 'important');
+                v.style.setProperty('left', '0px', 'important');
+                v.style.setProperty('right', '0px', 'important');
+                v.style.setProperty('bottom', '0px', 'important');
+                v.style.setProperty('width', '100%', 'important');
+                v.style.setProperty('height', '100%', 'important');
+                v.style.setProperty('max-width', 'none', 'important');
+                v.style.setProperty('max-height', 'none', 'important');
+                v.style.setProperty('object-fit', fit, 'important');
+                v.style.setProperty('object-position', 'center center', 'important');
+              });
+              window.dispatchEvent(new Event('resize'));
+              window.dispatchEvent(new Event('orientationchange'));
+            } catch(e) {}
           })();
           true;
         `);
@@ -1646,13 +1777,13 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   }, [scheduleControlsHide]);
 
   useEffect(() => {
-    if (isPlaying && showControls && !isSliding) {
+    if (effectiveIsPlaying && showControls && !isSliding) {
       scheduleControlsHide();
     }
     return () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
-  }, [isPlaying, showControls, isSliding, scheduleControlsHide]);
+  }, [effectiveIsPlaying, showControls, isSliding, scheduleControlsHide]);
 
   // Handle seek target (native player)
   useEffect(() => {
@@ -1670,29 +1801,95 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   // Seek forward / backward 10s
   const handleSkip = useCallback(
     (offsetSec: number) => {
-      const newTime = Math.max(0, Math.min(duration || 1, currentTime + offsetSec));
+      const current = isWebActive ? (webCurrentTime || currentTime) : currentTime;
+      const total = isWebActive ? (webDuration || duration) : duration;
+      const newTime = Math.max(0, Math.min(total || 1, current + offsetSec));
       console.log(`[YouTubeInlinePlayer] ⏩ Skip ${offsetSec}s -> new target: ${newTime}s`);
-      onSeek(newTime);
+      if (isWebActive) {
+        handleSeekFromModal(newTime);
+      } else {
+        onSeek(newTime);
+      }
       scheduleControlsHide();
     },
-    [currentTime, duration, onSeek, scheduleControlsHide]
+    [isWebActive, webCurrentTime, webDuration, currentTime, duration, handleSeekFromModal, onSeek, scheduleControlsHide]
   );
 
+
+  useEffect(() => {
+    if (isWebActive && webViewRef.current) {
+      const currentMode = videoResizeMode || screenFitMode || 'cover';
+      const fitCss = currentMode === 'contain' ? 'contain' : currentMode === 'stretch' ? 'fill' : 'cover';
+      webViewRef.current.injectJavaScript(`
+        (function() {
+          try {
+            window.__agyDesiredFitMode = '${currentMode}';
+            var fit = '${fitCss}';
+            var allVids = document.querySelectorAll('video');
+            allVids.forEach(function(v) {
+              v.style.setProperty('position', 'absolute', 'important');
+              v.style.setProperty('top', '0px', 'important');
+              v.style.setProperty('left', '0px', 'important');
+              v.style.setProperty('right', '0px', 'important');
+              v.style.setProperty('bottom', '0px', 'important');
+              v.style.setProperty('width', '100%', 'important');
+              v.style.setProperty('height', '100%', 'important');
+              v.style.setProperty('max-width', 'none', 'important');
+              v.style.setProperty('max-height', 'none', 'important');
+              v.style.setProperty('object-fit', fit, 'important');
+              v.style.setProperty('object-position', 'center center', 'important');
+            });
+            window.dispatchEvent(new Event('resize'));
+            window.dispatchEvent(new Event('orientationchange'));
+          } catch(e) {}
+        })();
+        true;
+      `);
+    }
+  }, [isFullScreen, videoResizeMode, screenFitMode, isWebActive]);
+
   const actualDuration = duration > 0 ? duration : (effectiveDuration > 0 ? effectiveDuration : 0);
-  const actualCurrentTime = isWebActive ? webCurrentTime : currentTime;
-  const progressPct = actualDuration > 0 ? (isSliding ? sliderPos : actualCurrentTime / actualDuration) : 0;
+  const actualCurrentTime = isWebActive ? (webCurrentTime || currentTime) : currentTime;
+  const progressPct = actualDuration > 0 ? (isSliding ? sliderPos : Math.min(1, Math.max(0, actualCurrentTime / actualDuration))) : 0;
+
+  const handleSlidingStart = useCallback((val: number) => {
+    isSlidingRef.current = true;
+    setIsSliding(true);
+    setSliderPos(val);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  }, []);
+
+  const handleSlidingChange = useCallback((val: number) => {
+    isSlidingRef.current = true;
+    setIsSliding(true);
+    setSliderPos(val);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  }, []);
+
+  const handleSlidingComplete = useCallback(
+    (val: number) => {
+      isSlidingRef.current = false;
+      setIsSliding(false);
+      setSliderPos(val);
+      const targetSec = Math.max(0, Math.min(actualDuration, val * (actualDuration || 1)));
+      if (isWebActive) {
+        handleSeekFromModal(targetSec);
+      } else {
+        onSeek(targetSec);
+      }
+      scheduleControlsHide();
+    },
+    [actualDuration, isWebActive, handleSeekFromModal, onSeek, scheduleControlsHide]
+  );
 
   const cleanPlayerJs = useMemo(
-    () => getInjectedCleanPlayerJs(effectiveTopInset),
-    [effectiveTopInset]
+    () => getInjectedCleanPlayerJs(effectiveTopInset, videoResizeMode),
+    [effectiveTopInset, videoResizeMode]
   );
 
   return (
     <View
-      style={[
-        styles.container,
-        isFullScreen && styles.containerFullScreen,
-      ]}
+      style={isFullScreen ? styles.containerFullScreen : styles.container}
     >
       {isWebActive ? (
         <WebView
@@ -1705,7 +1902,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             StyleSheet.absoluteFill,
             { backgroundColor: '#000000' },
           ]}
-          containerStyle={{ backgroundColor: '#000000' }}
+          containerStyle={{ backgroundColor: '#000000', width: '100%', height: '100%' }}
           opaque={false}
           injectedJavaScriptBeforeContentLoaded={INJECTED_BEFORE_CONTENT_JS}
           allowsInlineMediaPlayback={true}
@@ -1714,7 +1911,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           mediaPlaybackRequiresUserAction={false}
           javaScriptEnabled={true}
           domStorageEnabled={true}
-          allowsFullscreenVideo={true}
+          allowsFullscreenVideo={false}
           scrollEnabled={false}
           bounces={false}
           showsVerticalScrollIndicator={false}
@@ -1753,13 +1950,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               if (!data || typeof data !== 'object') return;
               if (data.type === 'GO_BACK') {
                 onMinimize();
-              } else if (data.type === 'SWIPE_UP_FULLSCREEN') {
+              } else if (data.type === 'SWIPE_UP_FULLSCREEN' || data.type === 'TOGGLE_FULLSCREEN') {
+                if (isHapticsSupported()) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }
                 onFullScreen();
-              } else if (data.type === 'CONTROLS_SHOWN') {
-                setShowControls(true);
-                scheduleControlsHide();
-              } else if (data.type === 'CONTROLS_HIDDEN') {
-                setShowControls(false);
               } else if (data.type === 'OPEN_SETTINGS') {
                 if (typeof data.currentTime === 'number') setWebCurrentTime(data.currentTime);
                 if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
@@ -1767,12 +1962,14 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 setSettingsSubView('main');
                 setSettingsModalVisible(true);
               } else if (data.type === 'PROGRESS') {
-                if (typeof data.currentTime === 'number') {
-                  setWebCurrentTime(data.currentTime);
-                  if (data.currentTime > 0) setShowPosterShield(false);
+                if (!isSlidingRef.current) {
+                  if (typeof data.currentTime === 'number') {
+                    setWebCurrentTime(data.currentTime);
+                    if (data.currentTime > 0) setShowPosterShield(false);
+                  }
+                  if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
+                  onProgress(data.currentTime || 0, data.duration || 0);
                 }
-                if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
-                onProgress(data.currentTime || 0, data.duration || 0);
               } else if (data.type === 'SWIPE_DOWN_MINIMIZE') {
                 onMinimize();
               } else if (data.type === 'SWIPE_EXIT') {
@@ -1811,13 +2008,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             resizeMode={videoResizeMode === 'contain' ? 'contain' : videoResizeMode === 'stretch' ? 'stretch' : 'cover'}
             style={StyleSheet.absoluteFill}
             onProgress={(e) => {
-              if (!isSliding) {
+              if (!isSlidingRef.current) {
                 onProgress(e.currentTime, e.duration || duration);
               }
             }}
             onLoad={(e) => {
               console.log('[YouTubeInlinePlayer] ✅ KSPlayer onLoad event fired! Duration:', e.duration, 'currentTime:', e.currentTime);
-              setShowPosterShield(false);
               setIsBuffering(false);
               onProgress(e.currentTime || 0, e.duration || duration);
             }}
@@ -1850,13 +2046,16 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             enterPictureInPictureOnLeave={true}
             ignoreSilentSwitch="ignore"
             progressUpdateInterval={250}
+            useTextureView={Platform.OS === 'android'}
+            hideShutterView={true}
+            shutterColor="transparent"
             onReadyForDisplay={() => {
-              console.log('[YouTubeInlinePlayer] 📺 First frame ready for display!');
+              console.log('[YouTubeInlinePlayer] 🎬 First frame ready for display!');
               setShowPosterShield(false);
               setIsBuffering(false);
             }}
             onProgress={(e) => {
-              if (!isSliding) {
+              if (!isSlidingRef.current) {
                 onProgress(e.currentTime, e.seekableDuration || duration);
               }
             }}
@@ -1943,24 +2142,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           </View>
         </View>
       )}
-
-      {/* Loading Poster Shield: prevents any white screen flash while video or web player loads, kept BEHIND controls */}
-      {showPosterShield && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]} pointerEvents="none">
-          {poster ? (
-            <Image
-              source={{ uri: poster }}
-              style={StyleSheet.absoluteFill}
-              resizeMode="cover"
-            />
-          ) : null}
-          <View style={[StyleSheet.absoluteFill, styles.loadingBackdrop]}>
-            <ActivityIndicator size="small" color="#ffffff" />
-          </View>
-        </View>
+        </>
       )}
 
-      {/* Tap Overlay to reveal/hide controls */}
+      {/* Tap Overlay to reveal/hide controls (active in both Web & Native) */}
       <TouchableOpacity
         style={StyleSheet.absoluteFill}
         activeOpacity={1}
@@ -2009,7 +2194,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
       {/* Controls Overlay (native player only) */}
       {showControls && (
-        <View style={styles.controlsOverlay} pointerEvents="box-none">
+        <View style={[styles.controlsOverlay, isFullScreen && styles.controlsOverlayFullScreen]} pointerEvents="box-none">
           {/* Top Bar: Real YouTube Icons (Chevron Down, Autoplay, Cast, CC, Screen Fit, Settings) */}
           <View style={styles.topBar}>
             <View style={{ width: 38, height: 38 }} />
@@ -2090,12 +2275,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           </View>
 
           {/* Bottom Bar: Real YouTube Time Pill, Chapter Pill & Fullscreen Icon */}
-          <View style={styles.bottomMetaRow}>
+          <View style={[styles.bottomMetaRow, isFullScreen && styles.bottomMetaRowFullScreen]}>
             <View style={styles.bottomLeftPills}>
               {/* Time Pill */}
               <View style={styles.timePill}>
                 <Text style={styles.timePillText}>
-                  {formatTime(isSliding ? sliderPos * duration : currentTime)} / {formatTime(duration)}
+                  {formatTime(isSliding ? sliderPos * actualDuration : actualCurrentTime)} / {formatTime(actualDuration)}
                 </Text>
               </View>
 
@@ -2109,7 +2294,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 activeOpacity={0.7}
               >
                 <Text style={styles.chapterPillText} numberOfLines={1}>
-                  {currentQuality || '480p'}
+                  {isWebActive ? (webQuality || 'Auto') : (currentQuality || '480p')}
                 </Text>
                 <Ionicons name="chevron-forward" size={11} color="rgba(255, 255, 255, 0.7)" />
               </TouchableOpacity>
@@ -2117,7 +2302,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
             <TouchableOpacity
               style={styles.fullscreenButton}
-              onPress={onFullScreen}
+              onPress={async () => {
+                if (await isHapticsSupported()) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }
+                onFullScreen();
+              }}
               activeOpacity={0.7}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
@@ -2174,45 +2364,49 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         </View>
       )}
 
-        </>
-      )}
-
       {/* ONLY ONE Single Progress Bar at Bottom Position (Active in both Web & Native) */}
       {actualDuration > 0 && (
         showControls ? (
-          <View style={styles.bottomScrubberContainer}>
+          <View style={[styles.bottomScrubberContainer, isFullScreen && styles.bottomScrubberContainerFullScreen]}>
+            {/* Real YouTube Floating Scrub Time Tooltip Bubble */}
+            {isSliding && (
+              <View
+                style={[
+                  styles.scrubTooltipBubble,
+                  {
+                    left: `${Math.max(6, Math.min(94, (sliderPos || progressPct) * 100))}%`,
+                    bottom: isFullScreen ? 38 : 30,
+                  },
+                ]}
+                pointerEvents="none"
+              >
+                <Text style={styles.scrubTooltipText}>
+                  {formatTime((sliderPos || progressPct) * actualDuration)}
+                </Text>
+              </View>
+            )}
             <Slider
               style={styles.bottomSlider}
               minimumValue={0}
               maximumValue={1}
               value={progressPct}
-              onValueChange={(val) => {
-                setIsSliding(true);
-                setSliderPos(val);
-              }}
-              onSlidingComplete={(val) => {
-                setIsSliding(false);
-                if (isWebActive) {
-                  webViewRef.current?.injectJavaScript(`
-                    (function() {
-                      var v = document.querySelector('video');
-                      if (v) v.currentTime = ${val * (actualDuration || 1)};
-                    })();
-                    true;
-                  `);
-                }
-                onSeek(val * (actualDuration || 1));
-                scheduleControlsHide();
-              }}
-              minimumTrackTintColor="#ff0000"
-              maximumTrackTintColor="rgba(255, 255, 255, 0.35)"
+              slideOnTap={true}
+              trackHeight={isFullScreen ? 4.5 : 3.5}
+              thumbSize={isFullScreen ? 18 : 14}
               thumbTintColor="#ff0000"
-              thumbSize={12}
-              trackHeight={3}
+              minimumTrackTintColor="#ff0000"
+              maximumTrackTintColor="rgba(255, 255, 255, 0.28)"
+              hitSlop={{ top: 22, bottom: 22, left: 10, right: 10 }}
+              onSlidingStart={handleSlidingStart}
+              onValueChange={handleSlidingChange}
+              onSlidingComplete={handleSlidingComplete}
             />
           </View>
         ) : (
-          <View style={styles.slimScrubTrack} pointerEvents="none">
+          <View
+            style={[styles.slimScrubTrack, isFullScreen && styles.slimScrubTrackFullScreen]}
+            pointerEvents="none"
+          >
             <View
               style={[
                 styles.slimScrubFill,
@@ -2221,6 +2415,22 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             />
           </View>
         )
+      )}
+
+      {/* Loading Poster Shield: prevents any white screen flash while video or web player loads */}
+      {showPosterShield && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]} pointerEvents="none">
+          {poster ? (
+            <Image
+              source={{ uri: poster }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+          ) : null}
+          <View style={[StyleSheet.absoluteFill, styles.loadingBackdrop]}>
+            <ActivityIndicator size="small" color="#ffffff" />
+          </View>
+        </View>
       )}
 
       {/* Go Back Left Arrow Icon: In front of the inline player at left corner, only when controls are active */}
@@ -2244,6 +2454,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         animationType="slide"
         transparent={true}
         onRequestClose={() => setSettingsModalVisible(false)}
+        supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
+        statusBarTranslucent={true}
       >
         <Pressable
           style={styles.settingsBackdrop}
@@ -2492,9 +2704,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                         key={q}
                         style={styles.optionItemRow}
                         onPress={async () => {
-                          if (await isHapticsSupported()) {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          }
+                          try {
+                            if (await isHapticsSupported()) {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            }
+                          } catch (_) {}
                           handleChangeQualityFromModal(q);
                           setSettingsModalVisible(false);
                         }}
@@ -2677,8 +2891,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 2.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     zIndex: 1002,
+  },
+  slimScrubTrackFullScreen: {
+    bottom: 8,
+    left: 12,
+    right: 12,
+    height: 3,
   },
   slimScrubFill: {
     height: '100%',
@@ -2699,8 +2919,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: '100%',
     height: '100%',
-    aspectRatio: undefined,
     backgroundColor: '#000000',
+    overflow: 'hidden',
+    zIndex: 9999,
   },
   topBarRight: {
     flexDirection: 'row',
@@ -2874,6 +3095,10 @@ const styles = StyleSheet.create({
     zIndex: 999,
     elevation: 20,
   },
+  controlsOverlayFullScreen: {
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+  },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2920,6 +3145,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  bottomMetaRowFullScreen: {
+    marginBottom: 8,
+    paddingHorizontal: 8,
+  },
   bottomLeftPills: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2961,16 +3190,41 @@ const styles = StyleSheet.create({
   },
   bottomScrubberContainer: {
     position: 'absolute',
-    bottom: -1,
-    left: -4,
-    right: -4,
-    height: 16,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 32,
     justifyContent: 'center',
+    zIndex: 1002,
+  },
+  bottomScrubberContainerFullScreen: {
+    bottom: 50,
+    height: 42,
+    paddingHorizontal: 20,
     zIndex: 1002,
   },
   bottomSlider: {
     width: '100%',
-    height: 20,
+    height: 36,
+  },
+  scrubTooltipBubble: {
+    position: 'absolute',
+    transform: [{ translateX: -24 }],
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1005,
+  },
+  scrubTooltipText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   settingsBackdrop: {
     flex: 1,
