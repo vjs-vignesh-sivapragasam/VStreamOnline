@@ -59,7 +59,7 @@ workflows:
           ruby -e '
             p = File.read("Podfile")
             unless p.include?("SKIP_INSTALL")
-              p += "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings[\"SKIP_INSTALL\"] = \"YES\"\n    end\n  end\nend\n"
+              p += "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings[\"SKIP_INSTALL\"] = \"YES\"\n      if target.name == 'react-native-menu'\n        config.build_settings['DEFINES_MODULE'] = 'YES'\n        config.build_settings['SWIFT_INSTALL_OBJC_HEADER'] = 'YES'\n      end\n    end\n  end\nend\n"
               File.write("Podfile", p)
             end
           '
@@ -245,7 +245,7 @@ workflows:
           ruby -e '
             p = File.read("Podfile")
             unless p.include?("SKIP_INSTALL")
-              p += "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings[\"SKIP_INSTALL\"] = \"YES\"\n    end\n  end\nend\n"
+              p += "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings[\"SKIP_INSTALL\"] = \"YES\"\n      if target.name == 'react-native-menu'\n        config.build_settings['DEFINES_MODULE'] = 'YES'\n        config.build_settings['SWIFT_INSTALL_OBJC_HEADER'] = 'YES'\n      end\n    end\n  end\nend\n"
               File.write("Podfile", p)
             end
           '

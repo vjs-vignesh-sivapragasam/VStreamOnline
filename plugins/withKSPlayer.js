@@ -63,6 +63,10 @@ const withKSPlayerPod = (config) => {
     target.build_configurations.each do |config|
       config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
       config.build_settings['SKIP_INSTALL'] = 'YES'
+      if target.name == 'react-native-menu'
+        config.build_settings['DEFINES_MODULE'] = 'YES'
+        config.build_settings['SWIFT_INSTALL_OBJC_HEADER'] = 'YES'
+      end
     end
   end
 `;

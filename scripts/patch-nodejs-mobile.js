@@ -216,7 +216,7 @@ if (fs.existsSync(createUpdatesPath)) {
   }
 }
 
-// ── 5. Patch @react-native-menu/menu RCTBridge.h import for RN 0.88+ New Architecture ──
+// ── 5. Patch @react-native-menu/menu for RN 0.88+ New Architecture & static frameworks ──
 const menuViewManagerPath = path.join(
   rootDir,
   'node_modules',
@@ -228,13 +228,63 @@ const menuViewManagerPath = path.join(
 
 if (fs.existsSync(menuViewManagerPath)) {
   let content = fs.readFileSync(menuViewManagerPath, 'utf8');
+  let changed = false;
+
   if (content.includes('#import "RCTBridge.h"')) {
     content = content.replace(
       '#import "RCTBridge.h"',
       '#if __has_include(<React/RCTBridge.h>)\n#import <React/RCTBridge.h>\n#elif __has_include("RCTBridge.h")\n#import "RCTBridge.h"\n#endif'
     );
+    changed = true;
+  }
+
+  const oldSwiftImport = '#if __has_include(<react_native_menu/react_native_menu-Swift.h>)\n#import <react_native_menu/react_native_menu-Swift.h>\n#else\n#import <react_native_menu-Swift.h>\n#endif';
+  const newSwiftImport = '#if __has_include(<react_native_menu/react_native_menu-Swift.h>)\n#import <react_native_menu/react_native_menu-Swift.h>\n#elif __has_include("react_native_menu-Swift.h")\n#import "react_native_menu-Swift.h"\n#elif __has_include(<react_native_menu-Swift.h>)\n#import <react_native_menu-Swift.h>\n#else\n#import "react_native_menu-Swift.h"\n#endif';
+
+  if (content.includes(oldSwiftImport)) {
+    content = content.replace(oldSwiftImport, newSwiftImport);
+    changed = true;
+  }
+
+  if (changed) {
     fs.writeFileSync(menuViewManagerPath, content, 'utf8');
-    console.log('✅ Patched @react-native-menu/menu MenuViewManager.mm for React Native 0.88+ header compatibility');
+    console.log('✅ Patched @react-native-menu/menu MenuViewManager.mm for Swift header & RN 0.88+ compatibility');
+  }
+}
+
+const menuViewPath = path.join(
+  rootDir,
+  'node_modules',
+  '@react-native-menu',
+  'menu',
+  'ios',
+  'NewArch',
+  'MenuView.mm'
+);
+
+if (fs.existsSync(menuViewPath)) {
+  let content = fs.readFileSync(menuViewPath, 'utf8');
+  let changed = false;
+
+  const oldSwiftImport = '#if __has_include(<react_native_menu/react_native_menu-Swift.h>)\n#import <react_native_menu/react_native_menu-Swift.h>\n#else\n#import <react_native_menu-Swift.h>\n#endif';
+  const newSwiftImport = '#if __has_include(<react_native_menu/react_native_menu-Swift.h>)\n#import <react_native_menu/react_native_menu-Swift.h>\n#elif __has_include("react_native_menu-Swift.h")\n#import "react_native_menu-Swift.h"\n#elif __has_include(<react_native_menu-Swift.h>)\n#import <react_native_menu-Swift.h>\n#else\n#import "react_native_menu-Swift.h"\n#endif';
+
+  if (content.includes(oldSwiftImport)) {
+    content = content.replace(oldSwiftImport, newSwiftImport);
+    changed = true;
+  }
+
+  if (content.includes('#import "RCTFabricComponentsPlugins.h"')) {
+    content = content.replace(
+      '#import "RCTFabricComponentsPlugins.h"',
+      '#if __has_include(<React/RCTFabricComponentsPlugins.h>)\n#import <React/RCTFabricComponentsPlugins.h>\n#elif __has_include("RCTFabricComponentsPlugins.h")\n#import "RCTFabricComponentsPlugins.h"\n#endif'
+    );
+    changed = true;
+  }
+
+  if (changed) {
+    fs.writeFileSync(menuViewPath, content, 'utf8');
+    console.log('✅ Patched @react-native-menu/menu MenuView.mm for Swift header & Fabric compatibility');
   }
 }
 
