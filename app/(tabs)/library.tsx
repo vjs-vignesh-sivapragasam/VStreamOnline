@@ -431,7 +431,7 @@ const LibraryScreen: React.FC = () => {
                                             <View style={styles.speedBadge}>
                                                 <Ionicons name="flash" size={11} color="#00e676" />
                                                 <Text style={styles.speedText}>
-                                                    {item.speedFormatted || '0 KB/s'}
+                                                    {item.speedFormatted || '0 Mbps'}
                                                 </Text>
                                             </View>
                                         )}

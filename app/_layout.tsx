@@ -15,6 +15,7 @@ import { YouTubePlayerProvider } from '@/contexts/YouTubePlayerContext';
 import { YouTubeWatchOverlay } from '@/components/youtube/YouTubeWatchOverlay';
 import { AppThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { VplexCinematicSplash } from '@/components/splash/VplexCinematicSplash';
+import { StremioKeepAliveKeeper } from '@/components/StremioKeepAliveKeeper';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -25,10 +26,10 @@ export const unstable_settings = {
   // Ensure that reloading on `/modal` keeps a back button present.
   initialRouteName: '(tabs)',
   tabs: {
-    initialRouteName: 'youtube',
+    initialRouteName: 'index',
   },
   '(tabs)': {
-    initialRouteName: 'youtube',
+    initialRouteName: 'index',
   },
 };
 
@@ -300,6 +301,7 @@ function RootLayoutNav() {
           </Stack>
           <PlayerSelectionModal />
           <YouTubeWatchOverlay />
+          <StremioKeepAliveKeeper />
         </YouTubePlayerProvider>
       </ThemeProvider>
     </ActionSheetProvider>

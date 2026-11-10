@@ -47,7 +47,7 @@ export const AppThemeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               setThemeIdState(stored as ThemeId);
             }
           } else {
-            // First run: explicitly save purple as default theme
+            // First run: explicitly save yellow as default theme
             storageService.setItem(StorageKeys.THEME_KEY, DEFAULT_THEME_ID);
             await AsyncStorage.setItem(StorageKeys.THEME_KEY, DEFAULT_THEME_ID);
           }

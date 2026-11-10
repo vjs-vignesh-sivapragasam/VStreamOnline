@@ -7,21 +7,28 @@ let isLifecycleListenerAttached = false;
  * Pings the embedded Stremio server on loopback to check if it is responsive.
  */
 export async function pingEmbeddedServer(timeoutMs: number = 2000): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch('http://127.0.0.1:11470/stats.json', {
-        signal: controller.signal,
-        headers: { Accept: '*/*' },
-      });
-      return res.ok || res.status < 500;
-    } finally {
-      clearTimeout(timer);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch('http://127.0.0.1:11470/stats.json', {
+          signal: controller.signal,
+          headers: { Accept: '*/*' },
+        });
+        if (res.ok || res.status < 500) {
+          return true;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 400));
+      }
     }
-  } catch {
-    return false;
   }
+  return false;
 }
 
 /**

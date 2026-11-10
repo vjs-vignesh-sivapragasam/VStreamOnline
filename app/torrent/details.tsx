@@ -1011,7 +1011,7 @@ const TorrentDetails = () => {
                           <View style={styles.qualityDownloadingBadge}>
                             <Ionicons name="arrow-down" size={10} color="#00e676" />
                             <Text style={styles.qualityDownloadingText}>
-                              {downloadInfo.progress}% • {downloadInfo.speedFormatted || '0 KB/s'}
+                              {downloadInfo.progress}% • {downloadInfo.speedFormatted || '0 Mbps'}
                             </Text>
                           </View>
                         )}

@@ -557,7 +557,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   return (
     <>
       {/* Minimized Floating Mini Player Bar */}
-      {isMinimized && (
+      {isMinimized ? (
         <View
           style={[
             styles.miniPlayerContainer,
@@ -617,7 +617,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
 
       {/* Full Real YouTube Watch Screen (kept mounted so audio never stops and expand is instantaneous) */}
       <View

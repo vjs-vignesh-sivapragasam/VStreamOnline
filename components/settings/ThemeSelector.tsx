@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
-import { ThemeId, AppTheme } from '@/constants/Colors';
+import { ThemeId, AppTheme, DEFAULT_THEME_ID } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
@@ -14,6 +14,12 @@ interface ThemeSelectorProps {
 
 const getThemeBadgeText = (theme: AppTheme) => {
   switch (theme.id) {
+    case 'yellow':
+      return 'Yellow (Default)';
+    case 'orange':
+      return 'Sunset Orange';
+    case 'white':
+      return 'Pure White';
     case 'purple':
       return 'Purple';
     case 'blue':
@@ -28,10 +34,13 @@ const getThemeBadgeText = (theme: AppTheme) => {
 };
 
 const getSubtitleBadge = (t: AppTheme) => {
-  if (t.id === 'purple') return 'Default';
+  if (t.id === DEFAULT_THEME_ID) return 'Default';
+  if (t.id === 'yellow') return 'Amber';
+  if (t.id === 'orange') return 'Sunset';
+  if (t.id === 'white') return 'Pure';
+  if (t.id === 'purple') return 'Classic';
   if (t.id === 'blue') return 'Ocean';
   if (t.id === 'green') return 'Emerald';
-  if (t.id === 'yellow') return 'Amber';
   if (t.id === 'red') return 'Crimson';
   if (t.id === 'accent') return 'Apple Pink';
   return t.subtitle.split(' ')[0];
@@ -86,7 +95,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
       <View style={styles.swatchesContainer}>
         {availableThemes.map((t: AppTheme) => {
           const isSelected = t.id === themeId;
-          const isDefault = t.id === 'purple';
+          const isDefault = t.id === DEFAULT_THEME_ID;
 
           return (
             <Pressable
@@ -127,7 +136,11 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
                   ]}
                 >
                   {isSelected && (
-                    <Ionicons name="checkmark" size={17} color="#FFFFFF" />
+                    <Ionicons
+                      name="checkmark"
+                      size={17}
+                      color={t.id === 'white' ? '#000000' : '#FFFFFF'}
+                    />
                   )}
                 </View>
               </View>

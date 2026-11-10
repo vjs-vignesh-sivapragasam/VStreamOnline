@@ -1,36 +1,13 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { useTheme } from '@/contexts/ThemeContext';
-import { router, usePathname, useSegments } from 'expo-router';
 
 export const unstable_settings = {
-  initialRouteName: 'youtube',
+  initialRouteName: 'index',
 };
-
-// Global flag to ensure default YouTube tab selection only fires once on app launch
-let hasNavigatedOnLaunch = false;
 
 export default function TabLayout() {
   const { theme } = useTheme();
-  const pathname = usePathname();
-  const segments = useSegments();
-
-  useEffect(() => {
-    if (!hasNavigatedOnLaunch) {
-      hasNavigatedOnLaunch = true;
-      const isDefaultLaunch =
-        pathname === '/' ||
-        pathname === '' ||
-        pathname === '/(tabs)' ||
-        pathname === '/(tabs)/' ||
-        pathname === '/index' ||
-        (segments.length === 1 && segments[0] === '(tabs)');
-
-      if (isDefaultLaunch) {
-        router.replace('/(tabs)/youtube' as any);
-      }
-    }
-  }, [pathname, segments]);
 
   return (
     <NativeTabs

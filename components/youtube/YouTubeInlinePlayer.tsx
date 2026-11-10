@@ -14,6 +14,7 @@ import {
   Dimensions,
   AppState,
   AppStateStatus,
+  Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Video, { VideoRef, ResizeMode } from 'react-native-video';
@@ -26,6 +27,7 @@ import { isRCTVideoAvailable } from '@/components/nativeplayer';
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
 import { youTubeService } from '@/services/YouTubeService';
+import { StorageKeys, storageService } from '@/utils/StorageService';
 
 const { width } = Dimensions.get('window');
 
@@ -59,6 +61,8 @@ export interface YouTubeInlinePlayerProps {
   onChangeQuality?: (quality: string) => void;
   onSetPlaybackSpeed?: (speed: number) => void;
   onToggleLoop?: () => void;
+  isPipEnabled?: boolean;
+  onTogglePip?: (enabled: boolean) => void;
   onTogglePlay: () => void;
   onMinimize: () => void;
   onFullScreen: () => void;
@@ -148,12 +152,13 @@ const INJECTED_BEFORE_CONTENT_JS = `
   true;
 `;
 
-function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'cover'): string {
+function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'cover', pipEnabled: boolean = true): string {
   const topOffset = 10;
   const initialFitCss = fitMode === 'contain' ? 'contain' : fitMode === 'stretch' ? 'fill' : 'cover';
   return `
   (function() {
     window.__agyDesiredFitMode = '${fitMode || 'cover'}';
+    window.__agyPipEnabled = ${pipEnabled};
     var cleanCss = \`
       /* 1. Hide entire YouTube mobile top header (logo, search, 3 dots, open app) */
       ytm-mobile-topbar-renderer,
@@ -838,6 +843,7 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
     // Auto Picture-in-Picture trigger when user leaves the app or browser minimizes
     document.addEventListener('visibilitychange', function() {
       if (document.hidden) {
+        if (window.__agyPipEnabled === false) return;
         var v = document.querySelector('video');
         if (v && !v.paused) {
           try {
@@ -1277,6 +1283,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   onChangeQuality,
   onSetPlaybackSpeed,
   onToggleLoop,
+  isPipEnabled: propPipEnabled,
+  onTogglePip,
   onTogglePlay,
   onMinimize,
   onFullScreen,
@@ -1353,7 +1361,19 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   }, [videoId]);
 
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
-  const [settingsSubView, setSettingsSubView] = useState<'main' | 'quality' | 'speed' | 'screenfit'>('main');
+  const [settingsSubView, setSettingsSubView] = useState<'main' | 'quality' | 'speed' | 'screenfit' | 'pip'>('main');
+
+  // PiP state (persisted in StorageService, defaults to enabled)
+  const [internalPipEnabled, setInternalPipEnabled] = useState<boolean>(() => {
+    try {
+      const saved = storageService.getItem(StorageKeys.YOUTUBE_PIP_ENABLED_KEY);
+      return saved !== undefined ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const isPipEnabled = propPipEnabled !== undefined ? propPipEnabled : internalPipEnabled;
 
   // Web player state for fallback mode
   const [webCurrentTime, setWebCurrentTime] = useState(0);
@@ -1395,9 +1415,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
       if (nextState === 'background' || nextState === 'inactive') {
-        if (effectiveIsPlaying && isWebActive && webViewRef.current) {
+        if (isPipEnabled && effectiveIsPlaying && isWebActive && webViewRef.current) {
           webViewRef.current.injectJavaScript(`
             (function() {
+              if (window.__agyPipEnabled === false) return;
               try {
                 var v = document.querySelector('video');
                 if (v && !v.paused) {
@@ -1415,7 +1436,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       }
     });
     return () => sub.remove();
-  }, [effectiveIsPlaying, isWebActive]);
+  }, [effectiveIsPlaying, isWebActive, isPipEnabled]);
 
   // Modal seek & progress handlers
   const handleSeekFromModal = useCallback((targetSec: number) => {
@@ -1554,6 +1575,35 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       onToggleLoop?.();
     }
   }, [isWebActive, onToggleLoop]);
+
+  const handleTogglePipFromModal = useCallback(async (explicitValue?: boolean) => {
+    const nextVal = explicitValue !== undefined ? explicitValue : !isPipEnabled;
+    try {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+    } catch (_) {}
+
+    setInternalPipEnabled(nextVal);
+    try {
+      storageService.setItem(StorageKeys.YOUTUBE_PIP_ENABLED_KEY, String(nextVal));
+    } catch (e) {
+      console.warn('[YouTubeInlinePlayer] Failed to save PiP state to storage:', e);
+    }
+    onTogglePip?.(nextVal);
+
+    if (isWebActive && webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        (function() {
+          window.__agyPipEnabled = ${nextVal};
+          if (!${nextVal} && document.pictureInPictureElement) {
+            document.exitPictureInPicture().catch(function(){});
+          }
+        })();
+        true;
+      `);
+    }
+  }, [isPipEnabled, isWebActive, onTogglePip]);
 
 
 
@@ -1887,8 +1937,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   );
 
   const cleanPlayerJs = useMemo(
-    () => getInjectedCleanPlayerJs(effectiveTopInset, videoResizeMode),
-    [effectiveTopInset, videoResizeMode]
+    () => getInjectedCleanPlayerJs(effectiveTopInset, videoResizeMode, isPipEnabled),
+    [effectiveTopInset, videoResizeMode, isPipEnabled]
   );
 
   return (
@@ -1910,7 +1960,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           opaque={false}
           injectedJavaScriptBeforeContentLoaded={INJECTED_BEFORE_CONTENT_JS}
           allowsInlineMediaPlayback={true}
-          allowsPictureInPictureMediaPlayback={true}
+          allowsPictureInPictureMediaPlayback={isPipEnabled}
           allowsAirPlayForMediaPlayback={true}
           mediaPlaybackRequiresUserAction={false}
           javaScriptEnabled={true}
@@ -2047,7 +2097,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             controls={false}
             playInBackground={true}
             playWhenInactive={true}
-            enterPictureInPictureOnLeave={true}
+            enterPictureInPictureOnLeave={isPipEnabled}
             ignoreSilentSwitch="ignore"
             progressUpdateInterval={250}
             onProgress={(e) => {
@@ -2669,6 +2719,49 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                     </Text>
                   </View>
                 </TouchableOpacity>
+
+                {/* Picture-in-Picture (PiP) Option */}
+                <TouchableOpacity
+                  style={styles.settingsRow}
+                  onPress={() => handleTogglePipFromModal()}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.settingsRowLeft}>
+                    <Ionicons
+                      name="albums-outline"
+                      size={20}
+                      color={isPipEnabled ? '#535aff' : '#ffffff'}
+                    />
+                    <Text style={styles.settingsRowLabel}>Picture-in-Picture</Text>
+                  </View>
+                  <View style={styles.settingsRowRight}>
+                    <Text
+                      style={[
+                        styles.settingsRowValue,
+                        isPipEnabled && { color: '#535aff', fontWeight: '700' },
+                      ]}
+                    >
+                      {isPipEnabled ? 'Enabled' : 'Disabled'}
+                    </Text>
+                    <Switch
+                      value={isPipEnabled}
+                      onValueChange={(val) => handleTogglePipFromModal(val)}
+                      trackColor={{ false: '#3a3a3c', true: '#535aff' }}
+                      thumbColor="#ffffff"
+                      ios_backgroundColor="#3a3a3c"
+                      style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }], marginLeft: 4 }}
+                    />
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSettingsSubView('pip');
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{ marginLeft: 2 }}
+                    >
+                      <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
               </View>
             )}
 
@@ -2846,6 +2939,76 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                         {isSelected && (
                           <Ionicons name="checkmark" size={18} color="#535aff" />
                         )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* 5. Picture-in-Picture Sub-Menu */}
+            {settingsSubView === 'pip' && (
+              <View>
+                <View style={styles.settingsSubHeader}>
+                  <TouchableOpacity
+                    style={styles.backButton}
+                    onPress={() => setSettingsSubView('main')}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="arrow-back" size={20} color="#ffffff" />
+                  </TouchableOpacity>
+                  <View style={styles.subHeaderTitleWrap}>
+                    <Text style={styles.settingsTitle}>Picture-in-Picture (PiP)</Text>
+                    <Text style={styles.settingsSubTitle}>Continue watching in a floating mini player</Text>
+                  </View>
+                </View>
+
+                <View style={styles.settingsDivider} />
+
+                <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
+                  {[
+                    {
+                      enabled: true,
+                      title: 'Enabled',
+                      desc: 'Automatically open floating mini player when leaving or switching apps',
+                      icon: 'albums-outline' as const,
+                      color: '#535aff',
+                    },
+                    {
+                      enabled: false,
+                      title: 'Disabled',
+                      desc: 'Keep video playback inside the app without opening floating PiP',
+                      icon: 'close-circle-outline' as const,
+                      color: '#ff453a',
+                    },
+                  ].map((item) => {
+                    const isSelected = isPipEnabled === item.enabled;
+                    return (
+                      <TouchableOpacity
+                        key={item.title}
+                        style={[
+                          styles.screenFitOptionCard,
+                          isSelected && {
+                            borderColor: item.color,
+                            backgroundColor: item.color + '15',
+                          },
+                        ]}
+                        onPress={async () => {
+                          await handleTogglePipFromModal(item.enabled);
+                          setSettingsModalVisible(false);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.screenFitOptionIconWrap, { backgroundColor: item.color + '22' }]}>
+                          <Ionicons name={item.icon} size={20} color={item.color} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.optionItemText, isSelected && { color: '#ffffff', fontWeight: '700' }]}>
+                            {item.title}
+                          </Text>
+                          <Text style={styles.screenFitOptionDesc}>{item.desc}</Text>
+                        </View>
+                        {isSelected && <Ionicons name="checkmark-circle" size={20} color={item.color} />}
                       </TouchableOpacity>
                     );
                   })}

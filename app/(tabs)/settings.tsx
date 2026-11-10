@@ -144,17 +144,7 @@ const SettingsScreen = () => {
             <SettingItem
               title="Theme Selection"
               icon="color-palette-outline"
-              badgeText={
-                theme.id === 'purple'
-                  ? 'Purple'
-                  : theme.id === 'blue'
-                  ? 'Ocean Blue'
-                  : theme.id === 'green'
-                  ? 'Emerald Green'
-                  : theme.id === 'accent'
-                  ? 'Apple Music'
-                  : theme.name
-              }
+              badgeText={theme.displayName || theme.name}
               badgeColor={theme.primary}
               onPress={async () => {
                 if (await isHapticsSupported()) {

@@ -28,6 +28,86 @@ async function setKeepAwakeState(active: boolean): Promise<void> {
   } catch {}
 }
 
+// High-accuracy Exponential Moving Average (EMA) speed calculator
+// Eliminates buffer bursts, uninitialized baseline spikes (e.g. 420 MB/s), and provides real Mbps
+export class DownloadSpeedTracker {
+  private lastBytes: number = 0;
+  private lastTime: number = 0;
+  private smoothedSpeedBps: number = 0;
+  private isInitialized: boolean = false;
+  private lastActiveTime: number = 0;
+
+  constructor(initialBytes = 0) {
+    this.reset(initialBytes);
+  }
+
+  reset(initialBytes = 0): void {
+    this.lastBytes = initialBytes;
+    this.lastTime = Date.now();
+    this.lastActiveTime = Date.now();
+    this.smoothedSpeedBps = 0;
+    this.isInitialized = false;
+  }
+
+  /**
+   * Updates progress and calculates a smoothed, realistic speed in bytes per second.
+   * Filters out impossible mobile network spikes and provides a true Mbps metric.
+   */
+  update(currentBytes: number): { speedBps: number; shouldUpdateUI: boolean } {
+    const now = Date.now();
+
+    // Baseline initialization: Establish initial offset without calculating an artificial jump
+    if (!this.isInitialized) {
+      this.lastBytes = currentBytes;
+      this.lastTime = now;
+      this.lastActiveTime = now;
+      this.isInitialized = true;
+      return { speedBps: 0, shouldUpdateUI: false };
+    }
+
+    const elapsedMs = now - this.lastTime;
+    // Update calculation at a stable cadence (at least 350ms window)
+    if (elapsedMs < 350) {
+      return { speedBps: this.smoothedSpeedBps, shouldUpdateUI: false };
+    }
+
+    const timeSec = elapsedMs / 1000;
+    const bytesDiff = currentBytes - this.lastBytes;
+
+    if (bytesDiff > 0) {
+      this.lastActiveTime = now;
+      const rawInstantSpeed = bytesDiff / timeSec;
+
+      // Filter out impossible mobile network spikes (cap at 125 MB/s = 1000 Mbps)
+      const clampedSpeed = Math.min(rawInstantSpeed, 125 * 1024 * 1024);
+
+      if (this.smoothedSpeedBps <= 0) {
+        this.smoothedSpeedBps = clampedSpeed;
+      } else {
+        // EMA smoothing: 35% new sample weight, 65% history for stable, jitter-free speed
+        this.smoothedSpeedBps = this.smoothedSpeedBps * 0.65 + clampedSpeed * 0.35;
+      }
+    } else {
+      // If stalled for over 1.5s with 0 new bytes, smoothly decay towards 0 so UI never freezes on stale spikes
+      if (now - this.lastActiveTime > 1500) {
+        this.smoothedSpeedBps = Math.round(this.smoothedSpeedBps * 0.5);
+        if (this.smoothedSpeedBps < 5000) {
+          this.smoothedSpeedBps = 0;
+        }
+      }
+    }
+
+    this.lastBytes = currentBytes;
+    this.lastTime = now;
+
+    return { speedBps: Math.round(this.smoothedSpeedBps), shouldUpdateUI: true };
+  }
+
+  getCurrentSpeedBps(): number {
+    return Math.round(this.smoothedSpeedBps);
+  }
+}
+
 export type DownloadHealth = 'good' | 'fair' | 'bad' | 'very_bad';
 
 export interface HealthIndicatorInfo {
@@ -192,7 +272,7 @@ export interface DownloadItem {
   status: 'downloading' | 'paused' | 'completed' | 'error';
   statusDetail?: string; // Descriptive real-time state for UI diagnostic
   speedBps: number;
-  speedFormatted: string; // e.g. "2.4 MB/s" or "820 KB/s"
+  speedFormatted: string; // e.g. "24.5 Mbps" or "820 Kbps"
   peers: number; // Connected peers
   errorMessage?: string;
   createdAt: number;
@@ -382,13 +462,21 @@ class DownloadManager {
     return this.inMemoryDownloads.find((d) => d.id === id);
   }
 
-  // Format speed into KB/s or MB/s
+  // Format speed into real Mbps (or Kbps) for clear, accurate network throughput visibility
   formatSpeed(bytesPerSecond: number): string {
-    if (!bytesPerSecond || bytesPerSecond <= 0) return '0 KB/s';
-    if (bytesPerSecond >= 1e6) {
-      return `${(bytesPerSecond / 1e6).toFixed(1)} MB/s`;
+    if (!bytesPerSecond || bytesPerSecond <= 0) return '0 Mbps';
+    const mbps = (bytesPerSecond * 8) / 1_000_000;
+    if (mbps >= 100) {
+      return `${Math.round(mbps)} Mbps`;
     }
-    return `${Math.round(bytesPerSecond / 1e3)} KB/s`;
+    if (mbps >= 1) {
+      return `${mbps.toFixed(1)} Mbps`;
+    }
+    const kbps = (bytesPerSecond * 8) / 1_000;
+    if (kbps >= 1) {
+      return `${Math.round(kbps)} Kbps`;
+    }
+    return `${Math.round(bytesPerSecond * 8)} bps`;
   }
 
   private currentCdnHealth: HealthIndicatorInfo = getDownloadHealth(28, 0, true);
@@ -724,7 +812,7 @@ class DownloadManager {
     existing.status = 'downloading';
     existing.statusDetail = 'Connecting to main video stream...';
     existing.speedBps = 0;
-    existing.speedFormatted = '0 KB/s';
+    existing.speedFormatted = '0 Mbps';
 
     this.notifyListeners();
     this.persistDownloadsImmediately();
@@ -775,7 +863,7 @@ class DownloadManager {
         status: 'downloading',
         statusDetail: 'Connecting to streaming engine...',
         speedBps: 0,
-        speedFormatted: '0 KB/s',
+        speedFormatted: '0 Mbps',
         peers: 0,
         createdAt: Date.now(),
       };
@@ -788,7 +876,7 @@ class DownloadManager {
       if (params.poster && (!item.poster || item.poster.trim() === '')) item.poster = params.poster;
       if (params.fileLength && params.fileLength > 0) item.totalBytes = params.fileLength;
       item.speedBps = 0;
-      item.speedFormatted = '0 KB/s';
+      item.speedFormatted = '0 Mbps';
       item.errorMessage = undefined;
     }
 
@@ -848,9 +936,8 @@ class DownloadManager {
 
     this.statsIntervals.set(id, statsTimer);
 
-    // Track download progress from native download task
-    let lastProgressBytes = item.downloadedBytes;
-    let lastProgressTime = Date.now();
+    // Track download progress from native download task using smoothed speed tracker
+    const speedTracker = new DownloadSpeedTracker(item.downloadedBytes);
     let lastNotifyTime = 0;
 
     // Localhost loopback downloads must use 'foreground' on iOS because nsurlsessiond cannot route loopback.
@@ -879,24 +966,20 @@ class DownloadManager {
           }
         }
 
-        // Calculate transfer speed in bytes per second
-        const timeDiff = Math.max((now - lastProgressTime) / 1000, 0.1);
-        const bytesDiff = Math.max(downloaded - lastProgressBytes, 0);
-        const speed = Math.round(bytesDiff / timeDiff);
-        lastProgressBytes = downloaded;
-        lastProgressTime = now;
-
-        if (speed > 0) {
-          item!.speedBps = speed;
-          item!.speedFormatted = this.formatSpeed(speed);
-        }
+        // Calculate transfer speed with EMA smoothing and burst protection
+        const { speedBps, shouldUpdateUI } = speedTracker.update(downloaded);
+        item!.speedBps = speedBps;
+        item!.speedFormatted = this.formatSpeed(speedBps);
 
         if (item!.progress > 0) {
           item!.statusDetail = item!.peers > 0 ? `Downloading (${item!.peers} peers)` : 'Downloading...';
         }
 
-        this.notifyListeners();
-        this.persistDownloadsThrottled();
+        if (shouldUpdateUI || now - lastNotifyTime >= 500 || item!.progress === 100) {
+          lastNotifyTime = now;
+          this.notifyListeners();
+          this.persistDownloadsThrottled();
+        }
       },
     });
 
@@ -991,7 +1074,7 @@ class DownloadManager {
         status: 'downloading',
         statusDetail: 'Starting download...',
         speedBps: 0,
-        speedFormatted: '0 KB/s',
+        speedFormatted: '0 Mbps',
         peers: 0,
         createdAt: Date.now(),
         sourceType: 'direct',
@@ -1005,7 +1088,7 @@ class DownloadManager {
       if (params.poster && (!item.poster || item.poster.trim() === '')) item.poster = params.poster;
       if (params.fileLength && params.fileLength > 0) item.totalBytes = params.fileLength;
       item.speedBps = 0;
-      item.speedFormatted = '0 KB/s';
+      item.speedFormatted = '0 Mbps';
       item.errorMessage = undefined;
       item.sourceType = 'direct';
     }
@@ -1015,8 +1098,7 @@ class DownloadManager {
 
     this.stopTracking(id);
 
-    let lastProgressBytes = item.downloadedBytes;
-    let lastProgressTime = Date.now();
+    const speedTracker = new DownloadSpeedTracker(item.downloadedBytes);
     let lastNotifyTime = 0;
 
     let downloadUrl = params.streamUrl;
@@ -1041,11 +1123,6 @@ class DownloadManager {
     }
 
     const isGoogleVideo = directUrl.includes('googlevideo.com');
-
-    // On iOS and native devices, Google CDN direct download with proper User-Agent works natively across all formats
-    const targetDownloadUrl = directUrl;
-    item.streamUrl = targetDownloadUrl;
-
     const isIos = Platform.OS === 'ios' || directUrl.includes('c=IOS');
     const directHeaders: Record<string, string> | undefined = isGoogleVideo
       ? {
@@ -1056,13 +1133,34 @@ class DownloadManager {
         }
       : undefined;
 
+    // Fast-stream pickup optimization:
+    // Google CDN severely throttles non-ratebypassed direct streams to ~16-64 KB/s.
+    // When the local engine is responsive, we route through its unthrottled 2MB range-chunked proxy.
+    // This allows downloads to pick up instantly at full network line speed (30-100 Mbps).
+    let targetDownloadUrl = directUrl;
+    let targetHeaders = directHeaders;
+
+    if (isGoogleVideo && !directUrl.includes('ratebypass=yes')) {
+      try {
+        const isEngineUp = await youTubeService.pingEngine(600);
+        if (isEngineUp) {
+          const base = youTubeService.getActiveBaseUrl();
+          targetDownloadUrl = `${base}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}`;
+          targetHeaders = undefined;
+          console.log(`[DownloadService] ⚡ Using chunked engine proxy for unthrottled pickup: ${targetDownloadUrl}`);
+        }
+      } catch {}
+    }
+
+    item.streamUrl = targetDownloadUrl;
+
     // Foreground session ensures native headers (User-Agent) are sent without being stripped by iOS nsurlsessiond,
     // avoiding HTTP 403 Forbidden on Google Video CDN, and avoiding ATS rejections on local engine endpoints.
     const sessionType: 'foreground' | 'background' = 'foreground';
 
     const task = new DownloadTask(targetDownloadUrl, targetFile, {
       sessionType,
-      headers: directHeaders,
+      headers: targetHeaders,
       onProgress: (progressData: DownloadProgress) => {
         if (item!.status !== 'downloading') return;
         const now = Date.now();
@@ -1082,21 +1180,14 @@ class DownloadManager {
           }
         }
 
-        const timeDiff = Math.max((now - lastProgressTime) / 1000, 0.1);
-        const bytesDiff = Math.max(downloaded - lastProgressBytes, 0);
-        const speed = Math.round(bytesDiff / timeDiff);
-        lastProgressBytes = downloaded;
-        lastProgressTime = now;
-
-        if (speed > 0) {
-          item!.speedBps = speed;
-          item!.speedFormatted = this.formatSpeed(speed);
-        }
-
+        // Calculate transfer speed with EMA smoothing and burst protection
+        const { speedBps, shouldUpdateUI } = speedTracker.update(downloaded);
+        item!.speedBps = speedBps;
+        item!.speedFormatted = this.formatSpeed(speedBps);
         item!.statusDetail = `Downloading (${item!.progress}%)`;
 
         // Throttle UI listener updates to at most once per 500ms to keep JS thread silky smooth and responsive
-        if (now - lastNotifyTime >= 500 || item!.progress === 100) {
+        if (shouldUpdateUI || now - lastNotifyTime >= 500 || item!.progress === 100) {
           lastNotifyTime = now;
           this.notifyListeners();
           this.persistDownloadsThrottled();
@@ -1131,17 +1222,29 @@ class DownloadManager {
         this.persistDownloadsImmediately();
       })
       .catch(async (err: any) => {
-        // Fallback: If direct Google Video CDN download failed, only attempt proxy if a local or remote engine is online!
-        if (isGoogleVideo && targetDownloadUrl === directUrl) {
+        // Fallback: Bidirectional fallback between chunked proxy and direct Google Video CDN
+        if (isGoogleVideo) {
           try {
-            const isEngineUp = await youTubeService.pingEngine(1000);
-            if (isEngineUp) {
-              const base = youTubeService.getActiveBaseUrl();
-              const proxyFallbackUrl = `${base}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}`;
-              console.log('[DownloadService] Direct download failed, attempting proxy fallback via active engine:', proxyFallbackUrl);
+            const isUsingProxy = targetDownloadUrl.includes('/yt/proxy-stream');
+            let fallbackUrl = directUrl;
+            let fallbackHeaders = directHeaders;
 
-              const retryTask = new DownloadTask(proxyFallbackUrl, targetFile, {
+            if (!isUsingProxy) {
+              const isEngineUp = await youTubeService.pingEngine(800);
+              if (isEngineUp) {
+                const base = youTubeService.getActiveBaseUrl();
+                fallbackUrl = `${base}/yt/proxy-stream?url=${encodeURIComponent(directUrl)}`;
+                fallbackHeaders = undefined;
+              }
+            }
+
+            if (fallbackUrl !== targetDownloadUrl) {
+              console.log('[DownloadService] Primary download stream failed, attempting fallback URL:', fallbackUrl);
+              const retrySpeedTracker = new DownloadSpeedTracker(item!.downloadedBytes);
+
+              const retryTask = new DownloadTask(fallbackUrl, targetFile, {
                 sessionType: 'foreground',
+                headers: fallbackHeaders,
                 onProgress: (progressData: DownloadProgress) => {
                   if (item!.status !== 'downloading') return;
                   const downloaded = progressData.bytesWritten;
@@ -1151,8 +1254,12 @@ class DownloadManager {
                     item!.progress = Math.min(Math.round((item!.downloadedBytes / item!.totalBytes) * 100), 100);
                   }
                   item!.statusDetail = `Downloading (${item!.progress}%)`;
+                  const { speedBps, shouldUpdateUI } = retrySpeedTracker.update(downloaded);
+                  item!.speedBps = speedBps;
+                  item!.speedFormatted = this.formatSpeed(speedBps);
+
                   const nowRetry = Date.now();
-                  if (nowRetry - lastNotifyTime >= 500 || item!.progress === 100) {
+                  if (shouldUpdateUI || nowRetry - lastNotifyTime >= 500 || item!.progress === 100) {
                     lastNotifyTime = nowRetry;
                     this.notifyListeners();
                     this.persistDownloadsThrottled();
@@ -1179,7 +1286,7 @@ class DownloadManager {
               }
             }
           } catch (retryErr) {
-            console.warn('[DownloadService] Proxy retry also failed:', retryErr);
+            console.warn('[DownloadService] Alternate download fallback also failed:', retryErr);
           }
         }
 
@@ -1258,8 +1365,8 @@ class DownloadManager {
       if (item.pauseState && item.pauseState.resumeData) {
         try {
           console.log(`[DownloadService] Resuming from native savable state for ${item.title}`);
-          let lastProgressBytes = item.downloadedBytes;
-          let lastProgressTime = Date.now();
+          const resumeSpeedTracker = new DownloadSpeedTracker(item.downloadedBytes);
+          let lastResumeNotifyTime = 0;
 
           const restoredTask = DownloadTask.fromSavable(item.pauseState, {
             onProgress: (progressData: DownloadProgress) => {
@@ -1281,22 +1388,18 @@ class DownloadManager {
                 }
               }
 
-              const timeDiff = Math.max((now - lastProgressTime) / 1000, 0.1);
-              const bytesDiff = Math.max(downloaded - lastProgressBytes, 0);
-              const speed = Math.round(bytesDiff / timeDiff);
-              lastProgressBytes = downloaded;
-              lastProgressTime = now;
-
-              if (speed > 0) {
-                item.speedBps = speed;
-                item.speedFormatted = this.formatSpeed(speed);
-              }
+              const { speedBps, shouldUpdateUI } = resumeSpeedTracker.update(downloaded);
+              item.speedBps = speedBps;
+              item.speedFormatted = this.formatSpeed(speedBps);
 
               item.statusDetail = `Downloading (${item.progress}%)`;
               item.health = getDownloadHealth(28, item.speedBps, true).health;
 
-              this.notifyListeners();
-              this.persistDownloadsThrottled();
+              if (shouldUpdateUI || now - lastResumeNotifyTime >= 500 || item.progress === 100) {
+                lastResumeNotifyTime = now;
+                this.notifyListeners();
+                this.persistDownloadsThrottled();
+              }
             },
           });
 
