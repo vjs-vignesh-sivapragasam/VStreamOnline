@@ -26,6 +26,7 @@ import { tmdbService, TmdbDetails } from '@/services/TmdbService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '@/contexts/ThemeContext';
 
 function getActiveStreamingClient(): StreamingServerClient {
   try {
@@ -129,6 +130,8 @@ const TorrentDetails = () => {
   const isPortrait = height > width;
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView | null>(null);
+  const { theme } = useTheme();
+
 
   // ── TMDB State ──
   const [tmdbData, setTmdbData] = useState<TmdbDetails | null>(null);
@@ -408,7 +411,8 @@ const TorrentDetails = () => {
       const files = await client.getTorrentFiles(item.infoHash);
 
       if (files.length <= 1) {
-        navigateToPlayer(item, files.length === 1 ? files[0].id : 0);
+        const fileIdx = files.length === 1 ? files[0].id : 0;
+        navigateToPlayer(item, fileIdx);
       } else {
         setPendingItem(item);
         setPickerFiles(files);
@@ -417,7 +421,6 @@ const TorrentDetails = () => {
       }
     } catch (e) {
       console.warn('[TorrentDetails] Could not fetch file list from streaming server:', e);
-      showAlert('Error', 'Could not load file list. Starting default stream.');
       navigateToPlayer(item, 0);
     } finally {
       setLoadingItem(null);
@@ -535,7 +538,11 @@ const TorrentDetails = () => {
           <TouchableOpacity
             style={[
               styles.bookmarkButton,
-              inMyList && styles.bookmarkButtonActive,
+              inMyList && {
+                backgroundColor: theme.primary + '33',
+                borderWidth: 1,
+                borderColor: theme.primary,
+              },
               { top: Math.max(insets.top + 6, 20) },
             ]}
             onPress={handleToggleMyList}
@@ -545,7 +552,7 @@ const TorrentDetails = () => {
             <Ionicons
               name={inMyList ? 'bookmark' : 'bookmark-outline'}
               size={22}
-              color={inMyList ? '#535aff' : '#ffffff'}
+              color={inMyList ? theme.primary : '#ffffff'}
             />
           </TouchableOpacity>
         </View>
@@ -574,7 +581,7 @@ const TorrentDetails = () => {
             disabled={isLoadingVariants}
           >
             {isLoadingVariants ? (
-              <ActivityIndicator size="small" color="#000000" style={{ marginRight: 8 }} />
+              <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 8 }} />
             ) : (
               <Ionicons name="play" size={20} color="#000000" style={{ marginRight: 8 }} />
             )}
@@ -587,7 +594,11 @@ const TorrentDetails = () => {
           <TouchableOpacity
             style={[
               styles.circularActionBtn,
-              hasActiveDownload && styles.circularActionBtnActive,
+              hasActiveDownload && {
+                backgroundColor: theme.primary + '25',
+                borderColor: theme.primary,
+                borderWidth: 1,
+              },
               hasCompletedDownload && styles.circularActionBtnCompleted,
             ]}
             onPress={handleDownloadPress}
@@ -595,7 +606,7 @@ const TorrentDetails = () => {
             disabled={isLoadingVariants}
           >
             {hasActiveDownload ? (
-              <Ionicons name="arrow-down" size={22} color="#535aff" />
+              <Ionicons name="arrow-down" size={22} color={theme.primary} />
             ) : hasCompletedDownload ? (
               <Ionicons name="checkmark-circle" size={22} color="#00e676" />
             ) : (
@@ -1021,21 +1032,21 @@ const TorrentDetails = () => {
                     <View style={styles.qualityPlayActionWrap}>
                       {isWatchMode ? (
                         isLoadingStream ? (
-                          <ActivityIndicator size="small" color="#535aff" />
+                          <ActivityIndicator size="small" color={theme.primary} />
                         ) : isItemCompleted ? (
                           <View style={[styles.qualityPlayBtn, styles.qualityPlayBtnOffline]}>
                             <Ionicons name="play" size={12} color="#00e676" />
                             <Text style={[styles.qualityPlayBtnText, { color: '#00e676' }]}>Play</Text>
                           </View>
                         ) : (
-                          <View style={styles.qualityPlayBtn}>
-                            <Ionicons name="play" size={12} color="#ffffff" />
-                            <Text style={styles.qualityPlayBtnText}>Watch</Text>
+                          <View style={[styles.qualityPlayBtn, { backgroundColor: theme.primary }]}>
+                            <Ionicons name="play" size={12} color="#000000" />
+                            <Text style={[styles.qualityPlayBtnText, { color: '#000000' }]}>Watch</Text>
                           </View>
                         )
                       ) : (
                         isStartingDownload ? (
-                          <ActivityIndicator size="small" color="#535aff" />
+                          <ActivityIndicator size="small" color={theme.primary} />
                         ) : isItemCompleted ? (
                           <View style={[styles.qualityPlayBtn, styles.qualityDownloadBtnCompleted]}>
                             <Ionicons name="checkmark-circle" size={13} color="#00e676" />
@@ -1052,9 +1063,9 @@ const TorrentDetails = () => {
                             <Text style={[styles.qualityPlayBtnText, { color: '#7b82ff' }]}>Resume</Text>
                           </View>
                         ) : (
-                          <View style={[styles.qualityPlayBtn, styles.qualityDownloadBtn]}>
-                            <Ionicons name="download-outline" size={13} color="#ffffff" />
-                            <Text style={styles.qualityPlayBtnText}>Download</Text>
+                          <View style={[styles.qualityPlayBtn, { backgroundColor: theme.primary }]}>
+                            <Ionicons name="download-outline" size={13} color="#000000" />
+                            <Text style={[styles.qualityPlayBtnText, { color: '#000000' }]}>Download</Text>
                           </View>
                         )
                       )}
@@ -1104,7 +1115,7 @@ const TorrentDetails = () => {
                     onPress={() => handleFilePick(file)}
                   >
                     <View style={styles.fileIconWrap}>
-                      <Ionicons name="document-outline" size={22} color="#535aff" />
+                      <Ionicons name="document-outline" size={22} color={theme.primary} />
                     </View>
                     <View style={styles.fileBody}>
                       <Text style={styles.fileName} numberOfLines={2}>
@@ -1131,7 +1142,7 @@ const TorrentDetails = () => {
                       }}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <Ionicons name="arrow-down-circle-outline" size={24} color="#535aff" />
+                      <Ionicons name="arrow-down-circle-outline" size={24} color={theme.primary} />
                     </TouchableOpacity>
 
                     <Ionicons name="play-circle-outline" size={26} color="#ffffff" />
@@ -1142,6 +1153,8 @@ const TorrentDetails = () => {
           </Pressable>
         </Pressable>
       </Modal>
+
+
     </>
   );
 };

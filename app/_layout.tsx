@@ -1,7 +1,7 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, Theme, ThemeProvider } from 'expo-router/react-navigation';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from 'react';
 import 'react-native-reanimated';
@@ -16,6 +16,7 @@ import { YouTubeWatchOverlay } from '@/components/youtube/YouTubeWatchOverlay';
 import { AppThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { VplexCinematicSplash } from '@/components/splash/VplexCinematicSplash';
 import { StremioKeepAliveKeeper } from '@/components/StremioKeepAliveKeeper';
+import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -109,6 +110,17 @@ const InvisibleHeaderBackground = () => (
 
 function RootLayoutNav() {
   const { theme: appTheme } = useTheme();
+  const router = useRouter();
+
+  useEffect(() => {
+    tamilMVNotificationService.initialize().catch((err: any) => {
+      console.log('[TamilMVNotificationService] Init error:', err?.message || err);
+    });
+    const cleanupResponse = tamilMVNotificationService.setupResponseListener(router);
+    return () => {
+      cleanupResponse();
+    };
+  }, [router]);
 
   const GlassDarkTheme: Theme = {
     ...DarkTheme,

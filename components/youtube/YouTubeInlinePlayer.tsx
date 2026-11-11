@@ -105,7 +105,8 @@ const INJECTED_BEFORE_CONTENT_JS = `
         '#player, .player-container, #player-container-id, .html5-video-player, .html5-video-container { background: #000000 !important; background-color: #000000 !important; width: 100vw !important; height: 100vh !important; position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; margin: 0 !important; padding: 0 !important; } ' +
         'video, video.video-stream, video.html5-main-video { width: 100vw !important; height: 100vh !important; max-width: none !important; max-height: none !important; position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; object-fit: cover !important; object-position: center center !important; } ' +
         'ytm-reel-shelf-renderer, ytd-reel-shelf-renderer, ytm-shorts-lockup-view-model, ytd-shorts-lockup-view-model, [reel-shelf], .reel-shelf, [class*="shorts-shelf"], [class*="reel-shelf"], ytm-pivot-bar-renderer, ytm-pivot-bar, .pivot-bar, [role="tablist"], ytm-mobile-bottom-bar-renderer, #pivot-bar, .ytm-pivot-bar-renderer, [class*="pivot-bar"], [class*="pivot_bar"], [class*="bottom-nav"], [class*="bottom_bar"], [class*="bottomNavigation"], ytm-navigation-bar, ytm-bottom-sheet-layout, .ytm-bottom-sheet-renderer, ytm-browse[tab-identifier], ytm-mobile-topbar-renderer, ytm-header, header, .mobile-topbar-header, .ghost-header { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; overflow: hidden !important; opacity: 0 !important; pointer-events: none !important; margin: 0 !important; padding: 0 !important; } ' +
-        'yt-progress-bar, .watch-page-progress-bar, .ytPlayerProgressBarHost, .ytPlayerProgressBarHostLowerPlayer, .ytPlayerProgressBarHostBottomEdge, .ytPlayerProgressBarHostBottomInset, .ytPlayerProgressBarHostCustom, .ytPlayerProgressBarDragContainer, .ytPlayerProgressBarProgressBar, .ytPlayerProgressBarProgressBarInset, .ytChapteredProgressBarHost, .ytFocusedChapterProgressBarLineHost, .ytProgressBarLineHost, .yt-progress-bar-line, .yt-chaptered-progress-bar-line, .yt-focused-chapter-progress-bar-line, .ytp-chrome-bottom, .ytp-progress-bar-container, .ytp-progress-bar, .ytp-progress-list, .ytp-play-progress, .ytp-load-progress, .ytp-hover-progress, [class*="ytPlayerProgressBarHost"], [class*="ytPlayerProgressBarProgressBar"], [class*="ytPlayerProgressBarDragContainer"], [class*="watch-page-progress-bar"], .ytm-progress-bar, ytm-progress-bar, .thin-scrubber { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; overflow: hidden !important; opacity: 0 !important; pointer-events: none !important; margin: 0 !important; padding: 0 !important; border: none !important; }';
+        'yt-progress-bar, .watch-page-progress-bar, .ytPlayerProgressBarHost, .ytPlayerProgressBarHostLowerPlayer, .ytPlayerProgressBarHostBottomEdge, .ytPlayerProgressBarHostBottomInset, .ytPlayerProgressBarHostCustom, .ytPlayerProgressBarDragContainer, .ytPlayerProgressBarProgressBar, .ytPlayerProgressBarProgressBarInset, .ytChapteredProgressBarHost, .ytFocusedChapterProgressBarLineHost, .ytProgressBarLineHost, .yt-progress-bar-line, .yt-chaptered-progress-bar-line, .yt-focused-chapter-progress-bar-line, .ytp-chrome-bottom, .ytp-progress-bar-container, .ytp-progress-bar, .ytp-progress-list, .ytp-play-progress, .ytp-load-progress, .ytp-hover-progress, [class*="ytPlayerProgressBarHost"], [class*="ytPlayerProgressBarProgressBar"], [class*="ytPlayerProgressBarDragContainer"], [class*="watch-page-progress-bar"], .ytm-progress-bar, ytm-progress-bar, .thin-scrubber { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; overflow: hidden !important; opacity: 0 !important; pointer-events: none !important; margin: 0 !important; padding: 0 !important; border: none !important; } ' +
+        '.video-ads, .ytp-ad-module, .ytp-ad-player-overlay, .ytp-ad-skip-button-container, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-text, .videoAdUiSkipButton, .ytm-ad-skip-button, [class*="ad-skip"], [class*="skip-ad"], button[class*="skip-button"], .ytp-ad-preview-container, .ytp-ad-text { display: flex !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; z-index: 2147483647 !important; }';
       var style = document.createElement('style');
       style.type = 'text/css';
       style.appendChild(document.createTextNode(css));
@@ -528,6 +529,29 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         height: 0 !important;
         width: 0 !important;
         overflow: hidden !important;
+      }
+
+      /* 9b. Explicitly ensure YouTube Ad elements and Skip Ad buttons are always visible and clickable */
+      .video-ads,
+      .ytp-ad-module,
+      .ytp-ad-player-overlay,
+      .ytp-ad-skip-button-container,
+      .ytp-ad-skip-button,
+      .ytp-ad-skip-button-modern,
+      .ytp-skip-ad-button,
+      .ytp-ad-skip-button-text,
+      .videoAdUiSkipButton,
+      .ytm-ad-skip-button,
+      [class*="ad-skip"],
+      [class*="skip-ad"],
+      button[class*="skip-button"],
+      .ytp-ad-preview-container,
+      .ytp-ad-text {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        z-index: 2147483647 !important;
       }
 
       /* 10. Clean container frame without page scrolling */
@@ -1195,9 +1219,118 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
       attachVideoListeners();
       setupBackgroundKeepAlive();
       syncControlsVisibility();
+      runAdSkipper();
+    }
+
+    function runAdSkipper() {
+      var moviePlayer = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+      var isAd = false;
+      if (moviePlayer) {
+        if (typeof moviePlayer.getProgressState === 'function') {
+          try {
+            var ps = moviePlayer.getProgressState();
+            if (ps && ps.isAd) isAd = true;
+          } catch(e) {}
+        }
+        var cls = moviePlayer.className || '';
+        if (cls.indexOf('ad-showing') !== -1 || cls.indexOf('ad-interrupting') !== -1) {
+          isAd = true;
+        }
+      }
+
+      var adSelectors = [
+        '.ad-showing',
+        '.ad-interrupting',
+        '.video-ads',
+        '.ytp-ad-player-overlay',
+        '.ytp-ad-player-overlay-layout',
+        '.ytp-ad-module',
+        'ytm-promoted-sparkles-web-renderer',
+        'ytm-ad-preview-renderer',
+        '.ytm-ad-player-overlay',
+        '.ad-container',
+        '.ad-display',
+        '[class*="ad-interrupting"]',
+        '[class*="ad-showing"]',
+        '[class*="video-ads"]',
+        '[class*="ytp-ad-"]',
+        '[class*="ytm-ad-"]'
+      ];
+      if (!isAd) {
+        for (var i = 0; i < adSelectors.length; i++) {
+          if (document.querySelector(adSelectors[i])) {
+            isAd = true;
+            break;
+          }
+        }
+      }
+
+      var skipSelectors = [
+        '.ytp-ad-skip-button',
+        '.ytp-ad-skip-button-modern',
+        '.ytp-skip-ad-button',
+        '.ytp-ad-skip-button-text',
+        '.videoAdUiSkipButton',
+        '.ytm-ad-skip-button',
+        'button.ytp-ad-skip-button',
+        'button[class*="skip-button"]',
+        '[class*="ad-skip"] button',
+        '[class*="skip-ad"]',
+        '.ytp-ad-skip-button-slot',
+        'button[id*="skip"]',
+        '.ytp-ad-text[class*="skip"]',
+        '[aria-label*="Skip ad" i]',
+        '[aria-label*="Skip" i]'
+      ];
+
+      var foundSkip = false;
+      for (var s = 0; s < skipSelectors.length; s++) {
+        var btns = document.querySelectorAll(skipSelectors[s]);
+        for (var b = 0; b < btns.length; b++) {
+          var btn = btns[b];
+          if (btn) {
+            foundSkip = true;
+            isAd = true;
+            try {
+              btn.click();
+              btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            } catch(e) {}
+          }
+        }
+      }
+
+      if (window._agyLastAdState !== isAd) {
+        window._agyLastAdState = isAd;
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'AD_STATE',
+            isAd: isAd,
+            canSkip: foundSkip
+          }));
+        }
+      }
+
+      if (isAd) {
+        var video = document.querySelector('video');
+        if (video && !video.paused && video.duration && !isNaN(video.duration)) {
+          try {
+            video.muted = true;
+            video.playbackRate = 16.0;
+            if (video.currentTime < video.duration - 0.2) {
+              video.currentTime = video.duration - 0.1;
+            }
+          } catch(e) {}
+        }
+      } else {
+        var v = document.querySelector('video');
+        if (v && v.playbackRate > 2.0) {
+          v.playbackRate = window.__userDesiredPlaybackRate || 1.0;
+        }
+      }
     }
 
     forceFullVideoAndPlay();
+    setInterval(runAdSkipper, 250);
 
     var count = 0;
     var timer = setInterval(function() {
@@ -1210,6 +1343,7 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
     var observer = new MutationObserver(function() {
       injectStyle();
       forceFullVideoAndPlay();
+      runAdSkipper();
       
       var unmute = document.querySelector('.ytp-unmute, .ytp-unmute-inner, [class*="unmute"]');
       if (unmute) {
@@ -1314,10 +1448,63 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [useKSPlayer, setUseKSPlayer] = useState(false);
   const [useWebFallback, setUseWebFallback] = useState(false);
   const [showPosterShield, setShowPosterShield] = useState(true);
+  const [isAdPlaying, setIsAdPlaying] = useState<boolean>(false);
 
   useEffect(() => {
     setShowPosterShield(true);
+    setIsAdPlaying(false);
   }, [videoId]);
+
+  const handleManualSkipAd = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    const skipJs = `
+      (function() {
+        var skipSelectors = [
+          '.ytp-ad-skip-button',
+          '.ytp-ad-skip-button-modern',
+          '.ytp-skip-ad-button',
+          '.ytp-ad-skip-button-text',
+          '.videoAdUiSkipButton',
+          '.ytm-ad-skip-button',
+          'button.ytp-ad-skip-button',
+          'button[class*="skip-button"]',
+          '[class*="ad-skip"] button',
+          '[class*="skip-ad"]',
+          '.ytp-ad-skip-button-slot',
+          'button[id*="skip"]',
+          '.ytp-ad-text[class*="skip"]',
+          '[aria-label*="Skip ad" i]',
+          '[aria-label*="Skip" i]',
+          '[title*="Skip ad" i]',
+          '[title*="Skip" i]'
+        ];
+        for (var i = 0; i < skipSelectors.length; i++) {
+          var btns = document.querySelectorAll(skipSelectors[i]);
+          for (var j = 0; j < btns.length; j++) {
+            try {
+              btns[j].click();
+              btns[j].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            } catch(e) {}
+          }
+        }
+        var v = document.querySelector('video');
+        if (v && v.duration) {
+          try {
+            v.muted = false;
+            v.playbackRate = window.__userDesiredPlaybackRate || 1.0;
+            v.currentTime = v.duration;
+          } catch(e) {}
+        }
+      })();
+      true;
+    `;
+    webViewRef.current?.injectJavaScript(skipJs);
+    setTimeout(() => {
+      setIsAdPlaying(false);
+    }, 400);
+  }, []);
 
 
 
@@ -2036,6 +2223,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 if (data.streamUrl && videoId) {
                   youTubeService.setLiveStreamInfo(videoId, data.streamUrl, data.duration);
                 }
+              } else if (data.type === 'AD_STATE') {
+                setIsAdPlaying(!!data.isAd);
               } else if (data.type === 'PLAY_STATE') {
                 if (typeof data.isPlaying === 'boolean') {
                   setWebIsPlaying(data.isPlaying);
@@ -2354,7 +2543,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 onFullScreen();
               }}
               activeOpacity={0.7}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
               <Ionicons name={isFullScreen ? 'contract-outline' : 'scan-outline'} size={20} color="#ffffff" />
             </TouchableOpacity>
@@ -2412,7 +2601,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       {/* ONLY ONE Single Progress Bar at Bottom Position (Active in both Web & Native) */}
       {actualDuration > 0 && (
         showControls ? (
-          <View style={[styles.bottomScrubberContainer, isFullScreen && styles.bottomScrubberContainerFullScreen]}>
+          <View
+            style={[styles.bottomScrubberContainer, isFullScreen && styles.bottomScrubberContainerFullScreen]}
+            pointerEvents="box-none"
+          >
             {/* Real YouTube Floating Scrub Time Tooltip Bubble */}
             {isSliding && (
               <View
@@ -2436,12 +2628,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               maximumValue={1}
               value={progressPct}
               slideOnTap={true}
-              trackHeight={isFullScreen ? 4.5 : 3.5}
-              thumbSize={isFullScreen ? 18 : 14}
+              trackHeight={isFullScreen ? 4 : 3}
+              thumbSize={isFullScreen ? 16 : 13}
               thumbTintColor="#ff0000"
               minimumTrackTintColor="#ff0000"
               maximumTrackTintColor="rgba(255, 255, 255, 0.28)"
-              hitSlop={{ top: 22, bottom: 22, left: 10, right: 10 }}
+              hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
               onSlidingStart={handleSlidingStart}
               onValueChange={handleSlidingChange}
               onSlidingComplete={handleSlidingComplete}
@@ -2490,6 +2682,22 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
           <Ionicons name="arrow-back" size={22} color="#ffffff" />
+        </TouchableOpacity>
+      )}
+
+      {/* Native Floating "Skip Ad" Button (Active in both Inline & Fullscreen, always topmost) */}
+      {isAdPlaying && (
+        <TouchableOpacity
+          style={[
+            styles.nativeSkipAdBtn,
+            isFullScreen ? styles.nativeSkipAdBtnFullScreen : styles.nativeSkipAdBtnInline,
+          ]}
+          onPress={handleManualSkipAd}
+          activeOpacity={0.8}
+          hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+        >
+          <Text style={styles.nativeSkipAdText}>Skip Ad</Text>
+          <Ionicons name="play-skip-forward" size={15} color="#ffffff" style={{ marginLeft: 6 }} />
         </TouchableOpacity>
       )}
 
@@ -3301,11 +3509,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
+    zIndex: 1010,
+    elevation: 35,
   },
   bottomMetaRowFullScreen: {
-    marginBottom: 8,
-    paddingHorizontal: 8,
+    marginBottom: 26,
+    paddingHorizontal: 12,
+    zIndex: 1010,
+    elevation: 35,
   },
   bottomLeftPills: {
     flexDirection: 'row',
@@ -3340,30 +3552,67 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   fullscreenButton: {
-    padding: 6,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 1020,
+    elevation: 40,
   },
   bottomScrubberContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 32,
+    height: 22,
     justifyContent: 'center',
-    zIndex: 1002,
+    zIndex: 1000,
   },
   bottomScrubberContainerFullScreen: {
-    bottom: 50,
-    height: 42,
-    paddingHorizontal: 20,
-    zIndex: 1002,
+    bottom: 8,
+    height: 26,
+    paddingHorizontal: 16,
+    zIndex: 1000,
   },
   bottomSlider: {
     width: '100%',
-    height: 36,
+    height: 24,
+  },
+  nativeSkipAdBtn: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(18, 18, 18, 0.94)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderRadius: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    elevation: 100,
+    zIndex: 99999,
+  },
+  nativeSkipAdBtnInline: {
+    bottom: 38,
+    right: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  nativeSkipAdBtnFullScreen: {
+    bottom: 64,
+    right: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  nativeSkipAdText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   scrubTooltipBubble: {
     position: 'absolute',

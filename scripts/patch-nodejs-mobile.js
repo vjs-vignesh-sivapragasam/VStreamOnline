@@ -149,3 +149,33 @@ if (fs.existsSync(createUpdatesPath)) {
     console.log('✅ Injected toReversed polyfill into expo-updates createUpdatesResources.js');
   }
 }
+
+// ── 5. Patch expo-router useScreens.js (prevent TypeError: Cannot read property 'ErrorBoundary' of undefined) ──
+const expoRouterUseScreensPath = path.join(
+  rootDir,
+  'node_modules',
+  'expo-router',
+  'build',
+  'useScreens.js'
+);
+
+if (fs.existsSync(expoRouterUseScreensPath)) {
+  let content = fs.readFileSync(expoRouterUseScreensPath, 'utf8');
+  const target = `function fromImport(value, { ErrorBoundary, SuspenseFallback, unstable_settings, ...component }) {`;
+  const replacement = `function fromImport(value, rawImport) {
+    if (!rawImport) {
+        if (__DEV__) {
+            console.error(\`[expo-router] Failed to load route module for "\${value?.contextKey}" (route: "\${value?.route}"). Module is undefined.\`);
+        }
+        return { default: EmptyRoute_1.EmptyRoute, SuspenseFallback: undefined };
+    }
+    const { ErrorBoundary, SuspenseFallback, unstable_settings, ...component } = rawImport;`;
+
+  if (content.includes(target)) {
+    content = content.replace(target, replacement);
+    fs.writeFileSync(expoRouterUseScreensPath, content, 'utf8');
+    console.log('✅ Patched expo-router useScreens.js to guard against undefined route imports');
+  } else if (content.includes('function fromImport(value, rawImport)')) {
+    console.log('ℹ️ expo-router useScreens.js already patched');
+  }
+}

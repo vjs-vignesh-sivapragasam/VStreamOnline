@@ -50,7 +50,8 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     onPlaybackError,
     streams = [],
     currentStreamIndex = 0,
-    onStreamChange
+    onStreamChange,
+    torrentBufferProgress,
 }) => {
     if (!isKSPlayerAvailable()) {
         const { MediaPlayer: NativePlayer } = require('@/components/nativeplayer');
@@ -66,6 +67,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 streams={streams}
                 currentStreamIndex={currentStreamIndex}
                 onStreamChange={onStreamChange}
+                torrentBufferProgress={torrentBufferProgress}
             />
         );
     }
@@ -104,6 +106,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [videoError, setVideoError] = useState<string | null>(null);
     const [availableAudioTracks, setAvailableAudioTracks] = useState<any[]>([]);
     const [availableTextTracks, setAvailableTextTracks] = useState<any[]>([]);
+    const [playbackBufferPct, setPlaybackBufferPct] = useState<number | undefined>(undefined);
+    const effectiveBufferPct = (playbackBufferPct !== undefined && playbackBufferPct > 0)
+        ? playbackBufferPct
+        : torrentBufferProgress;
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     // NEW: current subtitle line text from the native player
@@ -250,6 +256,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const handleProgress = useCallback((data: any) => {
         if (!playerState.isDragging && !isSeeking.current) {
             playerState.setCurrentTime(data.currentTime);
+        }
+        if (data.duration > 0 && data.playableDuration !== undefined) {
+            const pct = Math.min(Math.round((data.playableDuration / data.duration) * 100), 100);
+            setPlaybackBufferPct(pct);
         }
     }, [playerState]);
 
@@ -572,9 +582,15 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 artwork={artwork}
                 isBuffering={playerState.isBuffering}
                 hasStartedPlaying={playerState.isReady}
+                bufferProgress={effectiveBufferPct}
             />
 
-            <WaitingLobby hasStartedPlaying={playerState.isReady} opacity={bufferOpacity} />
+            <WaitingLobby
+                hasStartedPlaying={playerState.isReady}
+                isBuffering={playerState.isBuffering}
+                opacity={bufferOpacity}
+                bufferProgress={effectiveBufferPct}
+            />
 
             {/* SUBTITLE DISPLAY – rendered over video, below controls */}
             <SubtitleDisplay

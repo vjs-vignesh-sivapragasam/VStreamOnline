@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, Pressable, View, ScrollView, Modal, TouchableOpacity } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { StatusBar, Text } from '@/components/Themed';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
+import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
 
 const SettingsScreen = () => {
   const router = useRouter();
@@ -24,6 +25,7 @@ const SettingsScreen = () => {
   const [themeModalVisible, setThemeModalVisible] = useState(false);
   const [storageModalVisible, setStorageModalVisible] = useState(false);
   const [dataStats, setDataStats] = useState<DataConsumptionStats | null>(null);
+  const [notifEnabled, setNotifEnabled] = useState(false);
 
   const loadDataStats = useCallback(async () => {
     try {
@@ -34,12 +36,33 @@ const SettingsScreen = () => {
     }
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      setNotifEnabled(tamilMVNotificationService.isNotificationsEnabled());
+      loadDataStats();
+    }, [loadDataStats])
+  );
+
   useEffect(() => {
     loadDataStats();
   }, [loadDataStats, storageModalVisible]);
 
-  const sourceList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'Connection', route: '/settings/tamilmv', icon: 'globe-outline' },
+  const sourceList: {
+    title: string;
+    route: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    subtitle?: string;
+    badgeText?: string;
+    badgeColor?: string;
+  }[] = [
+    {
+      title: 'Connection & Movie Alerts',
+      route: '/settings/tamilmv',
+      icon: 'globe-outline',
+      subtitle: 'Mirror domain & push notification alerts',
+      badgeText: notifEnabled ? 'Alerts On' : undefined,
+      badgeColor: '#30d158',
+    },
   ];
 
   const integrationList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -194,6 +217,9 @@ const SettingsScreen = () => {
                   key={index}
                   title={item.title}
                   icon={item.icon}
+                  subtitle={item.subtitle}
+                  badgeText={item.badgeText}
+                  badgeColor={item.badgeColor}
                   onPress={() => onSettingsItemPress(item)}
                   isFirst={index === 0}
                   isLast={index === sourceList.length - 1}

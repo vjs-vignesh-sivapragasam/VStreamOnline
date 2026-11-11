@@ -1,7 +1,7 @@
 import { getPlatformSpecificPlayers, Players } from "@/utils/MediaPlayer";
 import { showAlert } from "@/utils/platform";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { ServerConfig } from "@/components/ServerConfig";
@@ -11,6 +11,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { TorrentItem } from "@/hooks/useTamilMv";
 import { StorageKeys, storageService } from "@/utils/StorageService";
 import { isKSPlayerAvailable } from "@/components/ksplayer/KSPlayerView";
+import { useTheme } from "@/contexts/ThemeContext";
 
 interface UpdateProgressEvent {
   progress: number;
@@ -83,6 +84,8 @@ const MediaPlayerScreen: React.FC = () => {
   );
   const [streams, setStreams] = useState<Stream[]>([]);
   const [currentStreamIndex, setCurrentStreamIndex] = useState<number>(0);
+  const { theme } = useTheme();
+  const [streamBufferProgress, setStreamBufferProgress] = useState<number>(0);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [isLoadingStream, setIsLoadingStream] = useState<boolean>(true);
   const [streamError, setStreamError] = useState<string>('');
@@ -96,6 +99,30 @@ const MediaPlayerScreen: React.FC = () => {
 
   const [currentPlayerType, setCurrentPlayerType] = useState<"native" | "ksplayer">("native");
   const [hasTriedNative, setHasTriedNative] = useState(false);
+  const torrentStatsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const cleanupTorrentStats = () => {
+    if (torrentStatsIntervalRef.current) {
+      clearInterval(torrentStatsIntervalRef.current);
+      torrentStatsIntervalRef.current = null;
+    }
+  };
+
+  const startTorrentStatsPolling = (client: StreamingServerClient, infoHash: string, fileIdx: number) => {
+    cleanupTorrentStats();
+    torrentStatsIntervalRef.current = setInterval(async () => {
+      try {
+        const stats = await client.getTorrentStats(infoHash, fileIdx);
+        if (stats) {
+          const rawProgress = stats.streamProgress !== undefined && stats.streamProgress >= 0
+            ? stats.streamProgress * 100
+            : (stats.downloaded && stats.streamLen ? (stats.downloaded / stats.streamLen) * 100 : 0);
+          const pct = Math.min(Math.max(Math.round(rawProgress), 0), 100);
+          setStreamBufferProgress(pct);
+        }
+      } catch {}
+    }, 600);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +182,7 @@ const MediaPlayerScreen: React.FC = () => {
     init();
 
     return () => {
+      cleanupTorrentStats();
       (async () => {
         try {
           await ScreenOrientation.unlockAsync();
@@ -271,9 +299,11 @@ const MediaPlayerScreen: React.FC = () => {
     if (!list[streamIndex]) return;
 
     setIsLoadingStream(true);
+    setStreamBufferProgress(0);
     setStreamError('');
     setCurrentPlayerType("native");
     setHasTriedNative(false);
+    cleanupTorrentStats();
 
     const stream = list[streamIndex];
     const infoHash = getInfoHashFromStream(stream);
@@ -289,7 +319,11 @@ const MediaPlayerScreen: React.FC = () => {
         const server = servers.find(s => s.serverId === sid);
         if (!server) throw new Error('Stremio server not found.');
         setIsTorrent(true);
-        finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, stream.fileIdx ?? -1, stremioClient ?? undefined);
+        const client = stremioClient ?? new StreamingServerClient(server.serverUrl);
+        finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, stream.fileIdx ?? -1, client);
+
+        const fileIdx = stream.fileIdx ?? 0;
+        startTorrentStatsPolling(client, infoHash!, fileIdx);
       } else {
         if (!stream.url) return;
         setIsTorrent(false);
@@ -299,6 +333,7 @@ const MediaPlayerScreen: React.FC = () => {
       setVideoUrl(finalUrl);
       setIsLoadingStream(false);
     } catch (error) {
+      cleanupTorrentStats();
       setStreamError(error instanceof Error ? error.message : 'Failed to load stream');
       setIsLoadingStream(false);
     }
@@ -414,6 +449,7 @@ const MediaPlayerScreen: React.FC = () => {
   // ── Playback callbacks ───────────────────────────────────────────────────────
 
   const handleBack = async (event: BackEvent): Promise<void> => {
+    cleanupTorrentStats();
     saveToWatchHistory(Math.floor(event.progress));
     router.back();
   };
@@ -450,9 +486,9 @@ const MediaPlayerScreen: React.FC = () => {
         <View style={styles.loadingContainer}>
           {artwork ? <Image source={{ uri: artwork }} style={styles.backdropImage} /> : null}
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color="#535aff" />
+            <ActivityIndicator size="large" color={theme.primary} />
             <Text style={styles.loadingText}>
-              {streamError || 'Loading stream. Please wait...'}
+              {streamError || `Buffering: ${streamBufferProgress}%`}
             </Text>
           </View>
         </View>
@@ -475,6 +511,7 @@ const MediaPlayerScreen: React.FC = () => {
         streams={streams}
         currentStreamIndex={currentStreamIndex}
         onStreamChange={handleStreamChange}
+        torrentBufferProgress={streamBufferProgress}
       />
     </GestureHandlerRootView>
   );

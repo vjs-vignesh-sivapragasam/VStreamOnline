@@ -9,6 +9,10 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Switch,
+  Alert,
+  Linking,
+  AppState,
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -28,7 +32,9 @@ import {
   autoDetectTamilMVDomain,
   pingTamilMV,
   PingResult,
+  Language,
 } from '@/hooks/useTamilMv';
+import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
 
 const PRESET_DOMAINS = [
   'https://www.1tamilmv.solar',
@@ -52,6 +58,142 @@ const TamilMvSettingsScreen: React.FC = () => {
   const [detectProgressText, setDetectProgressText] = useState<string>('');
   const [pingResult, setPingResult] = useState<PingResult | null>(null);
   const [lastPingedUrl, setLastPingedUrl] = useState<string | null>(null);
+
+  // Push Notification States
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() =>
+    tamilMVNotificationService.isNotificationsEnabled()
+  );
+  const [hasNotificationPermission, setHasNotificationPermission] = useState<boolean>(false);
+  const [selectedLanguages, setSelectedLanguages] = useState<Language[]>(() =>
+    tamilMVNotificationService.getSelectedLanguages()
+  );
+  const [isSendingTest, setIsSendingTest] = useState<boolean>(false);
+  const [isCheckingNewMovies, setIsCheckingNewMovies] = useState<boolean>(false);
+  const [checkStatusText, setCheckStatusText] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkPerm = async () => {
+      const granted = await tamilMVNotificationService.checkPermissions();
+      setHasNotificationPermission(granted);
+    };
+
+    checkPerm();
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        checkPerm();
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, []);
+
+  const handleToggleNotifications = async (val: boolean) => {
+    await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (val && !tamilMVNotificationService.isSupported()) {
+      showAlert(
+        'Notifications Unavailable',
+        'Native notification modules are not included in this build (e.g. Expo Go or stale binary). Please rebuild your native app (npx expo run:android) to enable movie alerts.'
+      );
+      setNotificationsEnabled(false);
+      return;
+    }
+    if (val && !hasNotificationPermission) {
+      const granted = await tamilMVNotificationService.requestPermissions();
+      setHasNotificationPermission(granted);
+      if (!granted) {
+        Alert.alert(
+          'Permission Needed',
+          'Notification permission is disabled. Would you like to open Settings to enable it?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() }
+          ]
+        );
+        return;
+      }
+    }
+    setNotificationsEnabled(val);
+    tamilMVNotificationService.setNotificationsEnabled(val);
+  };
+
+  const handleToggleLanguage = async (lang: Language) => {
+    await triggerHaptic();
+    let updated: Language[];
+    if (selectedLanguages.includes(lang)) {
+      if (selectedLanguages.length === 1) {
+        showAlert('Language Selection', 'Please keep at least one language selected for alerts.');
+        return;
+      }
+      updated = selectedLanguages.filter((l) => l !== lang);
+    } else {
+      updated = [...selectedLanguages, lang];
+    }
+    setSelectedLanguages(updated);
+    tamilMVNotificationService.setSelectedLanguages(updated);
+  };
+
+  const handleSendTestNotification = async () => {
+    await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!tamilMVNotificationService.isSupported()) {
+      showAlert(
+        'Notifications Unavailable',
+        'Native notification modules are not included in this build. Please rebuild your app binary (npx expo run:android) to test notifications.'
+      );
+      return;
+    }
+    setIsSendingTest(true);
+    try {
+      const success = await tamilMVNotificationService.sendTestNotification();
+      if (success) {
+        setHasNotificationPermission(true);
+        showAlert('Notification Sent! 🎬', 'Check your device notification banner to preview the movie alert.');
+      } else {
+        const hasPerm = await tamilMVNotificationService.checkPermissions();
+        setHasNotificationPermission(hasPerm);
+        if (!hasPerm) {
+          Alert.alert(
+            'Permission Denied',
+            'Notification permission is disabled on your device. Please open Settings to enable notifications.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() }
+            ]
+          );
+        } else {
+          showAlert('Notification Error', 'Could not schedule notification. Please check your notification settings.');
+        }
+      }
+    } catch (err: any) {
+      showAlert('Error', err?.message || 'Failed to dispatch test notification.');
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
+
+  const handleCheckNow = async () => {
+    await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    setIsCheckingNewMovies(true);
+    setCheckStatusText('Checking TamilMV for new releases...');
+    try {
+      const res = await tamilMVNotificationService.checkForNewMovies(true);
+      if (res.newCount > 0) {
+        setCheckStatusText(`Dispatched ${res.newCount} new movie alert(s)!`);
+        showAlert(
+          'New Releases Found! 🎬',
+          `Dispatched ${res.newCount} alert(s): ${res.movies.slice(0, 3).join(', ')}`
+        );
+      } else {
+        setCheckStatusText('All caught up! No new releases detected right now.');
+      }
+    } catch (err: any) {
+      setCheckStatusText('Check failed: ' + (err?.message || 'Network error'));
+    } finally {
+      setIsCheckingNewMovies(false);
+    }
+  };
 
   const triggerHaptic = useCallback(async (type: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
     if (await isHapticsSupported()) {
@@ -516,6 +658,193 @@ const TamilMvSettingsScreen: React.FC = () => {
             </View>
           </View>
 
+          {/* 4. New Movie Push Notifications Card */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <View style={styles.headerTitleWrap}>
+                <Ionicons name="notifications" size={15} color={theme.primary} style={{ marginRight: 6 }} />
+                <Text style={styles.cardSectionTitle}>NEW MOVIE PUSH NOTIFICATIONS</Text>
+              </View>
+              <View
+                style={[
+                  styles.statusBadge,
+                  {
+                    backgroundColor: notificationsEnabled ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)',
+                    borderColor: notificationsEnabled ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 69, 58, 0.3)',
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.statusDot,
+                    { backgroundColor: notificationsEnabled ? '#30d158' : '#ff453a' },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.statusText,
+                    { color: notificationsEnabled ? '#30d158' : '#ff453a' },
+                  ]}
+                >
+                  {notificationsEnabled ? 'Active' : 'Off'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Toggle row */}
+            <View style={styles.notifToggleRow}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={styles.notifToggleTitle}>Push Alerts for New Releases</Text>
+                <Text style={styles.notifToggleDesc}>
+                  {notificationsEnabled
+                    ? 'Periodically scans TamilMV and sends instant alerts when fresh movies or series are added'
+                    : 'Turn on to receive instant push alerts when new movies are uploaded'}
+                </Text>
+              </View>
+              <Switch
+                value={notificationsEnabled}
+                onValueChange={handleToggleNotifications}
+                trackColor={{ false: '#3A3A3C', true: theme.primary }}
+                thumbColor="#FFFFFF"
+                ios_backgroundColor="#3A3A3C"
+              />
+            </View>
+
+            {notificationsEnabled && (
+              <>
+                <View style={styles.detailDivider} />
+
+                {/* Permission status row */}
+                <View style={styles.notifPermissionRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                    <Ionicons
+                      name={hasNotificationPermission ? 'checkmark-circle' : 'warning-outline'}
+                      size={16}
+                      color={hasNotificationPermission ? '#30d158' : '#ff9500'}
+                    />
+                    <Text style={styles.notifPermissionText}>
+                      {hasNotificationPermission
+                        ? 'Device Permission: Granted'
+                        : 'Device Permission: Action Required'}
+                    </Text>
+                  </View>
+                  {!hasNotificationPermission && (
+                    <TouchableOpacity
+                      style={[styles.grantBtn, { backgroundColor: theme.primary }]}
+                      onPress={async () => {
+                        const granted = await tamilMVNotificationService.requestPermissions();
+                        setHasNotificationPermission(granted);
+                        if (granted) {
+                          showAlert('Permission Granted!', 'You will now receive new movie alerts.');
+                        } else {
+                          Alert.alert(
+                            'Permission Required',
+                            'Notification permission is disabled on your device. Would you like to open Settings to enable it?',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Open Settings', onPress: () => Linking.openSettings() }
+                            ]
+                          );
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.grantBtnText}>Grant</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Language filters */}
+                <Text style={styles.notifSectionTitle}>Alert Languages</Text>
+                <View style={styles.notifLangsContainer}>
+                  {[
+                    { id: 'tamil' as Language, label: 'Tamil' },
+                    { id: 'telugu' as Language, label: 'Telugu' },
+                    { id: 'hindi' as Language, label: 'Hindi' },
+                    { id: 'malayalam' as Language, label: 'Malayalam' },
+                    { id: 'kannada' as Language, label: 'Kannada' },
+                    { id: 'english' as Language, label: 'English' },
+                  ].map((lang) => {
+                    const isSelected = selectedLanguages.includes(lang.id);
+                    return (
+                      <TouchableOpacity
+                        key={lang.id}
+                        style={[
+                          styles.notifLangChip,
+                          isSelected && {
+                            backgroundColor: theme.primary + '20',
+                            borderColor: theme.primary,
+                          },
+                        ]}
+                        onPress={() => handleToggleLanguage(lang.id)}
+                        activeOpacity={0.7}
+                      >
+                        {isSelected && (
+                          <Ionicons
+                            name="checkmark"
+                            size={14}
+                            color={theme.primary}
+                            style={{ marginRight: 4 }}
+                          />
+                        )}
+                        <Text
+                          style={[
+                            styles.notifLangChipText,
+                            isSelected && { color: theme.primary, fontWeight: '700' },
+                          ]}
+                        >
+                          {lang.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Action buttons */}
+                <View style={styles.notifButtonsRow}>
+                  <TouchableOpacity
+                    style={styles.notifActionBtn}
+                    onPress={handleSendTestNotification}
+                    disabled={isSendingTest}
+                    activeOpacity={0.7}
+                  >
+                    {isSendingTest ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <>
+                        <Ionicons name="paper-plane-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                        <Text style={styles.notifActionBtnText}>Send Test</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.notifActionBtn,
+                      { backgroundColor: theme.primary + '18', borderColor: theme.primary + '44' },
+                    ]}
+                    onPress={handleCheckNow}
+                    disabled={isCheckingNewMovies}
+                    activeOpacity={0.7}
+                  >
+                    {isCheckingNewMovies ? (
+                      <ActivityIndicator size="small" color={theme.primary} />
+                    ) : (
+                      <>
+                        <Ionicons name="refresh-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
+                        <Text style={[styles.notifActionBtnText, { color: theme.primary }]}>Check Now</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {checkStatusText ? (
+                  <Text style={styles.checkStatusMessage}>{checkStatusText}</Text>
+                ) : null}
+              </>
+            )}
+          </View>
+
           <BottomSpacing space={60} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -825,6 +1154,118 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  notifToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  notifToggleTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  notifToggleDesc: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  notifPermissionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1a1a1a',
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  notifPermissionText: {
+    fontSize: 12,
+    color: '#E5E5EA',
+    fontWeight: '500',
+  },
+  grantBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  grantBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  notifSectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginBottom: 8,
+  },
+  notifLangsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  notifLangChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  notifLangChipText: {
+    fontSize: 13,
+    color: '#8E8E93',
+    fontWeight: '500',
+  },
+  notifButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  notifActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: '#1a1a1a',
+  },
+  notifActionBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  checkStatusMessage: {
+    fontSize: 12,
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 5,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
 

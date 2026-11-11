@@ -62,7 +62,8 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     onPlaybackError,
     streams = [],
     currentStreamIndex = 0,
-    onStreamChange
+    onStreamChange,
+    torrentBufferProgress,
 }) => {
     const videoRef = useRef<VideoRef>(null);
     const shouldAutoHideControls = useRef(true);
@@ -102,6 +103,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [videoError, setVideoError] = useState<string | null>(null);
     const [availableAudioTracks, setAvailableAudioTracks] = useState<any[]>([]);
     const [availableTextTracks, setAvailableTextTracks] = useState<any[]>([]);
+    const [playbackBufferPct, setPlaybackBufferPct] = useState<number | undefined>(undefined);
+    const effectiveBufferPct = (playbackBufferPct !== undefined && playbackBufferPct > 0)
+        ? playbackBufferPct
+        : torrentBufferProgress;
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -240,6 +245,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const handleProgress = useCallback((data: OnProgressData) => {
         if (!playerState.isDragging && !isSeeking.current) {
             playerState.setCurrentTime(data.currentTime);
+        }
+        if (data.seekableDuration > 0 && data.playableDuration !== undefined) {
+            const pct = Math.min(Math.round((data.playableDuration / data.seekableDuration) * 100), 100);
+            setPlaybackBufferPct(pct);
         }
     }, [playerState]);
 
@@ -597,9 +606,15 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 artwork={artwork}
                 isBuffering={playerState.isBuffering}
                 hasStartedPlaying={playerState.isReady}
+                bufferProgress={effectiveBufferPct}
             />
 
-            <WaitingLobby hasStartedPlaying={playerState.isReady} opacity={bufferOpacity} />
+            <WaitingLobby
+                hasStartedPlaying={playerState.isReady}
+                isBuffering={playerState.isBuffering}
+                opacity={bufferOpacity}
+                bufferProgress={effectiveBufferPct}
+            />
 
             <TouchableOpacity style={styles.touchArea} activeOpacity={1} onPress={handleOverlayPress} />
 

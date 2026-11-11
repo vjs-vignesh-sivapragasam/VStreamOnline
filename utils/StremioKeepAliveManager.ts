@@ -24,11 +24,11 @@ export function isBackgroundAudioKeepAliveEnabled(): boolean {
   try {
     const val = storageService.getItem(StorageKeys.STREMIO_BACKGROUND_KEEP_ALIVE_KEY);
     if (val === undefined || val === null) {
-      return true; // Default ON to keep Stremio server alive on lock screen
+      return false; // Default OFF
     }
     return val === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 

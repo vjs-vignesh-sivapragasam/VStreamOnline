@@ -53,7 +53,8 @@
       "permissions": [
         "android.permission.VIBRATE",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -63,6 +64,13 @@
     },
     "plugins": [
       "./plugins/withKSPlayer",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#FFB800"
+        }
+      ],
       [
         "react-native-video",
         {
