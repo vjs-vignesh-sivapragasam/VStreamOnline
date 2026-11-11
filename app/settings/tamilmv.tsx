@@ -92,10 +92,11 @@ const TamilMvSettingsScreen: React.FC = () => {
 
   const handleToggleNotifications = async (val: boolean) => {
     await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    const rebuildCmd = Platform.OS === 'ios' ? 'npx expo run:ios' : 'npx expo run:android';
     if (val && !tamilMVNotificationService.isSupported()) {
       showAlert(
         'Notifications Unavailable',
-        'Native notification modules are not included in this build (e.g. Expo Go or stale binary). Please rebuild your native app (npx expo run:android) to enable movie alerts.'
+        `Native notification modules are not included in this build (e.g. Expo Go or stale binary). Please rebuild your native app (${rebuildCmd}) to enable movie alerts.`
       );
       setNotificationsEnabled(false);
       return;
@@ -137,19 +138,31 @@ const TamilMvSettingsScreen: React.FC = () => {
 
   const handleSendTestNotification = async () => {
     await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    const rebuildCmd = Platform.OS === 'ios' ? 'npx expo run:ios' : 'npx expo run:android';
     if (!tamilMVNotificationService.isSupported()) {
       showAlert(
         'Notifications Unavailable',
-        'Native notification modules are not included in this build. Please rebuild your app binary (npx expo run:android) to test notifications.'
+        `Native notification modules are not included in this build. Please rebuild your app binary (${rebuildCmd}) to test notifications.`
       );
       return;
     }
     setIsSendingTest(true);
+    setCheckStatusText('Dispatching test notification...');
     try {
       const success = await tamilMVNotificationService.sendTestNotification();
       if (success) {
         setHasNotificationPermission(true);
-        showAlert('Notification Sent! 🎬', 'Check your device notification banner to preview the movie alert.');
+        if (await isHapticsSupported()) {
+          try {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          } catch {}
+        }
+        setCheckStatusText('🎬 Test notification dispatched! Check your notification banner above.');
+        // On iOS, avoid popping a modal Alert immediately because an active UIAlertController
+        // suppresses or hides the foreground notification banner animation from Dynamic Island/notch.
+        if (Platform.OS !== 'ios') {
+          showAlert('Notification Sent! 🎬', 'Check your device notification banner to preview the movie alert.');
+        }
       } else {
         const hasPerm = await tamilMVNotificationService.checkPermissions();
         setHasNotificationPermission(hasPerm);

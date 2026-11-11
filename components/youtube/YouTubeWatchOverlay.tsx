@@ -129,6 +129,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
     playbackError,
     togglePlay,
     pauseVideo,
+    resumeVideo,
     minimize,
     expand,
     close,
@@ -649,6 +650,8 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             topInset={isFullScreen ? 0 : insets.top}
             isFullScreen={isFullScreen}
             onTogglePlay={togglePlay}
+            onPlay={resumeVideo}
+            onPause={pauseVideo}
             onMinimize={isFullScreen ? () => handleFullScreen(false) : handleGoBackPrevious}
             onSwipeExit={isFullScreen ? () => handleFullScreen(false) : handleGoBackPrevious}
             onFullScreen={() => handleFullScreen()}

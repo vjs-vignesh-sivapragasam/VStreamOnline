@@ -26,7 +26,7 @@ import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksp
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
-import { youTubeService } from '@/services/YouTubeService';
+import { youTubeService, SponsorSegment } from '@/services/YouTubeService';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 
 const { width } = Dimensions.get('window');
@@ -64,6 +64,8 @@ export interface YouTubeInlinePlayerProps {
   isPipEnabled?: boolean;
   onTogglePip?: (enabled: boolean) => void;
   onTogglePlay: () => void;
+  onPlay?: () => void;
+  onPause?: () => void;
   onMinimize: () => void;
   onFullScreen: () => void;
   onSeek: (seconds: number) => void;
@@ -100,13 +102,119 @@ function formatRemainingTime(currentSec: number, durationSec: number): string {
 const INJECTED_BEFORE_CONTENT_JS = `
   (function() {
     try {
+      // 0. SCRIPT-LEVEL AD STRIPPER & INTERCEPTOR
+      // Deletes ad breaks, pre-rolls, mid-rolls and tracking from player responses before player initialization
+      function sanitizePlayerResponse(obj) {
+        if (!obj || typeof obj !== 'object') return obj;
+        try {
+          if (obj.adPlacements) delete obj.adPlacements;
+          if (obj.adSlots) delete obj.adSlots;
+          if (obj.playerAds) delete obj.playerAds;
+          if (obj.adBreakHeartbeatParams) delete obj.adBreakHeartbeatParams;
+          if (obj.playbackTracking) {
+            delete obj.playbackTracking.videostatsPlaybackUrl;
+            delete obj.playbackTracking.videostatsDelayplayUrl;
+            delete obj.playbackTracking.videostatsWatchtimeUrl;
+          }
+        } catch(e) {}
+        return obj;
+      }
+
+      // 0a. Intercept inline ytInitialPlayerResponse
+      var _rawYtInitialPlayerResponse = window.ytInitialPlayerResponse;
+      Object.defineProperty(window, 'ytInitialPlayerResponse', {
+        get: function() { return _rawYtInitialPlayerResponse; },
+        set: function(val) {
+          _rawYtInitialPlayerResponse = sanitizePlayerResponse(val);
+        },
+        configurable: true
+      });
+      if (_rawYtInitialPlayerResponse) {
+        _rawYtInitialPlayerResponse = sanitizePlayerResponse(_rawYtInitialPlayerResponse);
+      }
+
+      // 0b. Intercept window.fetch for /youtubei/v1/player and Google Ad endpoints
+      if (window.fetch) {
+        var _origFetch = window.fetch;
+        window.fetch = function() {
+          var urlArg = arguments[0];
+          var urlStr = (typeof urlArg === 'string') ? urlArg : (urlArg && urlArg.url ? urlArg.url : '');
+          if (
+            urlStr.indexOf('/youtubei/v1/player/ad_break') !== -1 ||
+            urlStr.indexOf('/api/stats/ads') !== -1 ||
+            urlStr.indexOf('/pagead/') !== -1 ||
+            urlStr.indexOf('doubleclick.net') !== -1 ||
+            urlStr.indexOf('googleads.g.doubleclick.net') !== -1 ||
+            urlStr.indexOf('googlesyndication.com') !== -1
+          ) {
+            return Promise.resolve(new Response(JSON.stringify({}), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' }
+            }));
+          }
+
+          var fetchPromise = _origFetch.apply(this, arguments);
+
+          if (urlStr.indexOf('/youtubei/v1/player') !== -1) {
+            return fetchPromise.then(function(res) {
+              try {
+                var clone = res.clone();
+                return clone.json().then(function(data) {
+                  data = sanitizePlayerResponse(data);
+                  return new Response(JSON.stringify(data), {
+                    status: res.status,
+                    statusText: res.statusText,
+                    headers: res.headers
+                  });
+                }).catch(function() {
+                  return res;
+                });
+              } catch(e) {
+                return res;
+              }
+            });
+          }
+
+          return fetchPromise;
+        };
+      }
+
+      // 0c. Intercept XMLHttpRequest for ad endpoints
+      if (window.XMLHttpRequest) {
+        var _origOpen = window.XMLHttpRequest.prototype.open;
+        var _origSend = window.XMLHttpRequest.prototype.send;
+        window.XMLHttpRequest.prototype.open = function(method, url) {
+          this._agyReqUrl = (typeof url === 'string') ? url : '';
+          return _origOpen.apply(this, arguments);
+        };
+        window.XMLHttpRequest.prototype.send = function() {
+          var reqUrl = this._agyReqUrl || '';
+          if (
+            reqUrl.indexOf('/youtubei/v1/player/ad_break') !== -1 ||
+            reqUrl.indexOf('/api/stats/ads') !== -1 ||
+            reqUrl.indexOf('/pagead/') !== -1 ||
+            reqUrl.indexOf('doubleclick.net') !== -1 ||
+            reqUrl.indexOf('googleads.g.doubleclick.net') !== -1 ||
+            reqUrl.indexOf('googlesyndication.com') !== -1
+          ) {
+            Object.defineProperty(this, 'readyState', { value: 4, writable: true });
+            Object.defineProperty(this, 'status', { value: 200, writable: true });
+            Object.defineProperty(this, 'responseText', { value: '{}', writable: true });
+            if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
+            if (typeof this.onload === 'function') this.onload();
+            return;
+          }
+          return _origSend.apply(this, arguments);
+        };
+      }
+
       // 1. Dark background + immediately hide bottom navigation bars, headers, clutters + full width progress bar styles
       var css = 'html, body { width: 100vw !important; height: 100vh !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: #000000 !important; } ' +
         '#player, .player-container, #player-container-id, .html5-video-player, .html5-video-container { background: #000000 !important; background-color: #000000 !important; width: 100vw !important; height: 100vh !important; position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; margin: 0 !important; padding: 0 !important; } ' +
         'video, video.video-stream, video.html5-main-video { width: 100vw !important; height: 100vh !important; max-width: none !important; max-height: none !important; position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; object-fit: cover !important; object-position: center center !important; } ' +
         'ytm-reel-shelf-renderer, ytd-reel-shelf-renderer, ytm-shorts-lockup-view-model, ytd-shorts-lockup-view-model, [reel-shelf], .reel-shelf, [class*="shorts-shelf"], [class*="reel-shelf"], ytm-pivot-bar-renderer, ytm-pivot-bar, .pivot-bar, [role="tablist"], ytm-mobile-bottom-bar-renderer, #pivot-bar, .ytm-pivot-bar-renderer, [class*="pivot-bar"], [class*="pivot_bar"], [class*="bottom-nav"], [class*="bottom_bar"], [class*="bottomNavigation"], ytm-navigation-bar, ytm-bottom-sheet-layout, .ytm-bottom-sheet-renderer, ytm-browse[tab-identifier], ytm-mobile-topbar-renderer, ytm-header, header, .mobile-topbar-header, .ghost-header { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; overflow: hidden !important; opacity: 0 !important; pointer-events: none !important; margin: 0 !important; padding: 0 !important; } ' +
         'yt-progress-bar, .watch-page-progress-bar, .ytPlayerProgressBarHost, .ytPlayerProgressBarHostLowerPlayer, .ytPlayerProgressBarHostBottomEdge, .ytPlayerProgressBarHostBottomInset, .ytPlayerProgressBarHostCustom, .ytPlayerProgressBarDragContainer, .ytPlayerProgressBarProgressBar, .ytPlayerProgressBarProgressBarInset, .ytChapteredProgressBarHost, .ytFocusedChapterProgressBarLineHost, .ytProgressBarLineHost, .yt-progress-bar-line, .yt-chaptered-progress-bar-line, .yt-focused-chapter-progress-bar-line, .ytp-chrome-bottom, .ytp-progress-bar-container, .ytp-progress-bar, .ytp-progress-list, .ytp-play-progress, .ytp-load-progress, .ytp-hover-progress, [class*="ytPlayerProgressBarHost"], [class*="ytPlayerProgressBarProgressBar"], [class*="ytPlayerProgressBarDragContainer"], [class*="watch-page-progress-bar"], .ytm-progress-bar, ytm-progress-bar, .thin-scrubber { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; overflow: hidden !important; opacity: 0 !important; pointer-events: none !important; margin: 0 !important; padding: 0 !important; border: none !important; } ' +
-        '.video-ads, .ytp-ad-module, .ytp-ad-player-overlay, .ytp-ad-skip-button-container, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-text, .videoAdUiSkipButton, .ytm-ad-skip-button, [class*="ad-skip"], [class*="skip-ad"], button[class*="skip-button"], .ytp-ad-preview-container, .ytp-ad-text { display: flex !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; z-index: 2147483647 !important; }';
+        '.ytp-ad-overlay-container, .ytp-ad-message-container, .ytp-ad-action-interstitial, .ytp-ad-progress-list, ytm-promoted-sparkles-web-renderer, ytm-promoted-video-renderer, ytm-ad-preview-renderer, ytm-companion-ad-renderer, .ad-container, .ad-div, .ytp-ad-overlay-slot, .ytp-ad-image-overlay, .ytp-ad-player-overlay-flyout-cta, [class*="companion-ad"], [class*="ad-overlay"], .ytp-suggested-action, .ytp-ad-preview-container, .ytp-ad-text { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; height: 0 !important; width: 0 !important; overflow: hidden !important; }';
       var style = document.createElement('style');
       style.type = 'text/css';
       style.appendChild(document.createTextNode(css));
@@ -153,13 +261,20 @@ const INJECTED_BEFORE_CONTENT_JS = `
   true;
 `;
 
-function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'cover', pipEnabled: boolean = true): string {
+function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'cover', pipEnabled: boolean = true, isLooping: boolean = false): string {
   const topOffset = 10;
   const initialFitCss = fitMode === 'contain' ? 'contain' : fitMode === 'stretch' ? 'fill' : 'cover';
   return `
   (function() {
     window.__agyDesiredFitMode = '${fitMode || 'cover'}';
     window.__agyPipEnabled = ${pipEnabled};
+    window.__agyLoopEnabled = ${isLooping};
+
+    if (window.__agyCleanPlayerInitialized) {
+      if (typeof injectStyle === 'function') injectStyle();
+      return;
+    }
+    window.__agyCleanPlayerInitialized = true;
     var cleanCss = \`
       /* 1. Hide entire YouTube mobile top header (logo, search, 3 dots, open app) */
       ytm-mobile-topbar-renderer,
@@ -531,27 +646,32 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         overflow: hidden !important;
       }
 
-      /* 9b. Explicitly ensure YouTube Ad elements and Skip Ad buttons are always visible and clickable */
-      .video-ads,
-      .ytp-ad-module,
-      .ytp-ad-player-overlay,
-      .ytp-ad-skip-button-container,
-      .ytp-ad-skip-button,
-      .ytp-ad-skip-button-modern,
-      .ytp-skip-ad-button,
-      .ytp-ad-skip-button-text,
-      .videoAdUiSkipButton,
-      .ytm-ad-skip-button,
-      [class*="ad-skip"],
-      [class*="skip-ad"],
-      button[class*="skip-button"],
+      /* 9b. Hide all YouTube Ad banners, companion cards, interstitials, and promoted items */
+      .ytp-ad-overlay-container,
+      .ytp-ad-message-container,
+      .ytp-ad-action-interstitial,
+      .ytp-ad-progress-list,
+      ytm-promoted-sparkles-web-renderer,
+      ytm-promoted-video-renderer,
+      ytm-ad-preview-renderer,
+      ytm-companion-ad-renderer,
+      .ad-container,
+      .ad-div,
+      .ytp-ad-overlay-slot,
+      .ytp-ad-image-overlay,
+      .ytp-ad-player-overlay-flyout-cta,
+      [class*="companion-ad"],
+      [class*="ad-overlay"],
+      .ytp-suggested-action,
       .ytp-ad-preview-container,
       .ytp-ad-text {
-        display: flex !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-        z-index: 2147483647 !important;
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        height: 0 !important;
+        width: 0 !important;
+        overflow: hidden !important;
       }
 
       /* 10. Clean container frame without page scrolling */
@@ -998,6 +1118,10 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         }
 
         v.addEventListener('timeupdate', function() {
+          if (isAdActive()) {
+            runAdSkipper();
+            return;
+          }
           updatePositionState();
           if (window.ReactNativeWebView && typeof v.currentTime === 'number') {
             window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -1038,9 +1162,16 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         });
 
         v.addEventListener('ended', function() {
-          if (v.duration < 120 || v.closest('ytm-reel-video-renderer, ytd-reel-video-renderer, ytm-shorts-player')) {
+          if (v.loop || window.__agyLoopEnabled || v.closest('ytm-reel-video-renderer, ytd-reel-video-renderer, ytm-shorts-player')) {
             v.currentTime = 0;
             v.play().catch(function() {});
+          } else {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'PLAY_STATE',
+                isPlaying: false
+              }));
+            }
           }
         });
 
@@ -1133,7 +1264,7 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
       var allVids = document.querySelectorAll('video');
       allVids.forEach(function(v) {
         v.muted = false;
-        v.loop = true;
+        v.loop = window.__agyLoopEnabled || false;
         v.style.setProperty('position', 'absolute', 'important');
         v.style.setProperty('top', '0px', 'important');
         v.style.setProperty('left', '0px', 'important');
@@ -1200,7 +1331,8 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
           if (typeof player.setPlaybackQuality === 'function') {
             player.setPlaybackQuality('large');
           }
-          if (typeof player.playVideo === 'function' && !window._agyUserPaused) {
+          if (typeof player.playVideo === 'function' && !window._agyUserPaused && !window._agyInitialPlayDone) {
+            window._agyInitialPlayDone = true;
             player.playVideo();
           }
         } catch(e) {}
@@ -1212,7 +1344,8 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
       }
 
       var playBtn = document.querySelector('.ytp-large-play-button, .player-control-play-pause-icon');
-      if (playBtn && document.querySelector('video') && document.querySelector('video').paused && !window._agyUserPaused) {
+      if (playBtn && document.querySelector('video') && document.querySelector('video').paused && !window._agyUserPaused && !window._agyInitialPlayDone) {
+        window._agyInitialPlayDone = true;
         try { playBtn.click(); } catch(e) {}
       }
 
@@ -1222,48 +1355,26 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
       runAdSkipper();
     }
 
-    function runAdSkipper() {
+    function isAdActive() {
       var moviePlayer = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
-      var isAd = false;
       if (moviePlayer) {
+        var cls = (typeof moviePlayer.className === 'string') ? moviePlayer.className : '';
+        if (cls.indexOf('ad-showing') !== -1 || cls.indexOf('ad-interrupting') !== -1) {
+          return true;
+        }
         if (typeof moviePlayer.getProgressState === 'function') {
           try {
             var ps = moviePlayer.getProgressState();
-            if (ps && ps.isAd) isAd = true;
+            if (ps && ps.isAd) return true;
           } catch(e) {}
         }
-        var cls = moviePlayer.className || '';
-        if (cls.indexOf('ad-showing') !== -1 || cls.indexOf('ad-interrupting') !== -1) {
-          isAd = true;
-        }
       }
+      var activeAd = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay, ytm-ad-preview-renderer');
+      return !!activeAd;
+    }
 
-      var adSelectors = [
-        '.ad-showing',
-        '.ad-interrupting',
-        '.video-ads',
-        '.ytp-ad-player-overlay',
-        '.ytp-ad-player-overlay-layout',
-        '.ytp-ad-module',
-        'ytm-promoted-sparkles-web-renderer',
-        'ytm-ad-preview-renderer',
-        '.ytm-ad-player-overlay',
-        '.ad-container',
-        '.ad-display',
-        '[class*="ad-interrupting"]',
-        '[class*="ad-showing"]',
-        '[class*="video-ads"]',
-        '[class*="ytp-ad-"]',
-        '[class*="ytm-ad-"]'
-      ];
-      if (!isAd) {
-        for (var i = 0; i < adSelectors.length; i++) {
-          if (document.querySelector(adSelectors[i])) {
-            isAd = true;
-            break;
-          }
-        }
-      }
+    function runAdSkipper() {
+      var isAd = isAdActive();
 
       var skipSelectors = [
         '.ytp-ad-skip-button',
@@ -1288,15 +1399,23 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         var btns = document.querySelectorAll(skipSelectors[s]);
         for (var b = 0; b < btns.length; b++) {
           var btn = btns[b];
-          if (btn) {
+          if (btn && (btn.offsetWidth > 0 || btn.offsetHeight > 0 || (btn.getClientRects && btn.getClientRects().length > 0))) {
             foundSkip = true;
-            isAd = true;
             try {
               btn.click();
               btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
             } catch(e) {}
           }
         }
+      }
+
+      if (!isAd && foundSkip) {
+        isAd = true;
+      }
+
+      var moviePlayer = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+      if (isAd && moviePlayer && typeof moviePlayer.skipAd === 'function') {
+        try { moviePlayer.skipAd(); } catch(e) {}
       }
 
       if (window._agyLastAdState !== isAd) {
@@ -1310,82 +1429,68 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         }
       }
 
-      if (isAd) {
-        var video = document.querySelector('video');
-        if (video && !video.paused && video.duration && !isNaN(video.duration)) {
+      var video = document.querySelector('video');
+      if (video) {
+        if (isAd) {
           try {
             video.muted = true;
-            video.playbackRate = 16.0;
-            if (video.currentTime < video.duration - 0.2) {
-              video.currentTime = video.duration - 0.1;
+            try { video.playbackRate = 16.0; } catch(err) {
+              try { video.playbackRate = 2.0; } catch(err2) {}
+            }
+            if (!isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
+              video.currentTime = video.duration;
             }
           } catch(e) {}
-        }
-      } else {
-        var v = document.querySelector('video');
-        if (v && v.playbackRate > 2.0) {
-          v.playbackRate = window.__userDesiredPlaybackRate || 1.0;
+        } else {
+          if (video.playbackRate > 2.0) {
+            video.playbackRate = window.__userDesiredPlaybackRate || 1.0;
+          }
+          if (video.muted && !window._agyUserMuted) {
+            video.muted = false;
+          }
         }
       }
     }
 
     forceFullVideoAndPlay();
-    setInterval(runAdSkipper, 250);
+    setInterval(runAdSkipper, 150);
 
     var count = 0;
-    var timer = setInterval(function() {
+    var initTimer = setInterval(function() {
       count++;
-      injectStyle();
       forceFullVideoAndPlay();
-      if (count > 25) clearInterval(timer);
-    }, 200);
+      if (count > 8) clearInterval(initTimer);
+    }, 300);
 
+    var mutationTimer = null;
     var observer = new MutationObserver(function() {
-      injectStyle();
-      forceFullVideoAndPlay();
-      runAdSkipper();
-      
-      var unmute = document.querySelector('.ytp-unmute, .ytp-unmute-inner, [class*="unmute"]');
-      if (unmute) {
-        try { unmute.click(); unmute.remove(); } catch(e) {}
-      }
-      var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar, .thin-scrubber');
-      secondaryBars.forEach(function(el) {
-        el.style.setProperty('display', 'none', 'important');
-      });
-      var allWebControls = document.querySelectorAll(
-        '.player-control-overlay, .player-control-container, .player-controls-content, ' +
-        '.player-controls-top, .player-controls-middle, .player-controls-bottom, ' +
-        '.player-control-overlay .top-row, .player-control-overlay .middle-row, .player-control-overlay .bottom-row, ' +
-        '.ytp-chrome-top, .ytp-chrome-bottom, ytm-custom-control, .ytm-time-display, ' +
-        '.ytm-fullscreen-button, .player-control-fullscreen-button, .player-control-play-pause-icon, ' +
-        '.player-control-seek-button, .ytp-settings-button, .ytm-settings-button'
-      );
-      allWebControls.forEach(function(el) {
-        el.style.setProperty('display', 'none', 'important');
-        el.style.setProperty('visibility', 'hidden', 'important');
-        el.style.setProperty('opacity', '0', 'important');
-        el.style.setProperty('pointer-events', 'none', 'important');
-      });
-      var navBars = document.querySelectorAll('ytm-pivot-bar-renderer, ytm-pivot-bar, .pivot-bar, [role="tablist"], ytm-mobile-bottom-bar-renderer, #pivot-bar, [class*="pivot-bar"], [class*="bottom-nav"], ytm-navigation-bar');
-      navBars.forEach(function(el) {
-        el.style.setProperty('display', 'none', 'important');
-        try { el.remove(); } catch(e) {}
-      });
+      if (mutationTimer) return;
+      mutationTimer = setTimeout(function() {
+        mutationTimer = null;
+        injectStyle();
+        runAdSkipper();
+        attachVideoListeners();
+        setupBackgroundKeepAlive();
 
-      attachVideoListeners();
-      setupBackgroundKeepAlive();
-
-      var popups = document.querySelectorAll(
-        '.ytp-popup, .ytp-settings-menu, ytm-bottom-sheet-renderer, ' +
-        '.ytm-menu-item-section-renderer, ytm-menu-popup-renderer, .ytp-panel-menu, ytm-menu-renderer'
-      );
-      if (popups.length > 0) {
-        popups.forEach(function(p) {
-          p.style.setProperty('display', 'none', 'important');
-          try { p.remove(); } catch(err) {}
+        var unmute = document.querySelector('.ytp-unmute, .ytp-unmute-inner, [class*="unmute"]');
+        if (unmute) {
+          try { unmute.click(); unmute.remove(); } catch(e) {}
+        }
+        var secondaryBars = document.querySelectorAll('.ytm-progress-bar, ytm-progress-bar, .player-control-overlay .progress-bar, .thin-scrubber');
+        secondaryBars.forEach(function(el) {
+          el.style.setProperty('display', 'none', 'important');
         });
-      }
+        var popups = document.querySelectorAll(
+          '.ytp-popup, .ytp-settings-menu, ytm-bottom-sheet-renderer, ' +
+          '.ytm-menu-item-section-renderer, ytm-menu-popup-renderer, .ytp-panel-menu, ytm-menu-renderer'
+        );
+        if (popups.length > 0) {
+          popups.forEach(function(p) {
+            p.style.setProperty('display', 'none', 'important');
+            try { p.remove(); } catch(err) {}
+          });
+        }
+      }, 400);
     });
     if (document.body) {
       observer.observe(document.body, { childList: true, subtree: true });
@@ -1420,6 +1525,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   isPipEnabled: propPipEnabled,
   onTogglePip,
   onTogglePlay,
+  onPlay,
+  onPause,
   onMinimize,
   onFullScreen,
   onSeek,
@@ -1450,9 +1557,19 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [showPosterShield, setShowPosterShield] = useState(true);
   const [isAdPlaying, setIsAdPlaying] = useState<boolean>(false);
 
+  const lastWebCommandPlayingRef = useRef<boolean | null>(null);
+
   useEffect(() => {
     setShowPosterShield(true);
     setIsAdPlaying(false);
+    setUseWebFallback(false);
+    setWebCurrentTime(0);
+    setWebDuration(0);
+    setWebIsPlaying(true);
+    lastWebCommandPlayingRef.current = null;
+    setSliderPos(0);
+    setIsSliding(false);
+    isSlidingRef.current = false;
   }, [videoId]);
 
   const handleManualSkipAd = useCallback(async () => {
@@ -1461,6 +1578,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     }
     const skipJs = `
       (function() {
+        var moviePlayer = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+        if (moviePlayer && typeof moviePlayer.skipAd === 'function') {
+          try { moviePlayer.skipAd(); } catch(e) {}
+        }
         var skipSelectors = [
           '.ytp-ad-skip-button',
           '.ytp-ad-skip-button-modern',
@@ -1490,11 +1611,13 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           }
         }
         var v = document.querySelector('video');
-        if (v && v.duration) {
+        if (v) {
           try {
+            if (!isNaN(v.duration) && isFinite(v.duration) && v.duration > 0) {
+              v.currentTime = v.duration;
+            }
             v.muted = false;
             v.playbackRate = window.__userDesiredPlaybackRate || 1.0;
-            v.currentTime = v.duration;
           } catch(e) {}
         }
       })();
@@ -1505,12 +1628,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       setIsAdPlaying(false);
     }, 400);
   }, []);
-
-
-
-  useEffect(() => {
-    setUseWebFallback(false);
-  }, [videoId]);
 
   // Seamless auto-fallback: if direct stream fails (e.g. 403 or engine starting), immediately play via web player
   
@@ -1647,6 +1764,56 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     }
   }, [isWebActive, effectiveDuration, onProgress, onSeek]);
 
+  // SponsorBlock integration: automatically skip creator-embedded sponsor shoutouts
+  const [sponsorSegments, setSponsorSegments] = useState<SponsorSegment[]>([]);
+  const lastSkippedSponsorEndRef = useRef<number>(-1);
+
+  useEffect(() => {
+    lastSkippedSponsorEndRef.current = -1;
+    if (!videoId) {
+      setSponsorSegments([]);
+      return;
+    }
+    let isSubscribed = true;
+    youTubeService
+      .getSponsorSegments(videoId)
+      .then((segs) => {
+        if (isSubscribed && Array.isArray(segs) && segs.length > 0) {
+          console.log(`[YouTubeInlinePlayer] 🛡️ Loaded ${segs.length} sponsor segment(s) for ${videoId}`);
+          setSponsorSegments(segs);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isSubscribed = false;
+    };
+  }, [videoId]);
+
+  const checkSponsorSkip = useCallback(
+    (cTime: number) => {
+      if (!sponsorSegments || sponsorSegments.length === 0 || isSlidingRef.current) return;
+      for (const seg of sponsorSegments) {
+        if (seg.category === 'sponsor' || seg.category === 'selfpromo' || seg.category === 'interaction') {
+          const [start, end] = seg.segment;
+          if (cTime >= start && cTime < end - 0.5) {
+            if (lastSkippedSponsorEndRef.current === end) return;
+            lastSkippedSponsorEndRef.current = end;
+            console.log(`[YouTubeInlinePlayer] ⚡ Auto-skipping sponsor segment: ${start.toFixed(1)}s -> ${end.toFixed(1)}s`);
+            if (isWebActive) {
+              handleSeekFromModal(end);
+            } else {
+              onSeek(end);
+            }
+            setFeedbackPill({ label: '⚡ Skipped Sponsor', icon: 'shield-checkmark-outline' });
+            setTimeout(() => setFeedbackPill(null), 2500);
+            break;
+          }
+        }
+      }
+    },
+    [sponsorSegments, isWebActive, handleSeekFromModal, onSeek]
+  );
+
   const handleSkipFromModal = useCallback(async (deltaSec: number) => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1662,14 +1829,29 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     if (isWebActive) {
       const nextPlaying = !effectiveIsPlaying;
       setWebIsPlaying(nextPlaying);
+      lastWebCommandPlayingRef.current = nextPlaying;
+      if (nextPlaying) {
+        if (onPlay) onPlay(); else onTogglePlay();
+      } else {
+        if (onPause) onPause(); else onTogglePlay();
+      }
       webViewRef.current?.injectJavaScript(`
         (function() {
           var v = document.querySelector('video');
-          if (v) {
-            window._agyUserPaused = ${!nextPlaying};
-            if (${nextPlaying}) {
+          var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+          window._agyUserPaused = ${!nextPlaying};
+          if (${nextPlaying}) {
+            if (p && typeof p.playVideo === 'function') {
+              try { p.playVideo(); } catch(e) {}
+            }
+            if (v && v.paused) {
               v.play().catch(function() {});
-            } else {
+            }
+          } else {
+            if (p && typeof p.pauseVideo === 'function') {
+              try { p.pauseVideo(); } catch(e) {}
+            }
+            if (v && !v.paused) {
               v.pause();
             }
           }
@@ -1677,9 +1859,13 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         true;
       `);
     } else {
-      onTogglePlay();
+      if (effectiveIsPlaying) {
+        if (onPause) onPause(); else onTogglePlay();
+      } else {
+        if (onPlay) onPlay(); else onTogglePlay();
+      }
     }
-  }, [isWebActive, effectiveIsPlaying, onTogglePlay]);
+  }, [isWebActive, effectiveIsPlaying, onPlay, onPause, onTogglePlay]);
 
   const handleTogglePlayFromModal = handleTogglePlay;
 
@@ -1819,18 +2005,25 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   // Sync React Native isPlaying state down to the web player
   useEffect(() => {
     if (isWebActive && webViewRef.current) {
+      if (lastWebCommandPlayingRef.current === isPlaying) return;
+      lastWebCommandPlayingRef.current = isPlaying;
       webViewRef.current.injectJavaScript(`
         (function() {
           try {
             var v = document.querySelector('video');
-            if (v) {
-              if (${isPlaying}) {
-                window._agyUserPaused = false;
-                if (v.paused) v.play().catch(function() {});
-              } else {
-                window._agyUserPaused = true;
-                if (!v.paused) v.pause();
+            var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+            if (${isPlaying}) {
+              window._agyUserPaused = false;
+              if (p && typeof p.playVideo === 'function') {
+                try { p.playVideo(); } catch(e) {}
               }
+              if (v && v.paused) v.play().catch(function() {});
+            } else {
+              window._agyUserPaused = true;
+              if (p && typeof p.pauseVideo === 'function') {
+                try { p.pauseVideo(); } catch(e) {}
+              }
+              if (v && !v.paused) v.pause();
             }
           } catch(e) {}
         })();
@@ -2124,8 +2317,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   );
 
   const cleanPlayerJs = useMemo(
-    () => getInjectedCleanPlayerJs(effectiveTopInset, videoResizeMode, isPipEnabled),
-    [effectiveTopInset, videoResizeMode, isPipEnabled]
+    () => getInjectedCleanPlayerJs(effectiveTopInset, videoResizeMode, isPipEnabled, effectiveLoop),
+    [effectiveTopInset, videoResizeMode, isPipEnabled, effectiveLoop]
   );
 
   return (
@@ -2164,15 +2357,20 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               : 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
           }
           onLoadProgress={({ nativeEvent }) => {
-            if (nativeEvent.progress > 0.2) {
+            if (nativeEvent.progress > 0.7) {
               webViewRef.current?.injectJavaScript(cleanPlayerJs);
             }
           }}
           onShouldStartLoadWithRequest={(request) => {
+            const url = request.url.toLowerCase();
             if (
-              request.url.startsWith('vnd.youtube') ||
-              request.url.startsWith('intent://') ||
-              request.url.startsWith('itms-appss://')
+              url.startsWith('vnd.youtube') ||
+              url.startsWith('intent://') ||
+              url.startsWith('itms-appss://') ||
+              url.includes('doubleclick.net') ||
+              url.includes('googleads.g.doubleclick.net') ||
+              url.includes('googlesyndication.com') ||
+              url.includes('/pagead/')
             ) {
               return false;
             }
@@ -2180,10 +2378,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           }}
           onLoadEnd={() => {
             setIsBuffering(false);
-            webViewRef.current?.injectJavaScript(cleanPlayerJs);
             setTimeout(() => {
               setShowPosterShield(false);
-            }, 800);
+            }, 600);
           }}
           onMessage={(event) => {
             try {
@@ -2204,12 +2401,18 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 setSettingsModalVisible(true);
               } else if (data.type === 'PROGRESS') {
                 if (!isSlidingRef.current) {
-                  if (typeof data.currentTime === 'number') {
-                    setWebCurrentTime(data.currentTime);
-                    if (data.currentTime > 0) setShowPosterShield(false);
+                  const cTime = typeof data.currentTime === 'number' ? data.currentTime : 0;
+                  const dTime = typeof data.duration === 'number' ? data.duration : 0;
+                  setWebCurrentTime(cTime);
+                  if (cTime > 0) {
+                    setShowPosterShield(false);
+                    setIsBuffering(false);
                   }
-                  if (typeof data.duration === 'number' && data.duration > 0) setWebDuration(data.duration);
-                  onProgress(data.currentTime || 0, data.duration || 0);
+                  if (dTime > 0) {
+                    setWebDuration(dTime);
+                  }
+                  checkSponsorSkip(cTime);
+                  onProgress(cTime, dTime > 0 ? dTime : effectiveDuration);
                 }
               } else if (data.type === 'SWIPE_DOWN_MINIMIZE') {
                 onMinimize();
@@ -2227,10 +2430,29 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 setIsAdPlaying(!!data.isAd);
               } else if (data.type === 'PLAY_STATE') {
                 if (typeof data.isPlaying === 'boolean') {
-                  setWebIsPlaying(data.isPlaying);
-                  if (data.isPlaying) setShowPosterShield(false);
-                  if (data.isPlaying !== isPlayingRef.current) {
-                    onTogglePlay();
+                  const newIsPlaying = data.isPlaying;
+                  setWebIsPlaying(newIsPlaying);
+                  lastWebCommandPlayingRef.current = newIsPlaying;
+                  if (newIsPlaying) {
+                    setShowPosterShield(false);
+                    setIsBuffering(false);
+                    if (!isPlayingRef.current) {
+                      isPlayingRef.current = true;
+                      if (onPlay) {
+                        onPlay();
+                      } else {
+                        onTogglePlay();
+                      }
+                    }
+                  } else {
+                    if (isPlayingRef.current) {
+                      isPlayingRef.current = false;
+                      if (onPause) {
+                        onPause();
+                      } else {
+                        onTogglePlay();
+                      }
+                    }
                   }
                 }
               }
@@ -2252,12 +2474,14 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             style={StyleSheet.absoluteFill}
             onProgress={(e) => {
               if (!isSlidingRef.current) {
+                checkSponsorSkip(e.currentTime);
                 onProgress(e.currentTime, e.duration || duration);
               }
             }}
             onLoad={(e) => {
               console.log('[YouTubeInlinePlayer] ✅ KSPlayer onLoad event fired! Duration:', e.duration, 'currentTime:', e.currentTime);
               setIsBuffering(false);
+              setShowPosterShield(false);
               onProgress(e.currentTime || 0, e.duration || duration);
             }}
             onBuffer={(e) => {
@@ -2291,12 +2515,14 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             progressUpdateInterval={250}
             onProgress={(e) => {
               if (!isSlidingRef.current) {
+                checkSponsorSkip(e.currentTime);
                 onProgress(e.currentTime, e.seekableDuration || duration);
               }
             }}
             onLoad={(e) => {
               console.log('[YouTubeInlinePlayer] ✅ react-native-video onLoad fired! Duration:', e.duration, 'currentTime:', currentTime);
               setIsBuffering(false);
+              setShowPosterShield(false);
               if (seekTarget !== null && seekTarget > 0) {
                 videoRef.current?.seek(seekTarget);
               } else if (currentTime > 0) {
@@ -2311,6 +2537,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             onEnd={() => {
               if (isLooping) {
                 videoRef.current?.seek(0);
+              } else {
+                if (onPause) onPause(); else onTogglePlay();
               }
             }}
             onError={(e) => {

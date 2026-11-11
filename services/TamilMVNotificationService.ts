@@ -17,20 +17,35 @@ function getNotifications(): any {
     return null;
   }
   try {
-    // expo-notifications' native module entry on Android/iOS uses 'ExpoPushTokenManager'.
-    // In environments where the native module is not linked (such as Expo Go or an existing
-    // dev client build that has not been recompiled yet), requiring 'expo-notifications'
-    // will throw 'Cannot find native module ExpoPushTokenManager'.
-    // By checking with requireOptionalNativeModule first, we avoid throwing during module evaluation.
+    // Check if any native notification module is available before requiring.
+    // On iOS, local notification modules are ExpoNotificationScheduler, ExpoNotificationPresenter,
+    // ExpoNotificationsHandlerModule, and ExpoNotificationPermissionsModule.
+    // On Android, ExpoPushTokenManager or ExpoNotificationScheduler are used.
     let nativeAvailable = false;
     try {
-      const pushTokenModule = requireOptionalNativeModule('ExpoPushTokenManager');
-      nativeAvailable = !!pushTokenModule;
+      nativeAvailable = !!(
+        requireOptionalNativeModule('ExpoNotificationScheduler') ||
+        requireOptionalNativeModule('ExpoNotificationPresenter') ||
+        requireOptionalNativeModule('ExpoNotificationsHandlerModule') ||
+        requireOptionalNativeModule('ExpoNotificationPermissionsModule') ||
+        requireOptionalNativeModule('ExpoPushTokenManager')
+      );
     } catch {
       nativeAvailable = false;
     }
 
     if (!nativeAvailable) {
+      // In certain bundle environments, requireOptionalNativeModule can return null
+      // even when the modules are statically linked. Fallback to a safe direct require.
+      try {
+        const directMod = require('expo-notifications');
+        if (directMod && typeof directMod.scheduleNotificationAsync === 'function') {
+          _notificationsCache = directMod;
+          return _notificationsCache;
+        }
+      } catch {
+        // Native module truly missing
+      }
       _notificationsCache = null;
       return null;
     }
@@ -44,6 +59,26 @@ function getNotifications(): any {
     _notificationsCache = null;
   }
   return _notificationsCache;
+}
+
+// Global eager registration of foreground notification presentation handler.
+// Apple requires setNotificationHandler to be configured to show banners while app is foregrounded.
+try {
+  const earlyNotif = getNotifications();
+  if (earlyNotif && typeof earlyNotif.setNotificationHandler === 'function') {
+    earlyNotif.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        priority: earlyNotif.AndroidNotificationPriority?.HIGH,
+      }),
+    });
+  }
+} catch {
+  // Safe evaluation
 }
 
 // Base notification channel and polling constants
@@ -68,19 +103,44 @@ class TamilMVNotificationService {
   }
 
   /**
+   * Evaluates permission result across Android & iOS.
+   */
+  private isAuthGranted(res: any): boolean {
+    if (!res) return false;
+    if (res.granted === true || res.status === 'granted') {
+      return true;
+    }
+    // iOS specific authorization checks
+    if (Platform.OS === 'ios' && res.ios) {
+      const iosStatus = res.ios.status;
+      // UNAuthorizationStatus: 2 = authorized, 3 = provisional, 4 = ephemeral
+      if (iosStatus === 2 || iosStatus === 3 || iosStatus === 4) {
+        return true;
+      }
+      if (
+        res.ios.allowsAlert ||
+        res.ios.allowsBadge ||
+        res.ios.allowsSound ||
+        res.ios.allowsDisplayInNotificationCenter ||
+        res.ios.allowsDisplayOnLockScreen
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Initializes notification channels, permissions, and background lifecycle listeners.
    */
   async initialize(): Promise<void> {
-    if (this.isInitialized) return;
-    this.isInitialized = true;
-
     const Notifications = getNotifications();
     if (!Notifications) {
       console.log('[TamilMVNotificationService] Native expo-notifications module not present in current binary; alerts inactive.');
       return;
     }
 
-    // 0. Configure foreground notification handler safely
+    // 0. Configure foreground notification handler safely (always re-assert)
     try {
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
@@ -95,6 +155,9 @@ class TamilMVNotificationService {
     } catch (e: any) {
       console.warn('[TamilMVNotificationService] Could not set foreground notification handler:', e?.message || e);
     }
+
+    if (this.isInitialized) return;
+    this.isInitialized = true;
 
     // 1. Setup Android high-priority notification channel
     if (Platform.OS === 'android') {
@@ -133,12 +196,7 @@ class TamilMVNotificationService {
     if (!Notifications) return false;
     try {
       const settings = await Notifications.getPermissionsAsync();
-      return (
-        settings.granted === true ||
-        settings.status === 'granted' ||
-        settings.ios?.status === Notifications.IosAuthorizationStatus?.AUTHORIZED ||
-        settings.ios?.status === Notifications.IosAuthorizationStatus?.PROVISIONAL
-      );
+      return this.isAuthGranted(settings);
     } catch {
       return false;
     }
@@ -157,10 +215,14 @@ class TamilMVNotificationService {
           allowAlert: true,
           allowBadge: true,
           allowSound: true,
+          allowDisplayInCarPlay: false,
+          allowCriticalAlerts: false,
+          provideAppNotificationSettings: false,
+          allowProvisional: false,
         },
         android: {},
       });
-      return res.status === 'granted' || res.granted === true;
+      return this.isAuthGranted(res);
     } catch (err: any) {
       console.warn('[TamilMVNotificationService] Failed to request notification permissions:', err?.message || err);
       return false;
@@ -401,6 +463,21 @@ class TamilMVNotificationService {
     }
 
     await this.initialize();
+
+    // Re-assert foreground notification presentation handler before sending test notification
+    // to guarantee iOS displays the banner drop-down while the app is in the foreground
+    try {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          priority: Notifications.AndroidNotificationPriority?.HIGH,
+        }),
+      });
+    } catch {}
 
     let hasPermission = await this.checkPermissions();
     if (!hasPermission) {
