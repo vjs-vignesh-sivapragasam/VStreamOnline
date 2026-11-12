@@ -826,7 +826,14 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
                 <MaterialIcons name="screen-lock-portrait" size={22} color="#535aff" />
               </View>
               <View style={styles.settingTextContainer}>
-                <Text style={styles.settingTitle}>Prevent Screen Lock (Keep Awake)</Text>
+                <View style={styles.settingTitleRow}>
+                  <Text style={[styles.settingTitle, { marginBottom: 0 }]}>Prevent Screen Lock (Keep Awake)</Text>
+                  {isKeepAwake ? (
+                    <View style={styles.alwaysOnBadge}>
+                      <Text style={styles.alwaysOnBadgeText}>Always On</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={styles.settingSubtitle}>
                   Keeps the screen awake while using the app to prevent auto-lock from interrupting the server.
                 </Text>
@@ -1137,6 +1144,27 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#FFFFFF',
     marginBottom: 4,
+  },
+  settingTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginBottom: 4,
+  },
+  alwaysOnBadge: {
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
+    borderColor: 'rgba(48, 209, 88, 0.4)',
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: 8,
+  },
+  alwaysOnBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#30d158',
+    letterSpacing: 0.2,
   },
   settingSubtitle: {
     fontSize: 13,

@@ -15,6 +15,7 @@ import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
 import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
+import { isScreenKeepAwakeEnabled } from '@/utils/StremioKeepAliveManager';
 
 const SettingsScreen = () => {
   const router = useRouter();
@@ -26,6 +27,7 @@ const SettingsScreen = () => {
   const [storageModalVisible, setStorageModalVisible] = useState(false);
   const [dataStats, setDataStats] = useState<DataConsumptionStats | null>(null);
   const [notifEnabled, setNotifEnabled] = useState(false);
+  const [screenKeepAwake, setScreenKeepAwake] = useState(true);
 
   const loadDataStats = useCallback(async () => {
     try {
@@ -39,6 +41,7 @@ const SettingsScreen = () => {
   useFocusEffect(
     useCallback(() => {
       setNotifEnabled(tamilMVNotificationService.isNotificationsEnabled());
+      setScreenKeepAwake(isScreenKeepAwakeEnabled());
       loadDataStats();
     }, [loadDataStats])
   );
@@ -65,8 +68,22 @@ const SettingsScreen = () => {
     },
   ];
 
-  const integrationList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'Server', route: '/settings/stremioserver', icon: 'server-outline' },
+  const integrationList: {
+    title: string;
+    route: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    subtitle?: string;
+    badgeText?: string;
+    badgeColor?: string;
+  }[] = [
+    {
+      title: 'Server',
+      route: '/settings/stremioserver',
+      icon: 'server-outline',
+      subtitle: 'Streaming server & screen keep-awake',
+      badgeText: screenKeepAwake ? 'Keep Awake On' : undefined,
+      badgeColor: '#30d158',
+    },
     { title: 'OpenSubtitles', route: '/settings/opensubtitles', icon: 'chatbox-ellipses-outline' },
   ];
 
@@ -239,6 +256,9 @@ const SettingsScreen = () => {
                   key={index}
                   title={item.title}
                   icon={item.icon}
+                  subtitle={item.subtitle}
+                  badgeText={item.badgeText}
+                  badgeColor={item.badgeColor}
                   onPress={() => onSettingsItemPress(item)}
                   isFirst={index === 0}
                   isLast={index === integrationList.length - 1}

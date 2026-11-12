@@ -52,11 +52,11 @@ export function isScreenKeepAwakeEnabled(): boolean {
   try {
     const val = storageService.getItem(StorageKeys.STREMIO_KEEP_AWAKE_KEY);
     if (val === undefined || val === null) {
-      return false; // Default OFF
+      return true; // Default ALWAYS ON
     }
     return val === 'true';
   } catch {
-    return false;
+    return true;
   }
 }
 

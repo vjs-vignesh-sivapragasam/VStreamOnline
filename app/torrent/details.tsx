@@ -78,6 +78,106 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1e3).toFixed(0)} KB`;
 }
 
+const KNOWN_LANGUAGES: { name: string; regex: RegExp }[] = [
+  { name: 'Tamil', regex: /\b(tamil|tam)\b/i },
+  { name: 'English', regex: /\b(english|eng)\b/i },
+  { name: 'Telugu', regex: /\b(telugu|tel)\b/i },
+  { name: 'Hindi', regex: /\b(hindi|hin)\b/i },
+  { name: 'Malayalam', regex: /\b(malayalam|mal)\b/i },
+  { name: 'Kannada', regex: /\b(kannada|kan)\b/i },
+  { name: 'Korean', regex: /\b(korean|kor)\b/i },
+  { name: 'Japanese', regex: /\b(japanese|jap)\b/i },
+  { name: 'Chinese', regex: /\b(chinese|chi)\b/i },
+  { name: 'Spanish', regex: /\b(spanish|spa)\b/i },
+  { name: 'French', regex: /\b(french|fre)\b/i },
+  { name: 'German', regex: /\b(german|ger)\b/i },
+];
+
+function extractLanguagesFromText(text: string): string[] {
+  if (!text) return [];
+  const matches: { name: string; index: number }[] = [];
+
+  // 1. Look inside square brackets [ ... ] or parentheses ( ... ) where audio languages are listed
+  const bracketMatches = Array.from(text.matchAll(/[\[\(]([^\]\)]+)[\]\)]/g));
+  const bracketText = bracketMatches.map((m) => m[1]).join(' ');
+  const target = bracketText.length > 0 ? bracketText : text;
+
+  for (const lang of KNOWN_LANGUAGES) {
+    const idx = target.search(lang.regex);
+    if (idx !== -1) {
+      matches.push({ name: lang.name, index: idx });
+    }
+  }
+
+  // 2. Fallback to searching the whole title if bracket text didn't match languages
+  if (matches.length === 0 && target !== text) {
+    for (const lang of KNOWN_LANGUAGES) {
+      const idx = text.search(lang.regex);
+      if (idx !== -1) {
+        matches.push({ name: lang.name, index: idx });
+      }
+    }
+  }
+
+  matches.sort((a, b) => a.index - b.index);
+  return matches.map((m) => m.name);
+}
+
+function getAllMovieLanguages(
+  topicTitle: string,
+  items: TorrentItem[],
+  tmdbLanguages?: string,
+  fallbackLang: string = 'Tamil'
+): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (lang: string) => {
+    if (!lang) return;
+    const key = lang.trim().toLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      const formatted = lang.trim().charAt(0).toUpperCase() + lang.trim().slice(1);
+      result.push(formatted);
+    }
+  };
+
+  // 1. Extract from topic title
+  extractLanguagesFromText(topicTitle).forEach(add);
+
+  // 2. Extract from variant torrent item titles & language tags
+  if (items && items.length > 0) {
+    for (const it of items) {
+      if (it.title) {
+        extractLanguagesFromText(it.title).forEach(add);
+      }
+      if (it.language) {
+        const normalized = it.language.charAt(0).toUpperCase() + it.language.slice(1).toLowerCase();
+        if (['Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English'].includes(normalized)) {
+          add(normalized);
+        }
+      }
+    }
+  }
+
+  // 3. Extract from TMDB languages
+  if (tmdbLanguages) {
+    const list = tmdbLanguages.split(',').map((s) => s.trim()).filter(Boolean);
+    for (const t of list) {
+      const match = KNOWN_LANGUAGES.find((k) => k.regex.test(t));
+      if (match) add(match.name);
+      else if (t.length > 0 && t.length < 25) add(t);
+    }
+  }
+
+  // 4. Fallback if empty
+  if (result.length === 0 && fallbackLang) {
+    add(fallbackLang);
+  }
+
+  return result;
+}
+
 function parseQualityMeta(title: string) {
   const is4K = /\b(4k|2160p|uhd)\b/i.test(title);
   const is1080p = /\b(1080p|fhd)\b/i.test(title);
@@ -101,6 +201,8 @@ function parseQualityMeta(title: string) {
   const codecMatch = title.match(/\b(HEVC|x265|x264|AVC|10bit|HDR10\+?|HDR)\b/i);
   const codec = codecMatch ? codecMatch[1].toUpperCase() : null;
 
+  const languages = extractLanguagesFromText(title);
+
   return {
     is4K,
     is1080p,
@@ -109,6 +211,7 @@ function parseQualityMeta(title: string) {
     fileSize,
     audio,
     codec,
+    languages,
   };
 }
 
@@ -356,6 +459,38 @@ const TorrentDetails = () => {
   const displayLanguage = LANGUAGE_NAMES[movieLanguage] || 'Tamil';
   const isSeries = type === 'series';
 
+  // ── Available Languages (Detected from title, torrent items, and TMDB) ──
+  const availableLanguages = useMemo(() => {
+    return getAllMovieLanguages(title, items, tmdbData?.languages, displayLanguage);
+  }, [title, items, tmdbData?.languages, displayLanguage]);
+
+  // ── Metadata Values for Hero Header ──
+  const releaseYear = tmdbData?.year || (publishDate ? new Date(publishDate).getFullYear().toString() : '');
+  const genresText = tmdbData?.genres
+    ? tmdbData.genres.split(',').slice(0, 3).map((g) => g.trim()).join(', ')
+    : '';
+  const runtimeText = tmdbData?.runtimeFormatted || (isSeries ? 'Series' : '');
+  const certificationText = tmdbData?.certification || '';
+
+  const imdbRating = tmdbData?.imdbRating;
+  const tmdbRating = tmdbData?.tmdbRating;
+  const rtScore = tmdbData?.rtScore;
+  const audienceScore = tmdbData?.audienceScore;
+
+  // ── Modal Language Filter State ──
+  const [selectedModalLanguage, setSelectedModalLanguage] = useState<string>('All');
+
+  const filteredModalItems = useMemo(() => {
+    if (selectedModalLanguage === 'All') return allItems;
+    const filtered = allItems.filter((item) => {
+      const meta = parseQualityMeta(cleanTitle(item.title));
+      if (meta.languages.includes(selectedModalLanguage)) return true;
+      if (item.language && item.language.toLowerCase() === selectedModalLanguage.toLowerCase()) return true;
+      return false;
+    });
+    return filtered.length > 0 ? filtered : allItems;
+  }, [allItems, selectedModalLanguage]);
+
   // ── Trailer Press Handler ──
   const handleTrailerPress = async () => {
     if (await isHapticsSupported()) {
@@ -365,7 +500,7 @@ const TorrentDetails = () => {
   };
 
   // ── Watch Now Handler ──
-  const handleWatchNow = async () => {
+  const handleWatchNow = async (preselectedLang?: string) => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -375,6 +510,7 @@ const TorrentDetails = () => {
     }
 
     if (allItems.length > 0) {
+      setSelectedModalLanguage(preselectedLang || 'All');
       setQualityModalMode('watch');
       setQualityModalVisible(true);
     } else {
@@ -396,6 +532,7 @@ const TorrentDetails = () => {
     }
 
     if (allItems.length > 0) {
+      setSelectedModalLanguage('All');
       setQualityModalMode('download');
       setQualityModalVisible(true);
     } else {
@@ -598,6 +735,81 @@ const TorrentDetails = () => {
         {/* ── Movie Title (Centered & Bold) ── */}
         <View style={styles.titleSection}>
           <Text style={styles.movieTitleMain}>{getMovieSearchTitle(tmdbData?.title || title)}</Text>
+
+          {/* Metadata Row: 2024 · Adventure, Thriller · 2h 15m · PG-13 */}
+          {(releaseYear || genresText || runtimeText) ? (
+            <Text style={styles.metaRowText} numberOfLines={1}>
+              {[releaseYear, genresText, runtimeText, certificationText].filter(Boolean).join('  ·  ')}
+            </Text>
+          ) : null}
+
+          {/* Ratings Badges Row (IMDb, TMDB, RT, Popcorn) */}
+          {(imdbRating || tmdbRating) && (
+            <View style={styles.ratingsRow}>
+              {imdbRating ? (
+                <View style={styles.badgePill}>
+                  <View style={styles.imdbLabel}>
+                    <Text style={styles.imdbLabelText}>IMDb</Text>
+                  </View>
+                  <Text style={styles.badgeScoreText}>{imdbRating}</Text>
+                </View>
+              ) : null}
+
+              {tmdbRating ? (
+                <View style={styles.badgePill}>
+                  <View style={styles.tmdbLabel}>
+                    <Text style={styles.tmdbLabelText}>TMDB</Text>
+                  </View>
+                  <Text style={styles.badgeScoreText}>{tmdbRating}</Text>
+                </View>
+              ) : null}
+
+              {rtScore ? (
+                <View style={styles.badgePill}>
+                  <View style={styles.rtLabel}>
+                    <Text style={styles.rtLabelText}>RT</Text>
+                  </View>
+                  <Text style={styles.badgeScoreText}>{rtScore}</Text>
+                </View>
+              ) : null}
+
+              {audienceScore ? (
+                <View style={[styles.badgePill, styles.popcornPill]}>
+                  <Text style={styles.popcornText}>🍿 {audienceScore}</Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+
+          {/* Languages Badges Row: [ 🔊 Tamil ] [ 🔊 English ] ... */}
+          {availableLanguages.length > 0 && (
+            <View style={styles.languagesBadgeRow}>
+              <View style={styles.languagesHeaderRow}>
+                <Ionicons name="volume-medium" size={13} color={theme.primary} style={{ marginRight: 5 }} />
+                <Text style={[styles.languagesHeaderLabel, { color: theme.primary }]}>
+                  {availableLanguages.length > 1 ? 'Audio Languages:' : 'Language:'}
+                </Text>
+              </View>
+              <View style={styles.languagesPillsWrap}>
+                {availableLanguages.map((lang) => (
+                  <TouchableOpacity
+                    key={lang}
+                    style={[
+                      styles.languagePill,
+                      {
+                        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                        borderColor: 'rgba(255, 255, 255, 0.16)',
+                      },
+                    ]}
+                    onPress={() => handleWatchNow(lang)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.languagePillText}>{lang}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
         </View>
 
         {/* ── Action Row (Trailer on Left, Centered Watch Now, Download on Right) ── */}
@@ -614,7 +826,7 @@ const TorrentDetails = () => {
           {/* Center: Watch Now Pill Button */}
           <TouchableOpacity
             style={styles.watchNowBtn}
-            onPress={handleWatchNow}
+            onPress={() => handleWatchNow()}
             activeOpacity={0.8}
             disabled={isLoadingVariants}
           >
@@ -716,11 +928,11 @@ const TorrentDetails = () => {
         )}
 
         {/* ── Section: Information ── */}
-        {tmdbData && (
+        {(tmdbData || formattedDate || availableLanguages.length > 0) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Information</Text>
             <View style={styles.infoTable}>
-              {tmdbData.releaseDateFormatted ? (
+              {tmdbData?.releaseDateFormatted ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Released On:</Text>
                   <Text style={styles.infoValue}>{tmdbData.releaseDateFormatted}</Text>
@@ -732,7 +944,7 @@ const TorrentDetails = () => {
                 </View>
               ) : null}
 
-              {tmdbData.imdbRating ? (
+              {tmdbData?.imdbRating ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>IMDB Rating:</Text>
                   <View style={styles.ratingValueRow}>
@@ -742,33 +954,33 @@ const TorrentDetails = () => {
                 </View>
               ) : null}
 
-              {tmdbData.genres ? (
+              {tmdbData?.genres ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Genre:</Text>
                   <Text style={styles.infoValue}>{tmdbData.genres}</Text>
                 </View>
               ) : null}
 
-              {tmdbData.runtimeFormatted ? (
+              {tmdbData?.runtimeFormatted ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Runtime:</Text>
                   <Text style={styles.infoValue}>{tmdbData.runtimeFormatted}</Text>
                 </View>
               ) : null}
 
-              {tmdbData.country ? (
+              {tmdbData?.country ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Country:</Text>
                   <Text style={styles.infoValue}>{tmdbData.country}</Text>
                 </View>
               ) : null}
 
-              {tmdbData.languages ? (
+              {availableLanguages.length > 0 && (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Languages:</Text>
-                  <Text style={styles.infoValue}>{tmdbData.languages}</Text>
+                  <Text style={styles.infoValue}>{availableLanguages.join(', ')}</Text>
                 </View>
-              ) : null}
+              )}
             </View>
           </View>
         )}
@@ -796,7 +1008,7 @@ const TorrentDetails = () => {
                     {qualityModalMode === 'watch' ? 'Choose Quality to Watch' : 'Choose Quality to Download'}
                   </Text>
                   <Text style={styles.modalSubtitle}>
-                    {allItems.length} {allItems.length === 1 ? 'quality' : 'qualities'} available •{' '}
+                    {filteredModalItems.length} {filteredModalItems.length === 1 ? 'quality' : 'qualities'} available •{' '}
                     {qualityModalMode === 'watch' ? 'Tap to start streaming' : 'Tap to start download'}
                   </Text>
                 </View>
@@ -810,8 +1022,43 @@ const TorrentDetails = () => {
               </View>
             </View>
 
+            {/* Language Filter Chips in Modal */}
+            {availableLanguages.length > 1 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.modalFilterScroll}
+              >
+                {['All', ...availableLanguages].map((lang) => {
+                  const isSelected = selectedModalLanguage === lang;
+                  return (
+                    <TouchableOpacity
+                      key={lang}
+                      style={[
+                        styles.modalFilterChip,
+                        isSelected && {
+                          backgroundColor: theme.primary,
+                          borderColor: theme.primary,
+                        },
+                      ]}
+                      onPress={() => setSelectedModalLanguage(lang)}
+                    >
+                      <Text
+                        style={[
+                          styles.modalFilterChipText,
+                          isSelected && { color: '#000000', fontWeight: '800' },
+                        ]}
+                      >
+                        {lang}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
             <FlatList
-              data={allItems}
+              data={filteredModalItems}
               keyExtractor={(item, index) => item.guid || `${item.infoHash}-${index}`}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.qualityListContent}
@@ -928,6 +1175,15 @@ const TorrentDetails = () => {
                             <Text style={styles.qualityMetaBadgeText}>{meta.codec}</Text>
                           </View>
                         ) : null}
+
+                        {meta.languages && meta.languages.length > 0 && (
+                          <View style={[styles.qualityMetaBadge, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' }]}>
+                            <Ionicons name="volume-medium" size={10} color={theme.primary} />
+                            <Text style={[styles.qualityMetaBadgeText, { color: theme.primary, fontWeight: '700' }]}>
+                              {meta.languages.join(' + ')}
+                            </Text>
+                          </View>
+                        )}
 
                         {isItemCompleted && (
                           <View style={styles.qualityDownloadedBadge}>
@@ -1684,6 +1940,150 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: '#00e676',
+  },
+
+  /* Metadata Row under title */
+  metaRowText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#D1D1D6',
+    textAlign: 'center',
+    marginTop: 6,
+    letterSpacing: 0.2,
+  },
+
+  /* Ratings Row */
+  ratingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    flexWrap: 'wrap',
+  },
+  badgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    gap: 5,
+  },
+  imdbLabel: {
+    backgroundColor: 'rgba(245, 197, 24, 0.22)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  imdbLabelText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#F5C518',
+    letterSpacing: -0.2,
+  },
+  tmdbLabel: {
+    backgroundColor: 'rgba(1, 180, 228, 0.22)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  tmdbLabelText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#01B4E4',
+    letterSpacing: -0.2,
+  },
+  rtLabel: {
+    backgroundColor: 'rgba(250, 50, 10, 0.22)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  rtLabelText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FA320A',
+    letterSpacing: -0.2,
+  },
+  badgeScoreText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+    paddingHorizontal: 2,
+  },
+  popcornPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  popcornText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+
+  /* Languages Badges Row */
+  languagesBadgeRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    gap: 6,
+    width: '100%',
+  },
+  languagesHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  languagesHeaderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  languagesPillsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  languagePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  languagePillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.3,
+  },
+
+  /* Modal Language Filter Chips */
+  modalFilterScroll: {
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  modalFilterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#1C1C1E',
+    borderWidth: 1,
+    borderColor: '#2C2C2E',
+  },
+  modalFilterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
   },
 });
 
