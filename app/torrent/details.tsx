@@ -17,12 +17,18 @@ import BottomSpacing from '@/components/BottomSpacing';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import { Ionicons } from '@expo/vector-icons';
-import { TorrentItem, fetchTamilMVTopicMagnets, searchTamilMV, cleanTopicTitle } from '@/hooks/useTamilMv';
+import {
+  TorrentItem,
+  fetchTamilMVTopicMagnets,
+  searchTamilMV,
+  cleanTopicTitle,
+  Language,
+} from '@/hooks/useTamilMv';
 import { StreamingServerClient, TorrentFile } from '@/clients/stremio';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { myListService } from '@/services/MyListService';
-import { tmdbService, TmdbDetails } from '@/services/TmdbService';
+import { tmdbService, TmdbDetails, detectLanguageCode } from '@/services/TmdbService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -106,6 +112,15 @@ function parseQualityMeta(title: string) {
   };
 }
 
+const LANGUAGE_NAMES: Record<Language, string> = {
+  tamil: 'Tamil',
+  english: 'English',
+  malayalam: 'Malayalam',
+  hindi: 'Hindi',
+  telugu: 'Telugu',
+  kannada: 'Kannada',
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const TorrentDetails = () => {
   const {
@@ -131,7 +146,6 @@ const TorrentDetails = () => {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView | null>(null);
   const { theme } = useTheme();
-
 
   // ── TMDB State ──
   const [tmdbData, setTmdbData] = useState<TmdbDetails | null>(null);
@@ -317,6 +331,30 @@ const TorrentDetails = () => {
     });
     setInMyList(added);
   };
+
+  // ── Language Detection & Category Feeds (matching index.tsx categories) ──
+  const movieLanguage: Language = useMemo(() => {
+    const rawParsed: TorrentItem[] = allItemsRaw ? (() => {
+      try { return JSON.parse(allItemsRaw); } catch { return []; }
+    })() : [];
+    const firstLang = rawParsed[0]?.language?.toLowerCase() || items[0]?.language?.toLowerCase();
+    if (firstLang && ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'].includes(firstLang)) {
+      return firstLang as Language;
+    }
+    const code = detectLanguageCode(title);
+    const codeMap: Record<string, Language> = {
+      ta: 'tamil',
+      te: 'telugu',
+      hi: 'hindi',
+      ml: 'malayalam',
+      kn: 'kannada',
+      en: 'english',
+    };
+    return codeMap[code] || 'tamil';
+  }, [allItemsRaw, items, title]);
+
+  const displayLanguage = LANGUAGE_NAMES[movieLanguage] || 'Tamil';
+  const isSeries = type === 'series';
 
   // ── Trailer Press Handler ──
   const handleTrailerPress = async () => {
@@ -732,126 +770,6 @@ const TorrentDetails = () => {
                 </View>
               ) : null}
             </View>
-          </View>
-        )}
-
-        {/* ── Section: Recommended ── */}
-        {tmdbData?.recommended && tmdbData.recommended.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Recommended</Text>
-              <TouchableOpacity
-                style={styles.seeAllRow}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/search',
-                    params: { query: getMovieSearchTitle(title) },
-                  } as any)
-                }
-              >
-                <Text style={styles.seeAllText}>See All</Text>
-                <Ionicons name="chevron-forward" size={14} color="#8E8E93" />
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={tmdbData.recommended}
-              keyExtractor={(item) => `rec-${item.id}`}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.mediaListContent}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.mediaCard}
-                  onPress={() => {
-                    router.push({
-                      pathname: '/torrent/details',
-                      params: {
-                        title: item.title,
-                        poster: item.posterUrl || '',
-                        type: 'movie',
-                        publishDate: item.year ? `${item.year}-01-01` : undefined,
-                      },
-                    });
-                  }}
-                  activeOpacity={0.75}
-                >
-                  <View style={styles.mediaPosterWrap}>
-                    <Image
-                      source={{ uri: item.posterUrl || '' }}
-                      style={styles.mediaPoster}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  <Text style={styles.mediaTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  {item.year ? (
-                    <Text style={styles.mediaYear}>{item.year}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              )}
-            />
-          </View>
-        )}
-
-        {/* ── Section: Similar to this ── */}
-        {tmdbData?.similar && tmdbData.similar.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Similar to this</Text>
-              <TouchableOpacity
-                style={styles.seeAllRow}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/search',
-                    params: { query: getMovieSearchTitle(title) },
-                  } as any)
-                }
-              >
-                <Text style={styles.seeAllText}>See All</Text>
-                <Ionicons name="chevron-forward" size={14} color="#8E8E93" />
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={tmdbData.similar}
-              keyExtractor={(item) => `sim-${item.id}`}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.mediaListContent}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.mediaCard}
-                  onPress={() => {
-                    router.push({
-                      pathname: '/torrent/details',
-                      params: {
-                        title: item.title,
-                        poster: item.posterUrl || '',
-                        type: 'movie',
-                        publishDate: item.year ? `${item.year}-01-01` : undefined,
-                      },
-                    });
-                  }}
-                  activeOpacity={0.75}
-                >
-                  <View style={styles.mediaPosterWrap}>
-                    <Image
-                      source={{ uri: item.posterUrl || '' }}
-                      style={styles.mediaPoster}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  <Text style={styles.mediaTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  {item.year ? (
-                    <Text style={styles.mediaYear}>{item.year}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              )}
-            />
           </View>
         )}
 
@@ -1298,27 +1216,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   sectionTitle: {
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
     marginBottom: 14,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  seeAllRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  seeAllText: {
-    fontSize: 13,
-    color: '#8E8E93',
-    fontWeight: '600',
   },
   variantBadge: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -1405,37 +1307,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     flex: 1,
-  },
-
-  /* Recommended & Similar */
-  mediaListContent: {
-    gap: 12,
-    paddingRight: 20,
-  },
-  mediaCard: {
-    width: 105,
-  },
-  mediaPosterWrap: {
-    width: 105,
-    height: 155,
-    borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: '#1c1c1e',
-    marginBottom: 6,
-  },
-  mediaPoster: {
-    width: '100%',
-    height: '100%',
-  },
-  mediaTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  mediaYear: {
-    fontSize: 11,
-    color: '#8E8E93',
-    marginTop: 2,
   },
 
   /* Torrent list */

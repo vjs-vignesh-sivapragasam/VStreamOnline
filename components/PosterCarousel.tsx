@@ -10,7 +10,7 @@ import {
 import { ActivityIndicator, Text } from '@/components/Themed';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { GroupedItem, Language, TorrentItem, useTamilMV } from '@/hooks/useTamilMv';
+import { GroupedItem, Language, TorrentItem, useTamilMV, useTamilMVTopReleases } from '@/hooks/useTamilMv';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,16 +40,16 @@ function pickItemFromGroup(
     group: GroupedItem,
     type: 'movie' | 'series',
 ): CarouselItem | null {
-    const torrent = group.items.find((i) => i.poster && i.magnetUrl);
-    if (!torrent) return null;
+    const torrent = group.items.find((i) => i.poster && i.magnetUrl) || group.items.find((i) => i.poster) || group.items[0];
+    if (!torrent || !torrent.poster) return null;
     return {
         id:          torrent.guid,
         title:       group.name ?? torrent.title,
         posterUrl:   torrent.poster!,
-        magnetUrl:   torrent.magnetUrl,
-        infoHash:    torrent.infoHash,
+        magnetUrl:   torrent.magnetUrl || '',
+        infoHash:    torrent.infoHash || '',
         publishDate: torrent.publishDate,
-        type,
+        type:        (group as any).type || type,
         groupid:     torrent.groupid,
         guid:        torrent.guid,
         allItems:    group.items, // ← added
@@ -78,37 +78,70 @@ export default function PosterCarousel({
 
     const hasSeriesCategory = !NO_SERIES_LANGUAGES.includes(filter);
 
+    const { groups: topReleasesGroups, loading: topLoading } = useTamilMVTopReleases(filter);
     const { groups: preDvdGroups } = useTamilMV(filter, 'predvd');
-
     const { groups: movieGroups, loading: moviesLoading } = useTamilMV(filter, 'webhd');
     const { groups: seriesGroups, loading: seriesLoading } = useTamilMV(filter, hasSeriesCategory ? 'series' : 'webhd');
 
-    const loading = moviesLoading || (hasSeriesCategory && seriesLoading);
+    const loading = (topLoading && moviesLoading) || (!topReleasesGroups.length && moviesLoading);
 
     const data: CarouselItem[] = React.useMemo(() => {
+        const seenTitles = new Set<string>();
+
+        // 1. Load all "Top Releases This Week" into the slideshow
+        const topItems = (topReleasesGroups || [])
+            .map((g: any) => pickItemFromGroup(g, (g as any).type || 'movie'))
+            .filter((i: any): i is CarouselItem => {
+                if (!i) return false;
+                const clean = (i.title || '').toLowerCase().trim();
+                if (seenTitles.has(clean)) return false;
+                seenTitles.add(clean);
+                return true;
+            });
+
+        // 2. Interleave with other fresh catalog items (PreDVD, WebHD, Series)
         const preDvd = (preDvdGroups || [])
-            .slice(0, 2)
             .map((g: any) => pickItemFromGroup(g, 'movie'))
-            .filter((i: any): i is CarouselItem => i !== null);
-        const movies = movieGroups
-            .slice(0, 4)
+            .filter((i: any): i is CarouselItem => {
+                if (!i) return false;
+                const clean = (i.title || '').toLowerCase().trim();
+                if (seenTitles.has(clean)) return false;
+                seenTitles.add(clean);
+                return true;
+            })
+            .slice(0, 3);
+
+        const movies = (movieGroups || [])
             .map((g: any) => pickItemFromGroup(g, 'movie'))
-            .filter((i: any): i is CarouselItem => i !== null);
+            .filter((i: any): i is CarouselItem => {
+                if (!i) return false;
+                const clean = (i.title || '').toLowerCase().trim();
+                if (seenTitles.has(clean)) return false;
+                seenTitles.add(clean);
+                return true;
+            })
+            .slice(0, 4);
 
         const series = (hasSeriesCategory ? seriesGroups : [])
-            .slice(0, 3)
             .map((g: any) => pickItemFromGroup(g, 'series'))
-            .filter((i: any): i is CarouselItem => i !== null);
+            .filter((i: any): i is CarouselItem => {
+                if (!i) return false;
+                const clean = (i.title || '').toLowerCase().trim();
+                if (seenTitles.has(clean)) return false;
+                seenTitles.add(clean);
+                return true;
+            })
+            .slice(0, 3);
 
-        const interleaved: CarouselItem[] = [];
+        const interleaved: CarouselItem[] = [...topItems];
         const maxLen = Math.max(preDvd.length, movies.length, series.length);
         for (let i = 0; i < maxLen; i++) {
             if (preDvd[i]) interleaved.push(preDvd[i]);
             if (movies[i]) interleaved.push(movies[i]);
             if (series[i]) interleaved.push(series[i]);
         }
-        return interleaved.slice(0, 7);
-    }, [preDvdGroups, movieGroups, seriesGroups, hasSeriesCategory]);
+        return interleaved.slice(0, 15);
+    }, [topReleasesGroups, preDvdGroups, movieGroups, seriesGroups, hasSeriesCategory]);
 
     useEffect(() => {
         setActiveIndex(0);
