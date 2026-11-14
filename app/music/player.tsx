@@ -18,7 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-assets/slider';
-import { WebView } from 'react-native-webview';
+import { WebView as RNWebView } from 'react-native-webview';
+const WebView = RNWebView as any;
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -354,7 +355,7 @@ function MusicPlayerScreenInner() {
   };
 
   // ── Audio Engine & Playback State ─────────────────────────────────────────
-  const webViewRef = useRef<WebView>(null);
+  const webViewRef = useRef<any>(null);
   const [engineReady, setEngineReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);

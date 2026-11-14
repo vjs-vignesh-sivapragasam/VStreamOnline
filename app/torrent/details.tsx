@@ -281,7 +281,7 @@ const TorrentDetails = () => {
   const { height, width } = useWindowDimensions();
   const isPortrait = height > width;
   const insets = useSafeAreaInsets();
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<any>(null);
   const { theme } = useTheme();
 
   // ── TMDB State ──
