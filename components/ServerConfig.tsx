@@ -805,7 +805,14 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
                 <MaterialIcons name="surround-sound" size={22} color="#535aff" />
               </View>
               <View style={styles.settingTextContainer}>
-                <Text style={styles.settingTitle}>Background Audio Keep-Alive</Text>
+                <View style={styles.settingTitleRow}>
+                  <Text style={[styles.settingTitle, { marginBottom: 0 }]}>Background Audio Keep-Alive</Text>
+                  {isBackgroundKeepAlive ? (
+                    <View style={styles.alwaysOnBadge}>
+                      <Text style={styles.alwaysOnBadgeText}>Active</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={styles.settingSubtitle}>
                   Maintains silent audio playback so iOS & Android do not suspend the Stremio server when the screen is locked.
                 </Text>

@@ -16,6 +16,40 @@ export interface TorrentStats {
   downloaded?: number;
   streamProgress?: number;
   streamLen?: number;
+  swarmConnections?: number;
+  swarmSize?: number;
+}
+
+export const DEFAULT_TRACKERS = [
+  'udp://tracker.opentrackers.org:1337/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://opentracker.i2p.rocks:6969/announce',
+  'udp://tracker.moeking.me:6969/announce',
+  'udp://explodie.org:6969/announce',
+  'http://tracker.openbittorrent.com:80/announce',
+];
+
+export function extractTrackersFromMagnet(magnetUrl?: string): string[] {
+  const trackers: string[] = [];
+  if (magnetUrl) {
+    const matches = Array.from(magnetUrl.matchAll(/[?&]tr=([^&]+)/gi));
+    for (const m of matches) {
+      try {
+        const decoded = decodeURIComponent(m[1].replace(/\+/g, ' '));
+        if (decoded && !trackers.includes(decoded)) {
+          trackers.push(decoded);
+        }
+      } catch {}
+    }
+  }
+  for (const dt of DEFAULT_TRACKERS) {
+    if (!trackers.includes(dt)) {
+      trackers.push(dt);
+    }
+  }
+  return trackers;
 }
 
 export class StreamingServerClient {
@@ -29,14 +63,24 @@ export class StreamingServerClient {
     return this.baseURL;
   }
 
-  async getStreamingURL(infoHash: string, fileIdx: number = -1): Promise<string> {
-    const directURL = `${this.baseURL}/${encodeURIComponent(infoHash)}/${fileIdx}`;
+  async getStreamingURL(infoHash: string, fileIdx: number = -1, magnetUrl?: string): Promise<string> {
+    let directURL = `${this.baseURL}/${encodeURIComponent(infoHash)}/${fileIdx}`;
+    const trackers = extractTrackersFromMagnet(magnetUrl);
+    if (trackers.length > 0) {
+      const qs = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
+      directURL += `?${qs}`;
+    }
     console.log('Direct streaming URL:', directURL);
     return directURL;
   }
 
-  async getTorrentFiles(infoHash: string, timeoutMs: number = 6000): Promise<TorrentFile[]> {
-    const url = `${this.baseURL}/${encodeURIComponent(infoHash)}/create`;
+  async getTorrentFiles(infoHash: string, timeoutMs: number = 6000, magnetUrl?: string): Promise<TorrentFile[]> {
+    let url = `${this.baseURL}/${encodeURIComponent(infoHash)}/create`;
+    const trackers = extractTrackersFromMagnet(magnetUrl);
+    if (trackers.length > 0) {
+      const qs = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
+      url += `?${qs}`;
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -185,4 +229,3 @@ export function getActiveStreamingClient(): StreamingServerClient {
   const candidates = getServerCandidates();
   return new StreamingServerClient(candidates[0] || 'http://127.0.0.1:11470');
 }
-

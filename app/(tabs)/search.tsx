@@ -24,26 +24,137 @@ import {
   TorrentItem,
 } from '@/hooks/useTamilMv';
 import { tmdbService } from '@/services/TmdbService';
+import { storageService } from '@/utils/StorageService';
 import { useLocalSearchParams, router } from 'expo-router';
 import { SvgXml } from 'react-native-svg';
 import { DefaultPosterImgXml } from '@/utils/Svg';
 
 // ─── Utility: Clean Movie Title ───────────────────────────────────────────────
 
+export type MovieCategoryKey =
+  | 'all'
+  | 'kollywood'
+  | 'hollywood'
+  | 'series'
+  | 'tollywood'
+  | 'bollywood'
+  | 'mollywood';
+
+export const CATEGORY_CONFIG: {
+  key: MovieCategoryKey;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { key: 'all', label: 'All', icon: 'apps-outline' },
+  { key: 'kollywood', label: 'Kollywood', icon: 'film-outline' },
+  { key: 'hollywood', label: 'Hollywood', icon: 'videocam-outline' },
+  { key: 'series', label: 'Web Series', icon: 'tv-outline' },
+  { key: 'tollywood', label: 'Tollywood', icon: 'film-outline' },
+  { key: 'bollywood', label: 'Bollywood', icon: 'film-outline' },
+  { key: 'mollywood', label: 'Mollywood', icon: 'film-outline' },
+];
+
+// Caches for maximum performance & zero re-computation
+const categoryCache = new WeakMap<GroupedItem, MovieCategoryKey>();
+const titleCache = new Map<string, string>();
+const globalPosterCache = new Map<string, string | null>();
+
+// Concurrency-limited poster loader (max 3 concurrent)
+class PosterQueue {
+  private queue: (() => Promise<void>)[] = [];
+  private activeCount = 0;
+  private maxConcurrent = 3;
+
+  enqueue(fn: () => Promise<void>) {
+    this.queue.push(fn);
+    this.processNext();
+  }
+
+  private processNext() {
+    if (this.activeCount >= this.maxConcurrent || this.queue.length === 0) return;
+    const task = this.queue.shift();
+    if (!task) return;
+    this.activeCount++;
+    task().finally(() => {
+      this.activeCount--;
+      this.processNext();
+    });
+  }
+}
+
+const posterQueue = new PosterQueue();
+
+export function getGroupCategory(group: GroupedItem): MovieCategoryKey {
+  const cached = categoryCache.get(group);
+  if (cached) return cached;
+
+  let result: MovieCategoryKey = 'kollywood';
+
+  const isSeries =
+    (group as any).type === 'series' ||
+    group.items.some((i) => {
+      const t = (i.title || '').toLowerCase();
+      const url = (i.guid || i.groupid || '').toLowerCase();
+      return (
+        /series|season|episode|s\d{2}|e\d{2}|ep\s*\(/i.test(t) ||
+        url.includes('/19-web-series') ||
+        url.includes('series')
+      );
+    });
+
+  if (isSeries) {
+    result = 'series';
+  } else {
+    const best = group.items.find((i) => i.poster) ?? group.items[0];
+    const lang = (best?.language || '').toLowerCase();
+    const allTitles = group.items.map((i) => (i.title || '').toLowerCase()).join(' ');
+    const allUrls = group.items.map((i) => (i.guid || i.groupid || '').toLowerCase()).join(' ');
+
+    // 1. Hollywood (English, forum 17 multi-audio Hollywood, or Hollywood in title/url)
+    if (
+      lang === 'english' ||
+      allTitles.includes('hollywood') ||
+      allUrls.includes('17-hollywood') ||
+      allUrls.includes('/forums/forum/46-') ||
+      allUrls.includes('/forums/forum/49-') ||
+      allUrls.includes('/forums/forum/50-')
+    ) {
+      result = 'hollywood';
+    } else if (lang === 'telugu' || allTitles.includes('telugu') || allUrls.includes('telugu')) {
+      result = 'tollywood';
+    } else if (lang === 'hindi' || allTitles.includes('hindi') || allUrls.includes('hindi')) {
+      result = 'bollywood';
+    } else if (lang === 'malayalam' || allTitles.includes('malayalam') || allUrls.includes('malayalam')) {
+      result = 'mollywood';
+    } else {
+      result = 'kollywood';
+    }
+  }
+
+  categoryCache.set(group, result);
+  return result;
+}
+
 const cleanMovieTitle = (title: string): string => {
   if (!title) return '';
-  return title
+  const cached = titleCache.get(title);
+  if (cached !== undefined) return cached;
+
+  const cleaned = title
     .replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|mx|cards|pizza|fi|live)\s*[-_:]\s*/gi, '')
     .replace(/^(?:https?:\/\/)?(?:www\.)?(?:1tamilmv|tamilmv)[\w\.-]*\s*[-_:]\s*/gi, '')
     .replace(/^\[?\b(?:1tamilmv|tamilmv)\b\]?\s*[-_:]?\s*/gi, '')
     .replace(/\b(?:1tamilmv|tamilmv)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  titleCache.set(title, cleaned);
+  return cleaned;
 };
 
 // ─── Search Movie Card Component ─────────────────────────────────────────────
 
-const SearchMovieCard = ({
+const SearchMovieCard = React.memo(({
   group,
   cardWidth,
   posterHeight,
@@ -56,10 +167,17 @@ const SearchMovieCard = ({
 }) => {
   const [imgError, setImgError] = useState(false);
   const best: TorrentItem = group.items.find((i) => i.poster) ?? group.items[0];
-  const [posterUri, setPosterUri] = useState<string | null>(best?.poster || null);
   const type = (group as any).type || 'movie';
   const releasesCount = group.items.length;
-  const lang = best?.language || 'tamil';
+
+  const titleKey = useMemo(() => {
+    return `${(group.name || best?.title || '').toLowerCase().trim()}_${group.year || ''}_${type}`;
+  }, [group.name, group.year, best?.title, type]);
+
+  const [posterUri, setPosterUri] = useState<string | null>(() => {
+    if (best?.poster) return best.poster;
+    return globalPosterCache.get(titleKey) || null;
+  });
 
   const cleanedTitle = useMemo(() => {
     return cleanMovieTitle(group.name ?? best?.title ?? '');
@@ -68,23 +186,49 @@ const SearchMovieCard = ({
   useEffect(() => {
     if (best?.poster) {
       setPosterUri(best.poster);
+      globalPosterCache.set(titleKey, best.poster);
       return;
     }
+
+    if (globalPosterCache.has(titleKey)) {
+      const cached = globalPosterCache.get(titleKey);
+      if (cached) setPosterUri(cached);
+      return;
+    }
+
     let isMounted = true;
-    tmdbService.getMovieFullInfo(group.name || '', group.year || undefined, type)
-      .then((info) => {
-        if (isMounted && info?.posterUrl) {
-          setPosterUri(info.posterUrl);
+    posterQueue.enqueue(async () => {
+      if (!isMounted) return;
+      try {
+        const poster = await tmdbService.getMoviePoster(
+          group.name || best?.title || '',
+          group.year || undefined,
+          type
+        );
+        if (poster) {
+          globalPosterCache.set(titleKey, poster);
+          if (isMounted) {
+            setPosterUri(poster);
+          }
+        } else {
+          globalPosterCache.set(titleKey, null);
         }
-      })
-      .catch(() => {});
-    return () => { isMounted = false; };
-  }, [best?.poster, group.name, group.year, type]);
+      } catch {}
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [best?.poster, group.name, group.year, type, titleKey]);
+
+  const handlePress = useCallback(() => {
+    onPress(group);
+  }, [onPress, group]);
 
   return (
     <Pressable
       style={[styles.cardContainer, { width: cardWidth }]}
-      onPress={() => onPress(group)}
+      onPress={handlePress}
     >
       <View style={[styles.posterWrap, { width: cardWidth, height: posterHeight }]}>
         {posterUri && !imgError ? (
@@ -93,27 +237,13 @@ const SearchMovieCard = ({
             onError={() => setImgError(true)}
             style={styles.posterImage}
             resizeMode="cover"
+            fadeDuration={150}
           />
         ) : (
           <View style={[styles.posterImage, styles.posterFallback]}>
             <SvgXml xml={DefaultPosterImgXml} width={cardWidth * 0.5} height={posterHeight * 0.4} />
           </View>
         )}
-
-        {/* Top Badges */}
-        <View style={styles.topBadgesRow}>
-          {group.year ? (
-            <View style={styles.yearBadge}>
-              <Text style={styles.yearBadgeText}>{group.year}</Text>
-            </View>
-          ) : null}
-
-          {lang ? (
-            <View style={styles.langBadge}>
-              <Text style={styles.langBadgeText}>{lang.toUpperCase()}</Text>
-            </View>
-          ) : null}
-        </View>
       </View>
 
       <Text style={[styles.cardTitle, { width: cardWidth }]} numberOfLines={2}>
@@ -122,12 +252,12 @@ const SearchMovieCard = ({
 
       <View style={styles.cardFooter}>
         <Text style={styles.cardSub}>
-          {type === 'series' ? 'Series' : 'Movie'} • {releasesCount} {releasesCount === 1 ? 'source' : 'sources'}
+          {type === 'series' ? 'Series' : 'Movie'}{group.year ? ` • ${group.year}` : ''} • {releasesCount} {releasesCount === 1 ? 'source' : 'sources'}
         </Text>
       </View>
     </Pressable>
   );
-};
+});
 
 // ─── Search Screen ────────────────────────────────────────────────────────────
 
@@ -136,8 +266,19 @@ const SearchScreen = () => {
   const params = useLocalSearchParams<{ query?: string }>();
   const [query, setQuery]                         = useState(params.query || '');
   const [showRecentlyAdded, setShowRecentlyAdded] = useState(false);
-  const [recentlyAddedMovies, setRecentlyAddedMovies] = useState<GroupedItem[]>([]);
+  const [recentlyAddedMovies, setRecentlyAddedMovies] = useState<GroupedItem[]>(() => {
+    try {
+      const raw = storageService.getItem('tamilmv:recently_added');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed?.data && Array.isArray(parsed.data)) return parsed.data;
+      }
+    } catch {}
+    return [];
+  });
   const [isLoadingRecent, setIsLoadingRecent]     = useState(false);
+  const [selectedCategory, setSelectedCategory]   = useState<MovieCategoryKey>('all');
 
   const [liveSearchResults, setLiveSearchResults] = useState<GroupedItem[]>([]);
   const [isSearchingLive, setIsSearchingLive]     = useState(false);
@@ -156,6 +297,7 @@ const SearchScreen = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setShowRecentlyAdded(true);
+    setSelectedCategory('all');
     if (recentlyAddedMovies.length === 0) {
       setIsLoadingRecent(true);
       try {
@@ -174,6 +316,7 @@ const SearchScreen = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setShowRecentlyAdded(false);
+    setSelectedCategory('all');
   }, []);
 
   const handleRefreshRecent = useCallback(async () => {
@@ -186,6 +329,13 @@ const SearchScreen = () => {
     } finally {
       setIsLoadingRecent(false);
     }
+  }, []);
+
+  const handleCategorySelect = useCallback(async (key: MovieCategoryKey) => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setSelectedCategory(key);
   }, []);
 
   // If a query parameter was passed on mount, handle it
@@ -233,6 +383,7 @@ const SearchScreen = () => {
     }
     setQuery('');
     setLiveSearchResults([]);
+    setSelectedCategory('all');
   }, []);
 
   const handleOpenWebView = useCallback(async () => {
@@ -266,36 +417,183 @@ const SearchScreen = () => {
     });
   }, []);
 
-  // Filter movies by query
+  // Filter movies by query (single deduplicated pass)
   const filteredMovies = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
+    if (liveSearchResults.length === 0) return [];
 
-    const inMemory = liveSearchResults.filter((group) => {
-      const nameMatch = group.name?.toLowerCase().includes(q);
-      const yearMatch = group.year ? group.year.toString().includes(q) : false;
-      const titleMatch = group.items.some((i) => i.title.toLowerCase().includes(q));
-      const langMatch = group.items.some((i) => i.language?.toLowerCase().includes(q));
-      return nameMatch || yearMatch || titleMatch || langMatch;
-    });
-
-    if (liveSearchResults.length === 0) return inMemory;
-
-    // Deduplicate by title + year
     const movieMap = new Map<string, GroupedItem>();
-    inMemory.forEach((g) => {
-      const key = `${(g.name || '').toLowerCase()}|||${g.year || ''}`;
-      movieMap.set(key, g);
-    });
-    liveSearchResults.forEach((g) => {
-      const key = `${(g.name || '').toLowerCase()}|||${g.year || ''}`;
-      if (!movieMap.has(key)) {
-        movieMap.set(key, g);
+    for (const g of liveSearchResults) {
+      const nameMatch = g.name?.toLowerCase().includes(q);
+      const yearMatch = g.year ? g.year.toString().includes(q) : false;
+      const titleMatch = g.items.some((i) => i.title.toLowerCase().includes(q));
+      const langMatch = g.items.some((i) => i.language?.toLowerCase().includes(q));
+      if (nameMatch || yearMatch || titleMatch || langMatch) {
+        const key = `${(g.name || '').toLowerCase()}|||${g.year || ''}`;
+        if (!movieMap.has(key)) {
+          movieMap.set(key, g);
+        }
       }
-    });
+    }
 
     return Array.from(movieMap.values());
   }, [query, liveSearchResults]);
+
+  // Category statistics & grouped sections for Recently Added (single-pass O(N))
+  const { recentCategoryCounts, recentGroupedByCategory } = useMemo(() => {
+    const counts: Record<MovieCategoryKey, number> = {
+      all: recentlyAddedMovies.length,
+      kollywood: 0,
+      hollywood: 0,
+      series: 0,
+      tollywood: 0,
+      bollywood: 0,
+      mollywood: 0,
+    };
+    const map = new Map<MovieCategoryKey, GroupedItem[]>();
+
+    for (const g of recentlyAddedMovies) {
+      const cat = getGroupCategory(g);
+      counts[cat] = (counts[cat] || 0) + 1;
+      let list = map.get(cat);
+      if (!list) {
+        list = [];
+        map.set(cat, list);
+      }
+      list.push(g);
+    }
+
+    const sections: { key: MovieCategoryKey; label: string; items: GroupedItem[] }[] = [];
+    for (const cfg of CATEGORY_CONFIG) {
+      if (cfg.key === 'all') continue;
+      const items = map.get(cfg.key);
+      if (items && items.length > 0) {
+        sections.push({
+          key: cfg.key,
+          label: cfg.label,
+          items,
+        });
+      }
+    }
+
+    return { recentCategoryCounts: counts, recentGroupedByCategory: sections };
+  }, [recentlyAddedMovies]);
+
+  const displayedRecentMovies = useMemo(() => {
+    if (selectedCategory === 'all') return recentlyAddedMovies;
+    return recentlyAddedMovies.filter((g) => getGroupCategory(g) === selectedCategory);
+  }, [recentlyAddedMovies, selectedCategory]);
+
+  const recentCategoryFilterOptions = useMemo(() => {
+    return CATEGORY_CONFIG.filter((cfg) => {
+      if (cfg.key === 'all') return true;
+      return (recentCategoryCounts[cfg.key] || 0) > 0;
+    }).map((cfg) => ({
+      ...cfg,
+      count: recentCategoryCounts[cfg.key] || 0,
+    }));
+  }, [recentCategoryCounts]);
+
+  // Category statistics & grouped sections for Search Results (single-pass O(N))
+  const { searchCategoryCounts, searchGroupedByCategory } = useMemo(() => {
+    const counts: Record<MovieCategoryKey, number> = {
+      all: filteredMovies.length,
+      kollywood: 0,
+      hollywood: 0,
+      series: 0,
+      tollywood: 0,
+      bollywood: 0,
+      mollywood: 0,
+    };
+    const map = new Map<MovieCategoryKey, GroupedItem[]>();
+
+    for (const g of filteredMovies) {
+      const cat = getGroupCategory(g);
+      counts[cat] = (counts[cat] || 0) + 1;
+      let list = map.get(cat);
+      if (!list) {
+        list = [];
+        map.set(cat, list);
+      }
+      list.push(g);
+    }
+
+    const sections: { key: MovieCategoryKey; label: string; items: GroupedItem[] }[] = [];
+    for (const cfg of CATEGORY_CONFIG) {
+      if (cfg.key === 'all') continue;
+      const items = map.get(cfg.key);
+      if (items && items.length > 0) {
+        sections.push({
+          key: cfg.key,
+          label: cfg.label,
+          items,
+        });
+      }
+    }
+
+    return { searchCategoryCounts: counts, searchGroupedByCategory: sections };
+  }, [filteredMovies]);
+
+  const displayedSearchMovies = useMemo(() => {
+    if (selectedCategory === 'all') return filteredMovies;
+    return filteredMovies.filter((g) => getGroupCategory(g) === selectedCategory);
+  }, [filteredMovies, selectedCategory]);
+
+  const searchCategoryFilterOptions = useMemo(() => {
+    return CATEGORY_CONFIG.filter((cfg) => {
+      if (cfg.key === 'all') return true;
+      return (searchCategoryCounts[cfg.key] || 0) > 0;
+    }).map((cfg) => ({
+      ...cfg,
+      count: searchCategoryCounts[cfg.key] || 0,
+    }));
+  }, [searchCategoryCounts]);
+
+  const renderCategoryFilterChips = (
+    options: { key: MovieCategoryKey; label: string; icon: keyof typeof Ionicons.glyphMap; count: number }[]
+  ) => {
+    if (options.length <= 1) return null;
+    return (
+      <View style={styles.filtersContainer}>
+        <FlatList
+          data={options}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+          keyExtractor={(item) => item.key}
+          renderItem={({ item }) => {
+            const isSelected = selectedCategory === item.key;
+            return (
+              <TouchableOpacity
+                style={[
+                  styles.filterButton,
+                  isSelected && styles.filterButtonActive,
+                ]}
+                onPress={() => handleCategorySelect(item.key)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={item.icon as any}
+                  size={18}
+                  color={isSelected ? '#000000' : '#8E8E93'}
+                  style={styles.filterIcon}
+                />
+                <Text
+                  style={[
+                    styles.filterButtonText,
+                    isSelected && styles.filterButtonTextActive,
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -350,7 +648,9 @@ const SearchScreen = () => {
             <View style={styles.resultsGridSection}>
               <View style={styles.resultsHeaderRow}>
                 <Text style={styles.resultsCountText}>
-                  {`${filteredMovies.length} ${filteredMovies.length === 1 ? 'Movie' : 'Movies'} found`}
+                  {selectedCategory === 'all'
+                    ? `${filteredMovies.length} ${filteredMovies.length === 1 ? 'Movie' : 'Movies'} found`
+                    : `${searchCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedSearchMovies.length} ${displayedSearchMovies.length === 1 ? 'Match' : 'Matches'})`}
                 </Text>
                 <TouchableOpacity
                   style={styles.clearIconButton}
@@ -363,17 +663,70 @@ const SearchScreen = () => {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.gridWrap}>
-                {filteredMovies.map((group) => (
-                  <SearchMovieCard
-                    key={`movie-${group.name}-${group.year || ''}`}
-                    group={group}
-                    cardWidth={cardWidth}
-                    posterHeight={posterHeight}
-                    onPress={handleCardPress}
-                  />
-                ))}
-              </View>
+              {/* Category Filter Chips Bar matching index.tsx */}
+              {renderCategoryFilterChips(searchCategoryFilterOptions)}
+
+              {selectedCategory === 'all' ? (
+                /* Grouped by Category Sections (like index.tsx) */
+                searchGroupedByCategory.map((sec) => (
+                  <View key={`search-sec-${sec.key}`} style={styles.categorySection}>
+                    <View style={styles.categorySectionHeader}>
+                      <Text style={styles.categorySectionTitle}>
+                        {sec.label}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.seeAllButton}
+                        onPress={() => handleCategorySelect(sec.key)}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={styles.seeAllText}>See all ({sec.items.length})</Text>
+                        <Ionicons name="chevron-forward" size={15} color="#8E8E93" style={styles.chevronIcon} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.gridWrap}>
+                      {sec.items.map((group) => (
+                        <SearchMovieCard
+                          key={`movie-${sec.key}-${group.name}-${group.year || ''}`}
+                          group={group}
+                          cardWidth={cardWidth}
+                          posterHeight={posterHeight}
+                          onPress={handleCardPress}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                /* Single Filtered Category Grid */
+                displayedSearchMovies.length > 0 ? (
+                  <View style={styles.gridWrap}>
+                    {displayedSearchMovies.map((group) => (
+                      <SearchMovieCard
+                        key={`movie-${group.name}-${group.year || ''}`}
+                        group={group}
+                        cardWidth={cardWidth}
+                        posterHeight={posterHeight}
+                        onPress={handleCardPress}
+                      />
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.emptyCategoryWrap}>
+                    <Ionicons name="film-outline" size={36} color="#6E6E73" />
+                    <Text style={styles.emptyCategoryText}>
+                      No {searchCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || selectedCategory} matches found.
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.retryButton, { marginTop: 12 }]}
+                      onPress={() => setSelectedCategory('all')}
+                    >
+                      <Text style={styles.retryButtonText}>Show All Matches</Text>
+                    </TouchableOpacity>
+                  </View>
+                )
+              )}
             </View>
           )}
 
@@ -421,8 +774,28 @@ const SearchScreen = () => {
         >
           {isLoadingRecent && recentlyAddedMovies.length === 0 ? (
             <View style={styles.catalogLoadingContainer}>
-              <ActivityIndicator color={theme.primary} size="large" />
-              <Text style={styles.catalogLoadingText}>Loading recently added…</Text>
+              <View style={styles.loadingPulseCircle}>
+                <ActivityIndicator color={theme.primary} size="large" />
+              </View>
+              <Text style={styles.catalogLoadingTitle}>Loading Recently Added</Text>
+              <Text style={styles.catalogLoadingText}>
+                Fetching latest releases across Kollywood, Hollywood & Web Series…
+              </Text>
+
+              {/* Skeleton Cards Preview Grid */}
+              <View style={styles.loadingSkeletonGrid}>
+                {Array.from({ length: numColumns * 2 }).map((_, k) => (
+                  <View
+                    key={`skeleton-${k}`}
+                    style={[
+                      styles.skeletonCard,
+                      { width: cardWidth, height: posterHeight },
+                    ]}
+                  >
+                    <View style={styles.skeletonInner} />
+                  </View>
+                ))}
+              </View>
             </View>
           ) : recentlyAddedMovies.length > 0 ? (
             <View style={styles.resultsGridSection}>
@@ -430,7 +803,9 @@ const SearchScreen = () => {
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Ionicons name="time-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
                   <Text style={styles.resultsCountText}>
-                    {`Recently Added (${recentlyAddedMovies.length} ${recentlyAddedMovies.length === 1 ? 'Movie' : 'Movies'})`}
+                    {selectedCategory === 'all'
+                      ? `Recently Added (${recentlyAddedMovies.length} ${recentlyAddedMovies.length === 1 ? 'Movie' : 'Movies'})`
+                      : `${recentCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedRecentMovies.length} ${displayedRecentMovies.length === 1 ? 'Title' : 'Titles'})`}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -444,17 +819,70 @@ const SearchScreen = () => {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.gridWrap}>
-                {recentlyAddedMovies.map((group, index) => (
-                  <SearchMovieCard
-                    key={`recent-${group.name}-${group.year || ''}-${index}`}
-                    group={group}
-                    cardWidth={cardWidth}
-                    posterHeight={posterHeight}
-                    onPress={handleCardPress}
-                  />
-                ))}
-              </View>
+              {/* Category Filter Chips Bar matching index.tsx */}
+              {renderCategoryFilterChips(recentCategoryFilterOptions)}
+
+              {selectedCategory === 'all' ? (
+                /* Grouped by Category Sections (like index.tsx) */
+                recentGroupedByCategory.map((sec) => (
+                  <View key={`recent-sec-${sec.key}`} style={styles.categorySection}>
+                    <View style={styles.categorySectionHeader}>
+                      <Text style={styles.categorySectionTitle}>
+                        {sec.label}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.seeAllButton}
+                        onPress={() => handleCategorySelect(sec.key)}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={styles.seeAllText}>See all ({sec.items.length})</Text>
+                        <Ionicons name="chevron-forward" size={15} color="#8E8E93" style={styles.chevronIcon} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.gridWrap}>
+                      {sec.items.map((group, index) => (
+                        <SearchMovieCard
+                          key={`recent-${sec.key}-${group.name}-${group.year || ''}-${index}`}
+                          group={group}
+                          cardWidth={cardWidth}
+                          posterHeight={posterHeight}
+                          onPress={handleCardPress}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                /* Single Filtered Category Grid */
+                displayedRecentMovies.length > 0 ? (
+                  <View style={styles.gridWrap}>
+                    {displayedRecentMovies.map((group, index) => (
+                      <SearchMovieCard
+                        key={`recent-${group.name}-${group.year || ''}-${index}`}
+                        group={group}
+                        cardWidth={cardWidth}
+                        posterHeight={posterHeight}
+                        onPress={handleCardPress}
+                      />
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.emptyCategoryWrap}>
+                    <Ionicons name="film-outline" size={36} color="#6E6E73" />
+                    <Text style={styles.emptyCategoryText}>
+                      No {recentCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || selectedCategory} releases found in this batch.
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.retryButton, { marginTop: 12 }]}
+                      onPress={() => setSelectedCategory('all')}
+                    >
+                      <Text style={styles.retryButtonText}>Show All Releases</Text>
+                    </TouchableOpacity>
+                  </View>
+                )
+              )}
             </View>
           ) : (
             <View style={styles.emptyStateContainer}>
@@ -491,12 +919,23 @@ const SearchScreen = () => {
             </Text>
             <View style={styles.emptyStateActionsRow}>
               <TouchableOpacity
-                style={[styles.loadRecentBtn, { backgroundColor: theme.primary }]}
+                style={[
+                  styles.loadRecentBtn,
+                  { backgroundColor: theme.primary },
+                  isLoadingRecent && { opacity: 0.8 },
+                ]}
                 onPress={handleRecentlyAddedPress}
                 activeOpacity={0.8}
+                disabled={isLoadingRecent}
               >
-                <Ionicons name="time-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.loadRecentBtnText}>Recently added</Text>
+                {isLoadingRecent ? (
+                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                ) : (
+                  <Ionicons name="time-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                )}
+                <Text style={styles.loadRecentBtnText}>
+                  {isLoadingRecent ? 'Loading recently added…' : 'Recently added'}
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -581,12 +1020,53 @@ const styles = StyleSheet.create({
 
   catalogLoadingContainer: {
     alignItems: 'center',
-    paddingVertical: 60,
-    gap: 12,
+    paddingVertical: 36,
+    paddingHorizontal: 4,
+    width: '100%',
+  },
+  loadingPulseCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: 'rgba(83, 90, 255, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(83, 90, 255, 0.25)',
+  },
+  catalogLoadingTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 6,
+    letterSpacing: -0.2,
   },
   catalogLoadingText: {
     color: '#8E8E93',
-    fontSize: 14,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 28,
+    maxWidth: 320,
+    lineHeight: 18,
+  },
+  loadingSkeletonGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    width: '100%',
+  },
+  skeletonCard: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#18181a',
+    borderWidth: 1,
+    borderColor: '#28282c',
+    marginBottom: 14,
+  },
+  skeletonInner: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
   },
 
   // Action / Status Badges
@@ -780,6 +1260,90 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '600',
     fontSize: 14,
+  },
+
+  // Filters Container matching index.tsx
+  filtersContainer: {
+    paddingVertical: 12,
+    marginHorizontal: -16,
+  },
+  filterRow: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  filterButtonActive: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+  },
+  filterIcon: {
+    marginRight: 6,
+  },
+  filterButtonText: {
+    fontSize: 15,
+    color: '#8E8E93',
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  filterButtonTextActive: {
+    color: '#000000',
+    fontWeight: '700',
+  },
+
+  // Category Sections (like index.tsx / PosterList)
+  categorySection: {
+    marginBottom: 24,
+  },
+  categorySectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 14,
+    paddingHorizontal: 2,
+  },
+  categorySectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.2,
+  },
+  seeAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  seeAllText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#cccccc',
+    letterSpacing: -0.1,
+  },
+  chevronIcon: {
+    marginLeft: 2,
+  },
+  emptyCategoryWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+    width: '100%',
+  },
+  emptyCategoryText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
 

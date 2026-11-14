@@ -15,7 +15,7 @@ import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
 import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
-import { isScreenKeepAwakeEnabled } from '@/utils/StremioKeepAliveManager';
+import { isScreenKeepAwakeEnabled, isBackgroundAudioKeepAliveEnabled } from '@/utils/StremioKeepAliveManager';
 
 const SettingsScreen = () => {
   const router = useRouter();
@@ -28,6 +28,7 @@ const SettingsScreen = () => {
   const [dataStats, setDataStats] = useState<DataConsumptionStats | null>(null);
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [screenKeepAwake, setScreenKeepAwake] = useState(true);
+  const [bgAudioKeepAlive, setBgAudioKeepAlive] = useState(false);
 
   const loadDataStats = useCallback(async () => {
     try {
@@ -42,6 +43,7 @@ const SettingsScreen = () => {
     useCallback(() => {
       setNotifEnabled(tamilMVNotificationService.isNotificationsEnabled());
       setScreenKeepAwake(isScreenKeepAwakeEnabled());
+      setBgAudioKeepAlive(isBackgroundAudioKeepAliveEnabled());
       loadDataStats();
     }, [loadDataStats])
   );
@@ -80,7 +82,9 @@ const SettingsScreen = () => {
       title: 'Server',
       route: '/settings/stremioserver',
       icon: 'server-outline',
-      subtitle: 'Streaming server & screen keep-awake',
+      subtitle: screenKeepAwake
+        ? 'Streaming server & screen keep-awake active'
+        : 'Streaming server configuration',
       badgeText: screenKeepAwake ? 'Keep Awake On' : undefined,
       badgeColor: '#30d158',
     },

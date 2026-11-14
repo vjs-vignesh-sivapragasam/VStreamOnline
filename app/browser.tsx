@@ -14,7 +14,7 @@ import {
 import { WebView, WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
@@ -741,9 +741,19 @@ true;
 export default function BrowserScreen() {
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView | null>(null);
+  const { url: initialUrlParam } = useLocalSearchParams<{ url?: string }>();
 
   const [baseUrl, setBaseUrl] = useState<string>(() => getTamilMVBaseUrl());
-  const [currentUrl, setCurrentUrl] = useState<string>(() => getTamilMVBaseUrl());
+  const [currentUrl, setCurrentUrl] = useState<string>(() => {
+    if (initialUrlParam) {
+      try {
+        return decodeURIComponent(initialUrlParam);
+      } catch {
+        return initialUrlParam;
+      }
+    }
+    return getTamilMVBaseUrl();
+  });
   const [addressBarInput, setAddressBarInput] = useState<string>('');
   const [canGoBack, setCanGoBack] = useState<boolean>(false);
   const [canGoForward, setCanGoForward] = useState<boolean>(false);
@@ -781,10 +791,27 @@ export default function BrowserScreen() {
   useEffect(() => {
     const unsub = subscribeTamilMVBaseUrl((newUrl) => {
       setBaseUrl(newUrl);
-      setCurrentUrl(newUrl);
+      if (!initialUrlParam) {
+        setCurrentUrl(newUrl);
+      }
     });
     return unsub;
-  }, []);
+  }, [initialUrlParam]);
+
+  // Handle incoming or updated URL param from navigation
+  useEffect(() => {
+    if (initialUrlParam) {
+      try {
+        const decoded = decodeURIComponent(initialUrlParam);
+        if (decoded && decoded !== currentUrl) {
+          setCurrentUrl(decoded);
+          setAddressBarInput(decoded);
+          setHasLoadError(false);
+          webViewRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(decoded)}; true;`);
+        }
+      } catch {}
+    }
+  }, [initialUrlParam]);
 
   // Hardware Back Button handling on Android
   useEffect(() => {

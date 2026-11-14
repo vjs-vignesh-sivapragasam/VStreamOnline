@@ -123,9 +123,62 @@ export function formatReleaseDate(dateStr?: string): string {
 
 class TmdbService {
   private inMemoryCache = new Map<string, TmdbDetails>();
+  private posterCache = new Map<string, string | null>();
 
   clearCache(): void {
     this.inMemoryCache.clear();
+    this.posterCache.clear();
+  }
+
+  /**
+   * Fast, lightweight poster lookup (single search query, w342 thumbnail, no heavy sub-requests)
+   */
+  async getMoviePoster(
+    rawTitle: string,
+    passedYear?: string,
+    passedType?: string
+  ): Promise<string | null> {
+    const { query, year: extractedYear } = cleanMovieQuery(rawTitle);
+    if (!query) return null;
+    const searchYear = passedYear || extractedYear;
+    const cacheKey = `${query.toLowerCase()}_${searchYear || 'noyear'}_${passedType || 'any'}`;
+
+    if (this.posterCache.has(cacheKey)) {
+      return this.posterCache.get(cacheKey)!;
+    }
+
+    if (this.inMemoryCache.has(cacheKey)) {
+      const p = this.inMemoryCache.get(cacheKey)?.posterUrl || null;
+      this.posterCache.set(cacheKey, p);
+      return p;
+    }
+
+    try {
+      const apiKey = this.getApiKey();
+      const isSeries = passedType === 'series';
+      const searchEndpoint = isSeries
+        ? `${TMDB_BASE_URL}/search/tv?api_key=${apiKey}&query=${encodeURIComponent(query)}${
+            searchYear ? `&first_air_date_year=${searchYear}` : ''
+          }`
+        : `${TMDB_BASE_URL}/search/movie?api_key=${apiKey}&query=${encodeURIComponent(query)}${
+            searchYear ? `&primary_release_year=${searchYear}` : ''
+          }`;
+
+      const res = await fetch(searchEndpoint);
+      if (res.ok) {
+        const data = await res.json();
+        const best = data.results?.[0];
+        if (best?.poster_path) {
+          const posterUrl = `${TMDB_IMAGE_BASE}/w342${best.poster_path}`;
+          this.posterCache.set(cacheKey, posterUrl);
+          return posterUrl;
+        }
+      }
+      this.posterCache.set(cacheKey, null);
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   private getApiKey(): string {

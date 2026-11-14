@@ -2,16 +2,18 @@ import { getPlatformSpecificPlayers, Players } from "@/utils/MediaPlayer";
 import { showAlert } from "@/utils/platform";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState, useRef } from "react";
-import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image } from "react-native";
+import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { ServerConfig } from "@/components/ServerConfig";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StreamingServerClient } from "@/clients/stremio";
+import { StreamingServerClient, getServerCandidates } from "@/clients/stremio";
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { TorrentItem } from "@/hooks/useTamilMv";
 import { StorageKeys, storageService } from "@/utils/StorageService";
 import { isKSPlayerAvailable } from "@/components/ksplayer/KSPlayerView";
 import { useTheme } from "@/contexts/ThemeContext";
+import { ensureEmbeddedServerRunning } from "@/utils/StremioServerManager";
+import { Ionicons } from "@expo/vector-icons";
 
 interface UpdateProgressEvent {
   progress: number;
@@ -86,6 +88,7 @@ const MediaPlayerScreen: React.FC = () => {
   const [currentStreamIndex, setCurrentStreamIndex] = useState<number>(0);
   const { theme } = useTheme();
   const [streamBufferProgress, setStreamBufferProgress] = useState<number>(0);
+  const [streamPeers, setStreamPeers] = useState<number>(0);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [isLoadingStream, setIsLoadingStream] = useState<boolean>(true);
   const [streamError, setStreamError] = useState<string>('');
@@ -112,13 +115,15 @@ const MediaPlayerScreen: React.FC = () => {
     cleanupTorrentStats();
     torrentStatsIntervalRef.current = setInterval(async () => {
       try {
-        const stats = await client.getTorrentStats(infoHash, fileIdx);
+        const stats = await client.getTorrentStats(infoHash, fileIdx >= 0 ? fileIdx : undefined);
         if (stats) {
           const rawProgress = stats.streamProgress !== undefined && stats.streamProgress >= 0
             ? stats.streamProgress * 100
             : (stats.downloaded && stats.streamLen ? (stats.downloaded / stats.streamLen) * 100 : 0);
           const pct = Math.min(Math.max(Math.round(rawProgress), 0), 100);
           setStreamBufferProgress(pct);
+          const peers = stats.peers ?? stats.swarmConnections ?? stats.swarmSize ?? 0;
+          setStreamPeers(peers);
         }
       } catch {}
     }, 600);
@@ -128,6 +133,8 @@ const MediaPlayerScreen: React.FC = () => {
     let cancelled = false;
 
     const init = async () => {
+      ensureEmbeddedServerRunning().catch(() => {});
+
       if (Platform.OS !== 'web') {
         try {
           await ScreenOrientation.unlockAsync();
@@ -251,10 +258,21 @@ const MediaPlayerScreen: React.FC = () => {
   const fetchServerConfigs = (): { servers: ServerConfig[]; selectedId: string | null } => {
     try {
       const stored = storageService.getItem(SERVERS_KEY);
-      if (!stored) { setStremioClient(null); return { servers: [], selectedId: null }; }
-      const all: ServerConfig[] = JSON.parse(stored);
-      const stremio = all.filter(s => s.serverType === 'stremio');
-      if (!stremio.length) { setStremioClient(null); return { servers: [], selectedId: null }; }
+      let stremio: ServerConfig[] = [];
+      if (stored) {
+        const all: ServerConfig[] = JSON.parse(stored);
+        stremio = all.filter(s => s.serverType === 'stremio');
+      }
+      if (!stremio.length) {
+        const candidates = getServerCandidates();
+        stremio = candidates.map((url, idx) => ({
+          serverId: `auto-${idx}`,
+          serverType: 'stremio',
+          serverName: idx === 0 ? 'Primary Streaming Server' : `Server Candidate ${idx + 1}`,
+          serverUrl: url,
+          current: idx === 0,
+        }));
+      }
       const current = stremio.find(s => s.current) ?? stremio[0];
       setStremioServers(stremio);
       setSelectedServerId(current.serverId);
@@ -262,8 +280,19 @@ const MediaPlayerScreen: React.FC = () => {
       setStremioClient(client);
       return { servers: stremio, selectedId: current.serverId };
     } catch {
-      setStremioClient(null);
-      return { servers: [], selectedId: null };
+      const fallbackUrl = 'http://127.0.0.1:11470';
+      const fallbackServer: ServerConfig = {
+        serverId: 'default-localhost',
+        serverType: 'stremio',
+        serverName: 'Local Server',
+        serverUrl: fallbackUrl,
+        current: true,
+      };
+      const client = new StreamingServerClient(fallbackUrl);
+      setStremioClient(client);
+      setStremioServers([fallbackServer]);
+      setSelectedServerId(fallbackServer.serverId);
+      return { servers: [fallbackServer], selectedId: fallbackServer.serverId };
     }
   };
 
@@ -283,10 +312,11 @@ const MediaPlayerScreen: React.FC = () => {
     infoHash: string,
     serverUrl: string,
     fileIdx: number,
-    client?: StreamingServerClient
+    client?: StreamingServerClient,
+    magnetUrl?: string
   ): Promise<string> => {
     const c = client ?? new StreamingServerClient(serverUrl);
-    return c.getStreamingURL(infoHash, fileIdx);
+    return c.getStreamingURL(infoHash, fileIdx, magnetUrl);
   };
 
   const loadStream = async (
@@ -300,6 +330,7 @@ const MediaPlayerScreen: React.FC = () => {
 
     setIsLoadingStream(true);
     setStreamBufferProgress(0);
+    setStreamPeers(0);
     setStreamError('');
     setCurrentPlayerType("native");
     setHasTriedNative(false);
@@ -307,6 +338,7 @@ const MediaPlayerScreen: React.FC = () => {
 
     const stream = list[streamIndex];
     const infoHash = getInfoHashFromStream(stream);
+    const magnetUrl = stream.magnet || stream.magnetLink;
     const isTorrentStream = !stream.url && !!infoHash;
 
     try {
@@ -315,14 +347,18 @@ const MediaPlayerScreen: React.FC = () => {
       if (isTorrentStream) {
         const servers = serverList ?? stremioServers;
         const sid = serverId !== undefined ? serverId : selectedServerId;
-        if (!sid || !servers.length) throw new Error('No Stremio server configured. Please add one in Settings.');
-        const server = servers.find(s => s.serverId === sid);
-        if (!server) throw new Error('Stremio server not found.');
+        const server = (sid ? servers.find(s => s.serverId === sid) : null) || servers[0] || {
+          serverId: 'auto-localhost',
+          serverType: 'stremio',
+          serverName: 'Local Server',
+          serverUrl: 'http://127.0.0.1:11470',
+          current: true,
+        };
         setIsTorrent(true);
         const client = stremioClient ?? new StreamingServerClient(server.serverUrl);
-        finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, stream.fileIdx ?? -1, client);
+        finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, stream.fileIdx ?? -1, client, magnetUrl);
 
-        const fileIdx = stream.fileIdx ?? 0;
+        const fileIdx = stream.fileIdx ?? -1;
         startTorrentStatsPolling(client, infoHash!, fileIdx);
       } else {
         if (!stream.url) return;
@@ -356,10 +392,15 @@ const MediaPlayerScreen: React.FC = () => {
       if (isTorrentStream) {
         const servers = serverList ?? stremioServers;
         const sid = serverId !== undefined ? serverId : selectedServerId;
-        if (!sid || !servers.length) { showAlert('Error', 'No Stremio server configured.'); return; }
-        const server = servers.find(s => s.serverId === sid);
-        if (!server) { showAlert('Error', 'Stremio server not found.'); return; }
-        url = `${server.serverUrl}/${encodeURIComponent(infoHash!)}/${encodeURIComponent(stream.fileIdx ?? -1)}`;
+        const server = (sid ? servers.find(s => s.serverId === sid) : null) || servers[0] || {
+          serverId: 'auto-localhost',
+          serverType: 'stremio',
+          serverName: 'Local Server',
+          serverUrl: 'http://127.0.0.1:11470',
+          current: true,
+        };
+        const client = stremioClient ?? new StreamingServerClient(server.serverUrl);
+        url = await client.getStreamingURL(infoHash!, stream.fileIdx ?? -1, stream.magnet || stream.magnetLink);
       }
       if (!url) { showAlert('Error', 'Unable to generate video URL'); return; }
 
@@ -479,6 +520,35 @@ const MediaPlayerScreen: React.FC = () => {
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
+  if (streamError && !videoUrl) {
+    return (
+      <GestureHandlerRootView style={styles.rootContainer}>
+        <StatusBar hidden={true} style="light" />
+        <View style={styles.loadingContainer}>
+          {artwork ? <Image source={{ uri: artwork }} style={styles.backdropImage} /> : null}
+          <View style={styles.loadingOverlay}>
+            <Ionicons name="alert-circle-outline" size={48} color="#ff453a" />
+            <Text style={[styles.loadingText, { color: '#ff453a', textAlign: 'center', marginHorizontal: 30 }]}>
+              {streamError}
+            </Text>
+            <TouchableOpacity
+              style={styles.retryBtn}
+              onPress={() => loadStream(currentStreamIndex)}
+            >
+              <Text style={styles.retryBtnText}>Retry</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.retryBtn, { backgroundColor: 'transparent', marginTop: 8 }]}
+              onPress={() => router.back()}
+            >
+              <Text style={[styles.retryBtnText, { color: '#ffffff' }]}>Go Back</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </GestureHandlerRootView>
+    );
+  }
+
   if (isLoadingStream) {
     return (
       <GestureHandlerRootView style={styles.rootContainer}>
@@ -488,7 +558,9 @@ const MediaPlayerScreen: React.FC = () => {
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={theme.primary} />
             <Text style={styles.loadingText}>
-              {streamError || `Buffering: ${streamBufferProgress}%`}
+              {streamBufferProgress > 0
+                ? `Buffering: ${streamBufferProgress}%`
+                : (streamPeers > 0 ? `Connecting to ${streamPeers} peers...` : 'Connecting to stream...')}
             </Text>
           </View>
         </View>
@@ -523,6 +595,18 @@ const styles = StyleSheet.create({
   backdropImage: { position: 'absolute', width: '100%', height: '100%', resizeMode: 'cover', opacity: 0.5 },
   loadingOverlay: { justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#fff', marginTop: 20, fontSize: 16, fontWeight: '500' },
+  retryBtn: {
+    marginTop: 20,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  retryBtnText: {
+    color: '#000000',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });
 
 export default MediaPlayerScreen;

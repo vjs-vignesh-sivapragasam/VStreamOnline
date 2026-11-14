@@ -379,7 +379,7 @@ export const WaitingLobby: React.FC<{
     if (error) return null;
     if (hasStartedPlaying && !isBuffering) return null;
     const pct = bufferProgress !== undefined && bufferProgress >= 0 ? Math.min(Math.max(Math.round(bufferProgress), 0), 100) : null;
-    const displayText = bufferText || (pct !== null ? `Buffering: ${pct}%` : "Buffering...");
+    const displayText = bufferText || (pct !== null ? (pct > 0 ? `Buffering: ${pct}%` : "Connecting to stream...") : "Buffering...");
     return (
         <Animated.View style={[styles.bufferingContainer, { opacity }]} pointerEvents="none">
             <ActivityIndicator size="large" color={theme.primary} />
@@ -399,7 +399,7 @@ export const ArtworkBackground: React.FC<{
     const { theme } = useTheme();
     if (!artwork || hasStartedPlaying || error) return null;
     const pct = bufferProgress !== undefined && bufferProgress >= 0 ? Math.min(Math.max(Math.round(bufferProgress), 0), 100) : null;
-    const displayText = bufferText || (pct !== null ? `Buffering: ${pct}%` : "Buffering...");
+    const displayText = bufferText || (pct !== null ? (pct > 0 ? `Buffering: ${pct}%` : "Connecting to stream...") : "Buffering...");
     return (
         <View style={styles.artworkContainer}>
             <Image source={{ uri: artwork }} style={styles.artworkImage} resizeMode="cover" />

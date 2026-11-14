@@ -2657,38 +2657,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       {/* Controls Overlay (native player only) */}
       {showControls && (
         <View style={[styles.controlsOverlay, isFullScreen && styles.controlsOverlayFullScreen]} pointerEvents="box-none">
-          {/* Top Bar: Real YouTube Icons (Chevron Down, Autoplay, Cast, CC, Screen Fit, Settings) */}
+          {/* Top Bar: Clean YouTube Icons (CC, Settings) */}
           <View style={styles.topBar}>
             <View style={{ width: 38, height: 38 }} />
 
             <View style={styles.topBarRight}>
-              {/* Autoplay Toggle Switch */}
-              <TouchableOpacity
-                style={[styles.autoplayToggleTrack, isAutoplay && styles.autoplayToggleTrackOn]}
-                onPress={handleToggleAutoplay}
-                activeOpacity={0.8}
-                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-              >
-                <View style={[styles.autoplayToggleThumb, isAutoplay && styles.autoplayToggleThumbOn]}>
-                  <Ionicons
-                    name={isAutoplay ? 'play' : 'pause'}
-                    size={8}
-                    color="#000000"
-                    style={isAutoplay ? { marginLeft: 1 } : undefined}
-                  />
-                </View>
-              </TouchableOpacity>
-
-              {/* Cast Icon */}
-              <TouchableOpacity
-                style={styles.topIconBtn}
-                onPress={handleCastPress}
-                activeOpacity={0.7}
-                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-              >
-                <Ionicons name="tv-outline" size={20} color="#ffffff" />
-              </TouchableOpacity>
-
               {/* Closed Captions (CC) Icon */}
               <TouchableOpacity
                 style={styles.topIconBtn}
@@ -2699,26 +2672,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 <View style={[styles.ccIconBadge, isCCOn && styles.ccIconBadgeActive]}>
                   <Text style={[styles.ccIconText, isCCOn && styles.ccIconTextActive]}>CC</Text>
                 </View>
-              </TouchableOpacity>
-
-              {/* Screen Fit / Zoom Toggle Button */}
-              <TouchableOpacity
-                style={styles.topIconBtn}
-                onPress={handleToggleResizeMode}
-                activeOpacity={0.7}
-                hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
-              >
-                <Ionicons
-                  name={
-                    effectiveResizeMode === 'stretch'
-                      ? 'scan-outline'
-                      : effectiveResizeMode === 'contain'
-                      ? 'contract-outline'
-                      : 'expand-outline'
-                  }
-                  size={19}
-                  color={effectiveResizeMode === 'stretch' ? '#30d158' : '#ffffff'}
-                />
               </TouchableOpacity>
 
               {/* Settings Gear Button */}

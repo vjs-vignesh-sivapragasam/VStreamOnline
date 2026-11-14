@@ -71,6 +71,33 @@ const TamilMvSettingsScreen: React.FC = () => {
   const [isCheckingNewMovies, setIsCheckingNewMovies] = useState<boolean>(false);
   const [checkStatusText, setCheckStatusText] = useState<string | null>(null);
 
+  const triggerHaptic = useCallback(async (type: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(type);
+    }
+  }, []);
+
+  const runPing = useCallback(async (targetUrl: string) => {
+    setIsPinging(true);
+    setLastPingedUrl(targetUrl);
+    try {
+      const result = await pingTamilMV(targetUrl);
+      setPingResult(result);
+      if (result.success && result.rssWorking) {
+        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+      }
+    } catch (e: any) {
+      setPingResult({
+        success: false,
+        latencyMs: 0,
+        rssWorking: false,
+        message: `Ping failed: ${e?.message || 'Unknown error'}`,
+      });
+    } finally {
+      setIsPinging(false);
+    }
+  }, [triggerHaptic]);
+
   useEffect(() => {
     const checkPerm = async () => {
       const granted = await tamilMVNotificationService.checkPermissions();
@@ -90,13 +117,116 @@ const TamilMvSettingsScreen: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      const current = await getTamilMVBaseUrlAsync();
+      setActiveUrl(current);
+      setUrlInput(current);
+      runPing(current);
+    })();
+  }, [runPing]);
+
+  const handleTestPing = async () => {
+    await triggerHaptic();
+    const candidate = urlInput.trim();
+    if (!candidate) {
+      showAlert('Error', 'Please enter a valid URL to ping.');
+      return;
+    }
+    await runPing(candidate);
+  };
+
+  const handleAutoDetectDomain = async () => {
+    await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    setIsAutoDetecting(true);
+    setDetectProgressText('Searching live mirrors...');
+    try {
+      const working = await autoDetectTamilMVDomain((status) => {
+        setDetectProgressText(status);
+      });
+
+      if (working) {
+        setActiveUrl(working);
+        setUrlInput(working);
+        showAlert(
+          'Mirror Connected',
+          `Successfully connected to live domain:\n\n${working}`
+        );
+        await runPing(working);
+      } else {
+        showAlert(
+          'Auto-Detect Failed',
+          'Could not find an active domain automatically. Please select a mirror preset below or check your network.'
+        );
+      }
+    } catch (e: any) {
+      showAlert('Auto-Detect Error', e?.message || 'Failed to auto-detect working domain');
+    } finally {
+      setIsAutoDetecting(false);
+      setDetectProgressText('');
+    }
+  };
+
+  const handleSave = async () => {
+    await triggerHaptic();
+    const candidate = urlInput.trim().replace(/\/+$/, '');
+
+    try {
+      const parsed = new URL(candidate);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        showAlert('Invalid URL', 'The URL must start with http:// or https://');
+        return;
+      }
+    } catch {
+      showAlert('Invalid URL', 'Please enter a well-formed website URL.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await setTamilMVBaseUrl(candidate);
+      setActiveUrl(candidate);
+      showAlert('Success', 'Mirror domain updated.');
+      await runPing(candidate);
+    } catch (e: any) {
+      showAlert('Error', `Failed to save URL: ${e?.message || 'Unknown error'}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    await triggerHaptic();
+    await resetTamilMVBaseUrl();
+    setActiveUrl(DEFAULT_TAMILMV_BASE_URL);
+    setUrlInput(DEFAULT_TAMILMV_BASE_URL);
+    showAlert('Reset', `Reset to default:\n${DEFAULT_TAMILMV_BASE_URL}`);
+    await runPing(DEFAULT_TAMILMV_BASE_URL);
+  };
+
+  const handleSelectPreset = async (preset: string) => {
+    await triggerHaptic();
+    setUrlInput(preset);
+    setActiveUrl(preset);
+    try {
+      await setTamilMVBaseUrl(preset);
+    } catch {}
+    await runPing(preset);
+  };
+
+  const handleCopyUrl = async () => {
+    await triggerHaptic();
+    await Clipboard.setStringAsync(activeUrl);
+    showAlert('Copied', 'Domain URL copied to clipboard.');
+  };
+
   const handleToggleNotifications = async (val: boolean) => {
     await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     const rebuildCmd = Platform.OS === 'ios' ? 'npx expo run:ios' : 'npx expo run:android';
     if (val && !tamilMVNotificationService.isSupported()) {
       showAlert(
         'Notifications Unavailable',
-        `Native notification modules are not included in this build (e.g. Expo Go or stale binary). Please rebuild your native app (${rebuildCmd}) to enable movie alerts.`
+        `Native notification modules are not included in this build. Please rebuild your native app (${rebuildCmd}) to enable movie alerts.`
       );
       setNotificationsEnabled(false);
       return;
@@ -142,7 +272,7 @@ const TamilMvSettingsScreen: React.FC = () => {
     if (!tamilMVNotificationService.isSupported()) {
       showAlert(
         'Notifications Unavailable',
-        `Native notification modules are not included in this build. Please rebuild your app binary (${rebuildCmd}) to test notifications.`
+        `Native notification modules are not included in this build. Please rebuild your app (${rebuildCmd}) to test notifications.`
       );
       return;
     }
@@ -157,9 +287,7 @@ const TamilMvSettingsScreen: React.FC = () => {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           } catch {}
         }
-        setCheckStatusText('🎬 Test notification dispatched! Check your notification banner above.');
-        // On iOS, avoid popping a modal Alert immediately because an active UIAlertController
-        // suppresses or hides the foreground notification banner animation from Dynamic Island/notch.
+        setCheckStatusText('Test notification sent! Check your notification banner.');
         if (Platform.OS !== 'ios') {
           showAlert('Notification Sent! 🎬', 'Check your device notification banner to preview the movie alert.');
         }
@@ -176,7 +304,7 @@ const TamilMvSettingsScreen: React.FC = () => {
             ]
           );
         } else {
-          showAlert('Notification Error', 'Could not schedule notification. Please check your notification settings.');
+          showAlert('Notification Error', 'Could not schedule notification. Please check your device settings.');
         }
       }
     } catch (err: any) {
@@ -189,11 +317,11 @@ const TamilMvSettingsScreen: React.FC = () => {
   const handleCheckNow = async () => {
     await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     setIsCheckingNewMovies(true);
-    setCheckStatusText('Checking TamilMV for new releases...');
+    setCheckStatusText('Checking for new releases...');
     try {
       const res = await tamilMVNotificationService.checkForNewMovies(true);
       if (res.newCount > 0) {
-        setCheckStatusText(`Dispatched ${res.newCount} new movie alert(s)!`);
+        setCheckStatusText(`Dispatched ${res.newCount} new alert(s)!`);
         showAlert(
           'New Releases Found! 🎬',
           `Dispatched ${res.newCount} alert(s): ${res.movies.slice(0, 3).join(', ')}`
@@ -208,143 +336,12 @@ const TamilMvSettingsScreen: React.FC = () => {
     }
   };
 
-  const triggerHaptic = useCallback(async (type: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
-    if (await isHapticsSupported()) {
-      Haptics.impactAsync(type);
-    }
-  }, []);
-
-  const runPing = useCallback(async (targetUrl: string) => {
-    setIsPinging(true);
-    setLastPingedUrl(targetUrl);
-    try {
-      const result = await pingTamilMV(targetUrl);
-      setPingResult(result);
-      if (result.success && result.rssWorking) {
-        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-      }
-    } catch (e: any) {
-      setPingResult({
-        success: false,
-        latencyMs: 0,
-        rssWorking: false,
-        message: `Ping failed: ${e?.message || 'Unknown error'}`,
-      });
-    } finally {
-      setIsPinging(false);
-    }
-  }, [triggerHaptic]);
-
-  useEffect(() => {
-    (async () => {
-      const current = await getTamilMVBaseUrlAsync();
-      setActiveUrl(current);
-      setUrlInput(current);
-      runPing(current);
-    })();
-  }, [runPing]);
-
-  const handleTestPing = async () => {
-    await triggerHaptic();
-    const candidate = urlInput.trim();
-    if (!candidate) {
-      showAlert('Error', 'Please enter a valid URL to ping.');
-      return;
-    }
-    await runPing(candidate);
-  };
-
-  const handleAutoDetectDomain = async () => {
-    await triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    setIsAutoDetecting(true);
-    setDetectProgressText('Searching for active mirror in background...');
-    try {
-      const working = await autoDetectTamilMVDomain((status) => {
-        setDetectProgressText(status);
-      });
-
-      if (working) {
-        setActiveUrl(working);
-        setUrlInput(working);
-        showAlert(
-          'Domain Configured',
-          `Successfully connected to live domain:\n\n${working}`
-        );
-        await runPing(working);
-      } else {
-        showAlert(
-          'Auto-Detect Failed',
-          'Could not find an active domain automatically. Please check your internet connection or select a mirror preset below.'
-        );
-      }
-    } catch (e: any) {
-      showAlert('Auto-Detect Error', e?.message || 'Failed to auto-detect working domain');
-    } finally {
-      setIsAutoDetecting(false);
-      setDetectProgressText('');
-    }
-  };
-
-  const handleSave = async () => {
-    await triggerHaptic();
-    const candidate = urlInput.trim().replace(/\/+$/, '');
-
-    try {
-      const parsed = new URL(candidate);
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
-        showAlert('Invalid URL', 'The URL must start with http:// or https://');
-        return;
-      }
-    } catch {
-      showAlert('Invalid URL', 'Please enter a well-formed website URL.');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      await setTamilMVBaseUrl(candidate);
-      setActiveUrl(candidate);
-      showAlert('Success', 'Connection URL updated successfully.');
-      await runPing(candidate);
-    } catch (e: any) {
-      showAlert('Error', `Failed to save URL: ${e?.message || 'Unknown error'}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleReset = async () => {
-    await triggerHaptic();
-    await resetTamilMVBaseUrl();
-    setActiveUrl(DEFAULT_TAMILMV_BASE_URL);
-    setUrlInput(DEFAULT_TAMILMV_BASE_URL);
-    showAlert('Reset', `Reset connection URL to default:\n${DEFAULT_TAMILMV_BASE_URL}`);
-    await runPing(DEFAULT_TAMILMV_BASE_URL);
-  };
-
-  const handleSelectPreset = async (preset: string) => {
-    await triggerHaptic();
-    setUrlInput(preset);
-    setActiveUrl(preset);
-    // Always persist to AsyncStorage automatically
-    try {
-      await setTamilMVBaseUrl(preset);
-    } catch {}
-    await runPing(preset);
-  };
-
-  const handleCopyUrl = async () => {
-    await triggerHaptic();
-    await Clipboard.setStringAsync(activeUrl);
-    showAlert('Copied', 'Domain URL copied to clipboard.');
-  };
-
   const getStatusBadge = () => {
     if (isPinging) {
       return (
         <View style={[styles.badge, styles.badgeChecking]}>
-          <ActivityIndicator size="small" color="#ffd60a" style={{ marginRight: 6 }} />
-          <Text style={[styles.badgeText, { color: '#ffd60a' }]}>Checking...</Text>
+          <ActivityIndicator size="small" color="#ffd60a" style={{ marginRight: 5 }} />
+          <Text style={[styles.badgeText, { color: '#ffd60a' }]}>Pinging...</Text>
         </View>
       );
     }
@@ -352,8 +349,8 @@ const TamilMvSettingsScreen: React.FC = () => {
     if (!pingResult) {
       return (
         <View style={[styles.badge, styles.badgeUnknown]}>
-          <Ionicons name="help-circle-outline" size={15} color="#8E8E93" style={{ marginRight: 5 }} />
-          <Text style={[styles.badgeText, { color: '#8E8E93' }]}>Not Tested</Text>
+          <Ionicons name="help-circle-outline" size={13} color="#8E8E93" style={{ marginRight: 4 }} />
+          <Text style={[styles.badgeText, { color: '#8E8E93' }]}>Untested</Text>
         </View>
       );
     }
@@ -361,7 +358,7 @@ const TamilMvSettingsScreen: React.FC = () => {
     if (pingResult.success && pingResult.rssWorking) {
       return (
         <View style={[styles.badge, styles.badgeSuccess]}>
-          <Ionicons name="checkmark-circle" size={15} color="#30d158" style={{ marginRight: 5 }} />
+          <View style={[styles.statusDot, { backgroundColor: '#30d158' }]} />
           <Text style={[styles.badgeText, { color: '#30d158' }]}>Online ({pingResult.latencyMs}ms)</Text>
         </View>
       );
@@ -370,16 +367,16 @@ const TamilMvSettingsScreen: React.FC = () => {
     if (pingResult.success && !pingResult.rssWorking) {
       return (
         <View style={[styles.badge, styles.badgeWarning]}>
-          <Ionicons name="alert-circle" size={15} color="#ffd60a" style={{ marginRight: 5 }} />
-          <Text style={[styles.badgeText, { color: '#ffd60a' }]}>Reachable • RSS Issue</Text>
+          <View style={[styles.statusDot, { backgroundColor: '#ffd60a' }]} />
+          <Text style={[styles.badgeText, { color: '#ffd60a' }]}>Feed Issue</Text>
         </View>
       );
     }
 
     return (
       <View style={[styles.badge, styles.badgeError]}>
-        <Ionicons name="close-circle" size={15} color="#ff453a" style={{ marginRight: 5 }} />
-        <Text style={[styles.badgeText, { color: '#ff453a' }]}>Offline / Blocked</Text>
+        <View style={[styles.statusDot, { backgroundColor: '#ff453a' }]} />
+        <Text style={[styles.badgeText, { color: '#ff453a' }]}>Offline</Text>
       </View>
     );
   };
@@ -401,10 +398,10 @@ const TamilMvSettingsScreen: React.FC = () => {
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             activeOpacity={0.7}
           >
-            <Ionicons name="arrow-back" size={22} color="#ffffff" />
+            <Ionicons name="chevron-back" size={22} color="#ffffff" />
           </TouchableOpacity>
-          <Text style={styles.navTitle}>Connection</Text>
-          <View style={{ width: 38 }} />
+          <Text style={styles.navTitle}>Connection & Alerts</Text>
+          <View style={{ width: 36 }} />
         </View>
 
         <ScrollView
@@ -415,46 +412,50 @@ const TamilMvSettingsScreen: React.FC = () => {
           {/* Header Title Section */}
           <View style={styles.header}>
             <View style={[styles.iconCircle, { backgroundColor: theme.iconBg }]}>
-              <Ionicons name="globe-outline" size={28} color={theme.primary} />
+              <Ionicons name="globe-outline" size={24} color={theme.primary} />
             </View>
-            <Text style={styles.title}>Connection</Text>
+            <Text style={styles.title}>Connection & Movie Alerts</Text>
             <Text style={styles.subtitle}>
-              Configure your streaming mirror, test live ping latency, and auto-detect working domains.
+              Configure live mirrors, test latency diagnostics, and manage new release alerts.
             </Text>
           </View>
 
-          {/* 1. Connection Status Card */}
+          {/* ── CARD 1: MIRROR & DIAGNOSTICS (CONSOLIDATED) ── */}
           <View style={styles.card}>
+            {/* Header & Status Badge */}
             <View style={styles.cardHeader}>
               <View style={styles.headerTitleWrap}>
                 <Ionicons name="pulse" size={15} color={theme.primary} style={{ marginRight: 6 }} />
-                <Text style={styles.cardSectionTitle}>LIVE STATUS</Text>
+                <Text style={styles.cardSectionTitle}>MIRROR & DIAGNOSTICS</Text>
               </View>
               {getStatusBadge()}
             </View>
 
-            <View style={styles.pingDetails}>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Active Domain</Text>
-                <TouchableOpacity
-                  style={styles.activeDomainRow}
-                  onPress={handleCopyUrl}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.detailValue} numberOfLines={1}>
-                    {lastPingedUrl || activeUrl}
-                  </Text>
-                  <Ionicons name="copy-outline" size={14} color="#8E8E93" style={{ marginLeft: 6 }} />
-                </TouchableOpacity>
+            {/* Active Domain Preview with Copy Action */}
+            <TouchableOpacity
+              style={styles.domainPreviewBox}
+              onPress={handleCopyUrl}
+              activeOpacity={0.7}
+            >
+              <View style={styles.domainPreviewLeft}>
+                <Ionicons name="link-outline" size={16} color={theme.primary} style={{ marginRight: 8 }} />
+                <Text style={styles.domainPreviewText} numberOfLines={1}>
+                  {lastPingedUrl || activeUrl}
+                </Text>
               </View>
+              <View style={styles.copyPill}>
+                <Ionicons name="copy-outline" size={12} color="#8E8E93" style={{ marginRight: 4 }} />
+                <Text style={styles.copyPillText}>Copy</Text>
+              </View>
+            </TouchableOpacity>
 
-              <View style={styles.detailDivider} />
-
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Latency</Text>
+            {/* Diagnostics Quick Metrics Row */}
+            <View style={styles.metricsRow}>
+              <View style={styles.metricItem}>
+                <Text style={styles.metricLabel}>Latency</Text>
                 <Text
                   style={[
-                    styles.detailValue,
+                    styles.metricValue,
                     {
                       color:
                         pingResult && pingResult.latencyMs > 0
@@ -467,156 +468,153 @@ const TamilMvSettingsScreen: React.FC = () => {
                     },
                   ]}
                 >
-                  {pingResult && pingResult.latencyMs > 0 ? `${pingResult.latencyMs} ms` : 'N/A'}
+                  {pingResult && pingResult.latencyMs > 0 ? `${pingResult.latencyMs}ms` : '—'}
                 </Text>
               </View>
 
-              <View style={styles.detailDivider} />
+              <View style={styles.metricDivider} />
 
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>HTTP Status</Text>
-                <Text style={styles.detailValue}>
-                  {pingResult?.httpStatus !== undefined ? pingResult.httpStatus : '—'}
+              <View style={styles.metricItem}>
+                <Text style={styles.metricLabel}>HTTP Status</Text>
+                <Text style={styles.metricValue}>
+                  {pingResult?.httpStatus !== undefined ? `${pingResult.httpStatus}` : '—'}
                 </Text>
               </View>
 
-              <View style={styles.detailDivider} />
+              <View style={styles.metricDivider} />
 
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Catalog Feed</Text>
+              <View style={styles.metricItem}>
+                <Text style={styles.metricLabel}>Catalog Feed</Text>
                 <Text
                   style={[
-                    styles.detailValue,
-                    { color: pingResult?.rssWorking ? '#30d158' : pingResult ? '#ff9f0a' : '#8E8E93' },
+                    styles.metricValue,
+                    { color: pingResult?.rssWorking ? '#30d158' : pingResult ? '#ffd60a' : '#8E8E93' },
                   ]}
                 >
-                  {pingResult?.rssWorking ? 'Active & Healthy' : pingResult ? 'Feed Issue' : '—'}
+                  {pingResult?.rssWorking ? 'Healthy' : pingResult ? 'Issues' : '—'}
                 </Text>
               </View>
             </View>
 
-            <TouchableOpacity
-              style={[styles.pingButton, isPinging && styles.buttonDisabled]}
-              onPress={handleTestPing}
-              disabled={isPinging}
-              activeOpacity={0.7}
-            >
-              {isPinging ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <>
-                  <Ionicons name="refresh-outline" size={17} color="#ffffff" style={{ marginRight: 6 }} />
-                  <Text style={styles.pingButtonText}>Test Latency & Diagnostics</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* 2. Auto-Detect Domain Card */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={styles.headerTitleWrap}>
-                <Ionicons name="sparkles" size={15} color={theme.primary} style={{ marginRight: 6 }} />
-                <Text style={styles.cardSectionTitle}>AUTO-DETECT MIRROR</Text>
-              </View>
-              <View
-                style={[
-                  styles.autoDetectBadge,
-                  { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' },
-                ]}
-              >
-                <Text style={[styles.autoDetectBadgeText, { color: theme.primaryLight || theme.primary }]}>
-                  Smart Resolver
-                </Text>
-              </View>
-            </View>
-
-            <Text style={styles.cardDescription}>
-              If your current domain gets blocked by your ISP, tap below. The app will search online in the background, identify the active live mirror, verify its connectivity, and automatically configure it.
-            </Text>
-
+            {/* Auto-Detect Progress Banner (when active) */}
             {isAutoDetecting && (
-              <View style={styles.detectingProgressBox}>
-                <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 10 }} />
-                <Text style={styles.detectingProgressText} numberOfLines={2}>
-                  {detectProgressText || 'Detecting working domain...'}
+              <View style={styles.detectProgressBanner}>
+                <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 8 }} />
+                <Text style={styles.detectProgressText} numberOfLines={1}>
+                  {detectProgressText || 'Testing live mirrors in background...'}
                 </Text>
               </View>
             )}
 
-            <TouchableOpacity
-              style={[
-                styles.autoDetectPrimaryBtn,
-                { backgroundColor: theme.primary },
-                (isAutoDetecting || isPinging) && styles.buttonDisabled,
-              ]}
-              onPress={handleAutoDetectDomain}
-              disabled={isAutoDetecting || isPinging}
-              activeOpacity={0.8}
-            >
-              {isAutoDetecting ? (
-                <>
-                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
-                  <Text style={styles.autoDetectPrimaryBtnText}>Detecting Working Domain...</Text>
-                </>
-              ) : (
-                <>
-                  <Ionicons name="search" size={17} color="#ffffff" style={{ marginRight: 8 }} />
-                  <Text style={styles.autoDetectPrimaryBtnText}>Auto-Detect Working Domain</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* 3. Domain Configuration Card */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={styles.headerTitleWrap}>
-                <Ionicons name="link" size={15} color={theme.primary} style={{ marginRight: 6 }} />
-                <Text style={styles.cardSectionTitle}>CUSTOM DOMAIN CONFIGURATION</Text>
-              </View>
-            </View>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Domain URL</Text>
-              <View style={styles.textInputWrapper}>
-                <Ionicons name="globe-outline" size={18} color="#8E8E93" style={{ marginRight: 8 }} />
-                <TextInput
-                  style={styles.textInput}
-                  value={urlInput}
-                  onChangeText={setUrlInput}
-                  placeholder="https://www.1tamilmv.solar"
-                  placeholderTextColor="#666666"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                />
-                {urlInput.length > 0 && (
-                  <TouchableOpacity
-                    onPress={() => setUrlInput('')}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Ionicons name="close-circle" size={18} color="#666666" />
-                  </TouchableOpacity>
+            {/* Consolidated Dual Actions: Test Latency & Auto-Detect Mirror */}
+            <View style={styles.consolidatedActionRow}>
+              <TouchableOpacity
+                style={[styles.actionBtnSecondary, (isPinging || isAutoDetecting) && styles.buttonDisabled]}
+                onPress={handleTestPing}
+                disabled={isPinging || isAutoDetecting}
+                activeOpacity={0.7}
+              >
+                {isPinging ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh-outline" size={15} color="#ffffff" style={{ marginRight: 6 }} />
+                    <Text style={styles.actionBtnSecondaryText}>Test Latency</Text>
+                  </>
                 )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.actionBtnPrimary,
+                  { backgroundColor: theme.primary },
+                  (isAutoDetecting || isPinging) && styles.buttonDisabled,
+                ]}
+                onPress={handleAutoDetectDomain}
+                disabled={isAutoDetecting || isPinging}
+                activeOpacity={0.8}
+              >
+                {isAutoDetecting ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Ionicons name="sparkles" size={14} color="#ffffff" style={{ marginRight: 6 }} />
+                    <Text style={styles.actionBtnPrimaryText}>Auto-Detect Mirror</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.cardDivider} />
+
+            {/* Custom Domain Input */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Custom Domain URL</Text>
+              <View style={styles.inputRow}>
+                <View style={styles.textInputWrap}>
+                  <TextInput
+                    style={styles.textInput}
+                    value={urlInput}
+                    onChangeText={setUrlInput}
+                    placeholder="https://www.1tamilmv.solar"
+                    placeholderTextColor="#555555"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                  />
+                  {urlInput.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => setUrlInput('')}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{ paddingHorizontal: 4 }}
+                    >
+                      <Ionicons name="close-circle" size={16} color="#666666" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={[styles.saveBtn, { backgroundColor: theme.primary }, isSaving && styles.buttonDisabled]}
+                  onPress={handleSave}
+                  disabled={isSaving}
+                  activeOpacity={0.8}
+                >
+                  {isSaving ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <Ionicons name="checkmark" size={18} color="#ffffff" />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.resetIconBtn}
+                  onPress={handleReset}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <MaterialIcons name="restore" size={20} color="#ff453a" />
+                </TouchableOpacity>
               </View>
             </View>
 
-            {/* Presets */}
-            <View style={styles.presetsContainer}>
-              <Text style={styles.presetsLabel}>Known Mirror Presets (Tap to switch & apply)</Text>
-              <View style={styles.presetsList}>
+            {/* Mirror Presets (Horizontal Scrollable Chips) */}
+            <View style={styles.presetsWrap}>
+              <Text style={styles.presetsTitle}>KNOWN MIRROR PRESETS</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.presetsScroll}
+              >
                 {PRESET_DOMAINS.map((domain) => {
                   const isSelected = activeUrl.trim().replace(/\/+$/, '') === domain;
+                  const shortName = domain.replace('https://www.', '').replace('https://', '');
                   return (
                     <TouchableOpacity
                       key={domain}
                       style={[
-                        styles.presetPill,
-                        isSelected && [
-                          styles.presetPillActive,
-                          { backgroundColor: theme.primary + '22', borderColor: theme.primary },
-                        ],
+                        styles.presetChip,
+                        isSelected && {
+                          backgroundColor: theme.primary + '22',
+                          borderColor: theme.primary,
+                        },
                       ]}
                       onPress={() => handleSelectPreset(domain)}
                       activeOpacity={0.7}
@@ -624,126 +622,72 @@ const TamilMvSettingsScreen: React.FC = () => {
                       {isSelected && (
                         <Ionicons
                           name="checkmark-circle"
-                          size={14}
+                          size={12}
                           color={theme.primary}
-                          style={{ marginRight: 5 }}
+                          style={{ marginRight: 4 }}
                         />
                       )}
-                      <Text style={[styles.presetPillText, isSelected && { color: '#ffffff', fontWeight: '700' }]}>
-                        {domain.replace('https://', '')}
+                      <Text
+                        style={[
+                          styles.presetChipText,
+                          isSelected && { color: theme.primaryLight || '#ffffff', fontWeight: '700' },
+                        ]}
+                      >
+                        {shortName}
                       </Text>
                     </TouchableOpacity>
                   );
                 })}
-              </View>
-            </View>
-
-            {/* Action Buttons */}
-            <View style={styles.actionsContainer}>
-              <TouchableOpacity
-                style={[
-                  styles.saveButton,
-                  { backgroundColor: theme.primary },
-                  isSaving && styles.buttonDisabled,
-                ]}
-                onPress={handleSave}
-                disabled={isSaving}
-                activeOpacity={0.8}
-              >
-                {isSaving ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark" size={18} color="#ffffff" style={{ marginRight: 6 }} />
-                    <Text style={styles.saveButtonText}>Save & Apply</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.resetButton}
-                onPress={handleReset}
-                activeOpacity={0.7}
-              >
-                <MaterialIcons name="restore" size={18} color="#ff453a" style={{ marginRight: 6 }} />
-                <Text style={styles.resetButtonText}>Reset to Default</Text>
-              </TouchableOpacity>
+              </ScrollView>
             </View>
           </View>
 
-          {/* 4. New Movie Push Notifications Card */}
+          {/* ── CARD 2: MOVIE PUSH NOTIFICATIONS ── */}
           <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={styles.headerTitleWrap}>
-                <Ionicons name="notifications" size={15} color={theme.primary} style={{ marginRight: 6 }} />
-                <Text style={styles.cardSectionTitle}>NEW MOVIE PUSH NOTIFICATIONS</Text>
-              </View>
-              <View
-                style={[
-                  styles.statusBadge,
-                  {
-                    backgroundColor: notificationsEnabled ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)',
-                    borderColor: notificationsEnabled ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 69, 58, 0.3)',
-                  },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.statusDot,
-                    { backgroundColor: notificationsEnabled ? '#30d158' : '#ff453a' },
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.statusText,
-                    { color: notificationsEnabled ? '#30d158' : '#ff453a' },
-                  ]}
-                >
-                  {notificationsEnabled ? 'Active' : 'Off'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Toggle row */}
-            <View style={styles.notifToggleRow}>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={styles.notifToggleTitle}>Push Alerts for New Releases</Text>
-                <Text style={styles.notifToggleDesc}>
-                  {notificationsEnabled
-                    ? 'Periodically scans TamilMV and sends instant alerts when fresh movies or series are added'
-                    : 'Turn on to receive instant push alerts when new movies are uploaded'}
-                </Text>
+            {/* Header & Toggle Switch */}
+            <View style={styles.notifHeaderRow}>
+              <View style={styles.notifHeaderLeft}>
+                <View style={[styles.notifIconWrap, { backgroundColor: theme.primary + '18' }]}>
+                  <Ionicons name="notifications" size={18} color={theme.primary} />
+                </View>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={styles.notifTitle}>New Movie Push Alerts</Text>
+                  <Text style={styles.notifSubtitle}>
+                    {notificationsEnabled
+                      ? 'Instant alerts when new movies or series are released'
+                      : 'Enable to receive notifications for new releases'}
+                  </Text>
+                </View>
               </View>
               <Switch
                 value={notificationsEnabled}
                 onValueChange={handleToggleNotifications}
-                trackColor={{ false: '#3A3A3C', true: theme.primary }}
+                trackColor={{ false: '#2C2C2E', true: theme.primary }}
                 thumbColor="#FFFFFF"
-                ios_backgroundColor="#3A3A3C"
+                ios_backgroundColor="#2C2C2E"
               />
             </View>
 
             {notificationsEnabled && (
               <>
-                <View style={styles.detailDivider} />
+                <View style={styles.cardDivider} />
 
-                {/* Permission status row */}
-                <View style={styles.notifPermissionRow}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                {/* Permission status pill */}
+                <View style={styles.permissionPillRow}>
+                  <View style={styles.permissionIndicator}>
                     <Ionicons
-                      name={hasNotificationPermission ? 'checkmark-circle' : 'warning-outline'}
-                      size={16}
-                      color={hasNotificationPermission ? '#30d158' : '#ff9500'}
+                      name={hasNotificationPermission ? 'checkmark-circle' : 'alert-circle'}
+                      size={15}
+                      color={hasNotificationPermission ? '#30d158' : '#ffd60a'}
+                      style={{ marginRight: 6 }}
                     />
-                    <Text style={styles.notifPermissionText}>
-                      {hasNotificationPermission
-                        ? 'Device Permission: Granted'
-                        : 'Device Permission: Action Required'}
+                    <Text style={styles.permissionText}>
+                      {hasNotificationPermission ? 'Device Permission: Granted' : 'Permission Action Required'}
                     </Text>
                   </View>
                   {!hasNotificationPermission && (
                     <TouchableOpacity
-                      style={[styles.grantBtn, { backgroundColor: theme.primary }]}
+                      style={[styles.grantPillBtn, { backgroundColor: theme.primary }]}
                       onPress={async () => {
                         const granted = await tamilMVNotificationService.requestPermissions();
                         setHasNotificationPermission(granted);
@@ -762,61 +706,63 @@ const TamilMvSettingsScreen: React.FC = () => {
                       }}
                       activeOpacity={0.7}
                     >
-                      <Text style={styles.grantBtnText}>Grant</Text>
+                      <Text style={styles.grantPillText}>Enable</Text>
                     </TouchableOpacity>
                   )}
                 </View>
 
-                {/* Language filters */}
-                <Text style={styles.notifSectionTitle}>Alert Languages</Text>
-                <View style={styles.notifLangsContainer}>
-                  {[
-                    { id: 'tamil' as Language, label: 'Tamil' },
-                    { id: 'telugu' as Language, label: 'Telugu' },
-                    { id: 'hindi' as Language, label: 'Hindi' },
-                    { id: 'malayalam' as Language, label: 'Malayalam' },
-                    { id: 'kannada' as Language, label: 'Kannada' },
-                    { id: 'english' as Language, label: 'English' },
-                  ].map((lang) => {
-                    const isSelected = selectedLanguages.includes(lang.id);
-                    return (
-                      <TouchableOpacity
-                        key={lang.id}
-                        style={[
-                          styles.notifLangChip,
-                          isSelected && {
-                            backgroundColor: theme.primary + '20',
-                            borderColor: theme.primary,
-                          },
-                        ]}
-                        onPress={() => handleToggleLanguage(lang.id)}
-                        activeOpacity={0.7}
-                      >
-                        {isSelected && (
-                          <Ionicons
-                            name="checkmark"
-                            size={14}
-                            color={theme.primary}
-                            style={{ marginRight: 4 }}
-                          />
-                        )}
-                        <Text
+                {/* Language filter pills */}
+                <View style={styles.langSection}>
+                  <Text style={styles.presetsTitle}>ALERT LANGUAGES</Text>
+                  <View style={styles.langChipsRow}>
+                    {[
+                      { id: 'tamil' as Language, label: 'Tamil' },
+                      { id: 'telugu' as Language, label: 'Telugu' },
+                      { id: 'hindi' as Language, label: 'Hindi' },
+                      { id: 'malayalam' as Language, label: 'Malayalam' },
+                      { id: 'kannada' as Language, label: 'Kannada' },
+                      { id: 'english' as Language, label: 'English' },
+                    ].map((lang) => {
+                      const isSelected = selectedLanguages.includes(lang.id);
+                      return (
+                        <TouchableOpacity
+                          key={lang.id}
                           style={[
-                            styles.notifLangChipText,
-                            isSelected && { color: theme.primary, fontWeight: '700' },
+                            styles.langChip,
+                            isSelected && {
+                              backgroundColor: theme.primary + '20',
+                              borderColor: theme.primary,
+                            },
                           ]}
+                          onPress={() => handleToggleLanguage(lang.id)}
+                          activeOpacity={0.7}
                         >
-                          {lang.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                          {isSelected && (
+                            <Ionicons
+                              name="checkmark"
+                              size={12}
+                              color={theme.primary}
+                              style={{ marginRight: 4 }}
+                            />
+                          )}
+                          <Text
+                            style={[
+                              styles.langChipText,
+                              isSelected && { color: theme.primary, fontWeight: '700' },
+                            ]}
+                          >
+                            {lang.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 </View>
 
-                {/* Action buttons */}
-                <View style={styles.notifButtonsRow}>
+                {/* Dual Test & Check Now Actions */}
+                <View style={styles.consolidatedActionRow}>
                   <TouchableOpacity
-                    style={styles.notifActionBtn}
+                    style={styles.actionBtnSecondary}
                     onPress={handleSendTestNotification}
                     disabled={isSendingTest}
                     activeOpacity={0.7}
@@ -825,17 +771,14 @@ const TamilMvSettingsScreen: React.FC = () => {
                       <ActivityIndicator size="small" color="#ffffff" />
                     ) : (
                       <>
-                        <Ionicons name="paper-plane-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-                        <Text style={styles.notifActionBtnText}>Send Test</Text>
+                        <Ionicons name="paper-plane-outline" size={15} color="#ffffff" style={{ marginRight: 6 }} />
+                        <Text style={styles.actionBtnSecondaryText}>Send Test</Text>
                       </>
                     )}
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[
-                      styles.notifActionBtn,
-                      { backgroundColor: theme.primary + '18', borderColor: theme.primary + '44' },
-                    ]}
+                    style={styles.actionBtnSecondary}
                     onPress={handleCheckNow}
                     disabled={isCheckingNewMovies}
                     activeOpacity={0.7}
@@ -844,8 +787,8 @@ const TamilMvSettingsScreen: React.FC = () => {
                       <ActivityIndicator size="small" color={theme.primary} />
                     ) : (
                       <>
-                        <Ionicons name="refresh-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
-                        <Text style={[styles.notifActionBtnText, { color: theme.primary }]}>Check Now</Text>
+                        <Ionicons name="refresh-outline" size={15} color={theme.primary} style={{ marginRight: 6 }} />
+                        <Text style={[styles.actionBtnSecondaryText, { color: theme.primary }]}>Check Now</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -858,7 +801,7 @@ const TamilMvSettingsScreen: React.FC = () => {
             )}
           </View>
 
-          <BottomSpacing space={60} />
+          <BottomSpacing space={40} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -880,111 +823,63 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   navTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     color: '#ffffff',
     letterSpacing: 0.2,
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 40,
-    maxWidth: 780,
+    paddingTop: 14,
+    paddingBottom: 30,
+    maxWidth: 720,
     width: '100%',
     marginHorizontal: 'auto',
   },
   header: {
     alignItems: 'center',
-    marginBottom: 20,
-    paddingTop: 4,
+    marginBottom: 16,
+    paddingTop: 2,
   },
   iconCircle: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '800',
     color: '#ffffff',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#8E8E93',
     textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 19,
-    paddingHorizontal: 20,
+    marginTop: 4,
+    lineHeight: 17,
+    paddingHorizontal: 16,
   },
   card: {
     backgroundColor: '#121212',
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    padding: 16,
-    marginBottom: 16,
-  },
-  headerTitleWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  cardDescription: {
-    fontSize: 13,
-    color: '#8E8E93',
-    lineHeight: 18,
+    padding: 14,
     marginBottom: 14,
-  },
-  autoDetectBadge: {
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  autoDetectBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  autoDetectPrimaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 13,
-    borderRadius: 12,
-  },
-  autoDetectPrimaryBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  detectingProgressBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#181818',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 14,
-  },
-  detectingProgressText: {
-    fontSize: 13,
-    color: '#ffffff',
-    fontWeight: '500',
-    flex: 1,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -992,18 +887,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  headerTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   cardSectionTitle: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#8E8E93',
     letterSpacing: 0.6,
   },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 5,
+  },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 20,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 12,
     borderWidth: 1,
   },
   badgeSuccess: {
@@ -1027,258 +932,300 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(142, 142, 147, 0.25)',
   },
   badgeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
-  pingDetails: {
-    backgroundColor: '#171717',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 14,
+  domainPreviewBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#181818',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.05)',
   },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
-  detailDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-  },
-  detailLabel: {
-    fontSize: 13,
-    color: '#8E8E93',
-  },
-  activeDomainRow: {
+  domainPreviewLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    maxWidth: '65%',
+    flex: 1,
+    marginRight: 8,
   },
-  detailValue: {
+  domainPreviewText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#ffffff',
+    flex: 1,
   },
-  pingButton: {
+  copyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  copyPillText: {
+    fontSize: 11,
+    color: '#8E8E93',
+    fontWeight: '600',
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: '#161616',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  metricItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  metricLabel: {
+    fontSize: 11,
+    color: '#8E8E93',
+    marginBottom: 2,
+  },
+  metricValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  metricDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  detectProgressBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  detectProgressText: {
+    fontSize: 12,
+    color: '#ffffff',
+    fontWeight: '500',
+    flex: 1,
+  },
+  consolidatedActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 4,
+  },
+  actionBtnSecondary: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#1c1c1e',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    paddingVertical: 12,
-    borderRadius: 12,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 10,
+    borderRadius: 10,
   },
-  pingButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  inputContainer: {
-    marginTop: 4,
-    marginBottom: 16,
-  },
-  inputLabel: {
+  actionBtnSecondaryText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#ffffff',
-    marginBottom: 8,
   },
-  textInputWrapper: {
+  actionBtnPrimary: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#171717',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 12,
-    paddingHorizontal: 12,
+    justifyContent: 'center',
     paddingVertical: 10,
+    borderRadius: 10,
+  },
+  actionBtnPrimaryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    marginVertical: 12,
+  },
+  inputContainer: {
+    marginBottom: 10,
+  },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  textInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#181818',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
   },
   textInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13,
     color: '#ffffff',
     padding: 0,
   },
-  presetsContainer: {
-    marginBottom: 16,
+  saveBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  presetsLabel: {
-    fontSize: 12,
+  resetIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 69, 58, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.25)',
+  },
+  presetsWrap: {
+    marginTop: 4,
+  },
+  presetsTitle: {
+    fontSize: 11,
     fontWeight: '600',
     color: '#8E8E93',
-    marginBottom: 10,
+    marginBottom: 6,
+    letterSpacing: 0.4,
   },
-  presetsList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  presetsScroll: {
+    gap: 6,
+    paddingVertical: 2,
   },
-  presetPill: {
+  presetChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
     backgroundColor: '#181818',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  presetPillActive: {
-    borderWidth: 1,
-  },
-  presetPillText: {
-    fontSize: 12,
-    color: '#999999',
-    fontWeight: '500',
-  },
-  actionsContainer: {
-    gap: 10,
-    marginTop: 4,
-  },
-  saveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 13,
-    borderRadius: 12,
-  },
-  saveButtonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  resetButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  resetButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#ff453a',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  notifToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-  },
-  notifToggleTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  notifToggleDesc: {
-    fontSize: 12,
+  presetChipText: {
+    fontSize: 11,
     color: '#8E8E93',
-    marginTop: 2,
-    lineHeight: 16,
+    fontWeight: '500',
   },
-  notifPermissionRow: {
+  notifHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1a1a1a',
-    padding: 10,
-    borderRadius: 10,
-    marginBottom: 12,
   },
-  notifPermissionText: {
+  notifHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  notifIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  notifTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  notifSubtitle: {
+    fontSize: 11,
+    color: '#8E8E93',
+    marginTop: 1,
+  },
+  permissionPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#181818',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 10,
+  },
+  permissionIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  permissionText: {
     fontSize: 12,
-    color: '#E5E5EA',
+    color: '#ffffff',
     fontWeight: '500',
   },
-  grantBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+  grantPillBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
     borderRadius: 6,
   },
-  grantBtnText: {
-    fontSize: 12,
+  grantPillText: {
+    fontSize: 11,
     fontWeight: '700',
-    color: '#000000',
+    color: '#ffffff',
   },
-  notifSectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#8E8E93',
-    marginBottom: 8,
+  langSection: {
+    marginBottom: 10,
   },
-  notifLangsContainer: {
+  langChipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 14,
+    gap: 6,
   },
-  notifLangChip: {
+  langChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: '#181818',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  notifLangChipText: {
-    fontSize: 13,
+  langChipText: {
+    fontSize: 12,
     color: '#8E8E93',
     fontWeight: '500',
   },
-  notifButtonsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  notifActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 11,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    backgroundColor: '#1a1a1a',
-  },
-  notifActionBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
   checkStatusMessage: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#8E8E93',
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 5,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '600',
+  buttonDisabled: {
+    opacity: 0.5,
   },
 });
 

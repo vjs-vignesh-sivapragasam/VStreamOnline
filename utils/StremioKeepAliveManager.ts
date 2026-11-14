@@ -18,7 +18,7 @@ function notifyListeners() {
 
 /**
  * Checks if Background Audio Keep-Alive is enabled (Option 1).
- * Defaults to true so the embedded Stremio server stays alive during screen lock on iOS/Android.
+ * Can be enabled by the user so the embedded Stremio server stays alive during screen lock on iOS/Android.
  */
 export function isBackgroundAudioKeepAliveEnabled(): boolean {
   try {
@@ -46,7 +46,7 @@ export function setBackgroundAudioKeepAliveEnabled(enabled: boolean): void {
 
 /**
  * Checks if Screen Keep-Awake is enabled (Option 2).
- * Defaults to false (can be enabled by user to prevent device auto-lock).
+ * Defaults to true (keeps the screen awake while using the app to prevent auto-lock).
  */
 export function isScreenKeepAwakeEnabled(): boolean {
   try {
