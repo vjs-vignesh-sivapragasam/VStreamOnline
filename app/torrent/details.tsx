@@ -771,10 +771,10 @@ const TorrentDetails = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       const client = await resolveStreamingServerClient();
-      const safeIdx = typeof fileIdx === 'number' && fileIdx >= 0 ? fileIdx : 0;
+      const safeIdx = typeof fileIdx === 'number' ? fileIdx : -1;
       const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl);
       const clean = cleanTitle(item.title);
-      const finalFileName = fileName || `${clean}.mp4`;
+      const finalFileName = fileName || `${clean}.mkv`;
 
       await downloadService.startDownload({
         infoHash: item.infoHash,
@@ -795,6 +795,7 @@ const TorrentDetails = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
+    let clean = cleanTitle(item.title);
     setDownloadingGuid(item.guid);
     try {
       const clean = cleanTitle(item.title);
@@ -803,17 +804,27 @@ const TorrentDetails = () => {
 
       if (files && files.length > 1) {
         setPendingItem(item);
-        setPickerFiles(files);
+        const videoFiles = files.filter((f) => ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(f.name.split('.').pop()?.toLowerCase() || ''));
+        if (videoFiles.length === 1) {
+          await executeDownload(item, videoFiles[0].id, videoFiles[0].name, videoFiles[0].length);
+          return;
+        }
+        setPickerFiles(videoFiles.length > 0 ? videoFiles : files);
         setPickerMode('download');
         setPickerVisible(true);
       } else {
-        const fileIdx = files && files.length === 1 ? (files[0].id ?? 0) : 0;
-        const fileName = files && files.length === 1 ? files[0].name : `${clean}.mp4`;
+
+
+
+
+        const fileIdx = files && files.length === 1 ? files[0].id : -1;
+        const fileName = files && files.length === 1 ? files[0].name : `${clean}.mkv`;
+
         const fileLength = files && files.length === 1 ? files[0].length : undefined;
         await executeDownload(item, fileIdx, fileName, fileLength);
       }
     } catch {
-      await executeDownload(item, 0);
+      await executeDownload(item, -1, `${clean}.mkv`);
     } finally {
       setDownloadingGuid(null);
     }

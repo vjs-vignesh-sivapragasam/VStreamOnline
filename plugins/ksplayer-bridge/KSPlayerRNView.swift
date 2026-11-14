@@ -119,7 +119,25 @@ class KSPlayerRNView: UIView {
     // MARK: - Load
 
     private func loadVideo() {
-        guard !url.isEmpty, let videoURL = URL(string: url) else { return }
+        guard !url.isEmpty else { return }
+
+        let videoURL: URL
+        if url.hasPrefix("file://") {
+            let rawPath = url.replacingOccurrences(of: "file://", with: "")
+            if let decodedPath = rawPath.removingPercentEncoding, FileManager.default.fileExists(atPath: decodedPath) {
+                videoURL = URL(fileURLWithPath: decodedPath)
+            } else if FileManager.default.fileExists(atPath: rawPath) {
+                videoURL = URL(fileURLWithPath: rawPath)
+            } else if let u = URL(string: url) {
+                videoURL = u
+            } else {
+                videoURL = URL(fileURLWithPath: rawPath)
+            }
+        } else if let u = URL(string: url) {
+            videoURL = u
+        } else {
+            return
+        }
 
         var httpHeaders: [String: String] = [:]
         headers.forEach { key, value in
@@ -139,6 +157,7 @@ class KSPlayerRNView: UIView {
         // ─────────────────────────────────────────────────────────────────────
 
         KSOptions.isAutoPlay = !paused
+        KSOptions.firstPlayerType = KSMEPlayer.self
         KSOptions.secondPlayerType = KSMEPlayer.self
 
         if !httpHeaders.isEmpty { options.appendHeader(httpHeaders) }

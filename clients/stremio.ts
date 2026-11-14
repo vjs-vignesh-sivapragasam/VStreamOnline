@@ -16,6 +16,7 @@ export interface TorrentStats {
   downloaded?: number;
   streamProgress?: number;
   streamLen?: number;
+  streamName?: string;
   swarmConnections?: number;
   swarmSize?: number;
 }

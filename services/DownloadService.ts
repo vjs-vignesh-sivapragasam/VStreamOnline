@@ -649,6 +649,12 @@ class DownloadManager {
 
     if (stats.streamLen !== undefined && stats.streamLen > 0 && item.totalBytes === 0) {
       item.totalBytes = stats.streamLen;
+      if (stats.streamName && stats.streamName !== item.fileName) {
+        const isPlaceholder = item.fileName.endsWith('.mp4') && stats.streamName.toLowerCase().endsWith('.mkv');
+        if (isPlaceholder || !item.fileName) {
+          item.fileName = stats.streamName;
+        }
+      }
       updated = true;
     }
 
@@ -675,9 +681,9 @@ class DownloadManager {
     }
 
     // Dynamic descriptive diagnostic for user
-    if (item.progress >= 100) {
+    if (item.progress >= 100 && item.status !== 'downloading') {
       item.status = 'completed';
-      item.statusDetail = 'Download complete';
+      item.statusDetail = 'Swarm buffered (downloading to storage...)';
       updated = true;
     } else if (item.peers === 0) {
       item.statusDetail = 'Searching for swarm peers (0 peers)...';
@@ -913,7 +919,9 @@ class DownloadManager {
     }
 
     // Update streamUrl with resolved active server
-    const activeStreamUrl = await client.getStreamingURL(params.infoHash, params.fileIdx);
+    const activeStreamUrl = (params.streamUrl && params.streamUrl.startsWith('http') && params.streamUrl.includes(params.infoHash))
+      ? params.streamUrl
+      : await client.getStreamingURL(params.infoHash, params.fileIdx);
     item.streamUrl = activeStreamUrl;
 
     // Check initial torrent stats
