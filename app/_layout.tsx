@@ -1,9 +1,9 @@
 import '@/utils/crashLogger';
 import { AppCrashErrorBoundary } from '@/utils/crashLogger';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme, Theme, ThemeProvider } from '@react-navigation/native';
+
 import { useFonts } from 'expo-font';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, DarkTheme, Theme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from 'react';
 import 'react-native-reanimated';

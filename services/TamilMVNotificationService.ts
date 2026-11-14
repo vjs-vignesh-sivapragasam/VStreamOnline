@@ -61,26 +61,6 @@ function getNotifications(): any {
   return _notificationsCache;
 }
 
-// Global eager registration of foreground notification presentation handler.
-// Apple requires setNotificationHandler to be configured to show banners while app is foregrounded.
-try {
-  const earlyNotif = getNotifications();
-  if (earlyNotif && typeof earlyNotif.setNotificationHandler === 'function') {
-    earlyNotif.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        priority: earlyNotif.AndroidNotificationPriority?.HIGH,
-      }),
-    });
-  }
-} catch {
-  // Safe evaluation
-}
-
 // Base notification channel and polling constants
 const NOTIFICATION_CHANNEL_ID = 'tamilmv-new-movies';
 const CHECK_INTERVAL_MS = 15 * 60 * 1000; // Check every 15 minutes
