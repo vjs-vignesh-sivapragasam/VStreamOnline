@@ -262,7 +262,9 @@ export default function YouTubeDownloadsScreen() {
                     {item.title}
                   </Text>
                   <Text style={styles.cardMeta} numberOfLines={1}>
-                    {downloadService.formatBytes(item.totalBytes || item.downloadedBytes)}
+                    {!isCompleted && item.totalBytes > 0
+                      ? `${downloadService.formatBytes(item.downloadedBytes)} / ${downloadService.formatBytes(item.totalBytes)}`
+                      : downloadService.formatBytes(item.totalBytes || item.downloadedBytes)}
                     {item.fileName ? ` • ${item.fileName.split('.').pop()?.toUpperCase()}` : ''}
                   </Text>
 
@@ -282,7 +284,13 @@ export default function YouTubeDownloadsScreen() {
                           {Math.round(item.progress || 0)}%
                         </Text>
                         <Text style={styles.speedText}>
-                          {item.speedFormatted || (isPaused ? 'Paused' : 'Downloading...')}
+                          {isPaused
+                            ? 'Paused'
+                            : item.speedFormatted && item.speedFormatted !== '0 Mbps'
+                            ? item.speedFormatted
+                            : isDownloading
+                            ? 'Starting...'
+                            : 'Downloading...'}
                         </Text>
                         {isDownloading && (
                           <View
@@ -546,8 +554,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   speedText: {
-    color: 'rgba(255, 255, 255, 0.5)',
+    color: 'rgba(255, 255, 255, 0.75)',
     fontSize: 10,
+    fontWeight: '600',
   },
   cardActions: {
     flexDirection: 'row',

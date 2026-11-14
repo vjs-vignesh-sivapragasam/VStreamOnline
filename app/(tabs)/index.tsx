@@ -21,6 +21,7 @@ import BlurGradientBackground from '@/components/BlurGradientBackground';
 import { useTheme } from '@/contexts/ThemeContext';
 import {
   useTamilMVCatalog,
+  useTamilMVRecentlyAdded,
   Language,
   CatalogSection,
   Category,
@@ -106,13 +107,19 @@ export default function HomeScreen() {
   }, [params.category, params.title, params.language]);
 
   const { sections, loading, errors, refresh } = useTamilMVCatalog(language);
+  const {
+    groups: recentGroups,
+    loading: recentLoading,
+    refresh: refreshRecent,
+  } = useTamilMVRecentlyAdded(language);
   const [refreshing, setRefreshing] = React.useState(false);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     refresh();
+    refreshRecent();
     setTimeout(() => setRefreshing(false), 1500);
-  }, [refresh]);
+  }, [refresh, refreshRecent]);
 
   useEffect(() => {
     startEmbeddedNodeServer();
@@ -137,6 +144,7 @@ export default function HomeScreen() {
         poster:      item.posterUrl,
         type:        item.type,
         publishDate: item.publishDate,
+        year:        item.year || (item.publishDate ? new Date(item.publishDate).getFullYear().toString() : undefined),
         allItems:    JSON.stringify(item.allItems),
       },
     });
@@ -242,6 +250,21 @@ export default function HomeScreen() {
                 <Text style={styles.retryText}>Retry</Text>
               </TouchableOpacity>
             </View>
+          )}
+
+          {/* Recently Added section (First 10 movies + See All button) */}
+          {recentGroups.length > 0 && (
+            <PosterList
+              groups={recentGroups.slice(0, 10)}
+              title="Recently Added"
+              type="movie"
+              language={language}
+              category="recentlyadded"
+              loading={recentLoading}
+              onSeeAll={(cat, catTitle, catLang) => {
+                setActiveCategory({ category: cat, title: catTitle, language: catLang });
+              }}
+            />
           )}
 
           {/* Category sections */}

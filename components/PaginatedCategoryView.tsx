@@ -390,6 +390,7 @@ export default function PaginatedCategoryView({
           magnetUrl: best.magnetUrl,
           infoHash: best.infoHash,
           poster: posterUrl || best.poster || '',
+          year: group.year || (best.publishDate ? new Date(best.publishDate).getFullYear().toString() : ''),
           type,
           publishDate: best.publishDate,
           allItems: JSON.stringify(group.items),

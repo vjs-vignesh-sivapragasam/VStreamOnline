@@ -55,6 +55,7 @@ export const isRCTVideoAvailable = (): boolean => {
 
 export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     videoUrl,
+    isTorrent,
     title,
     back: onBack,
     progress,
@@ -63,7 +64,8 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     onPlaybackError,
     streams = [],
     currentStreamIndex = 0,
-    onStreamChange
+    onStreamChange,
+    torrentBufferProgress,
 }) => {
     const videoRef = useRef<VideoRef>(null);
     const shouldAutoHideControls = useRef(true);
@@ -103,6 +105,12 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [videoError, setVideoError] = useState<string | null>(null);
     const [availableAudioTracks, setAvailableAudioTracks] = useState<any[]>([]);
     const [availableTextTracks, setAvailableTextTracks] = useState<any[]>([]);
+    const isLocalFile = videoUrl ? (
+        videoUrl.startsWith('file:') ||
+        videoUrl.startsWith('content:') ||
+        (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))
+    ) : false;
+    const effectiveBufferPct = isLocalFile ? undefined : (isTorrent ? torrentBufferProgress : undefined);
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -246,15 +254,36 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         if (!playerState.isDragging && !isSeeking.current) {
             playerState.setCurrentTime(data.currentTime);
         }
-    }, [playerState]);
+        if (data.currentTime > 0) {
+            if (playerState.isBuffering) {
+                playerState.setIsBuffering(false);
+                Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+            }
+            if (!playerState.isReady) {
+                playerState.setIsReady(true);
+            }
+        }
+    }, [bufferOpacity, playerState]);
 
     const handleReadyForDisplay = useCallback(() => {
         playerState.setIsReady(true);
         playerState.setIsBuffering(false);
-    }, [playerState]);
+        Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+    }, [bufferOpacity, playerState]);
+
+    const handlePlaybackStateChanged = useCallback((e: { isPlaying: boolean; isSeeking: boolean }) => {
+        if (e.isPlaying) {
+            playerState.setIsPlaying(true);
+            playerState.setIsBuffering(false);
+            Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+        }
+    }, [bufferOpacity, playerState]);
 
     const handleBuffer = useCallback((data: OnBufferData) => {
         if (!isSeeking.current && !playerState.isDragging) {
+            if (isLocalFile && playerState.isReady && data.isBuffering) {
+                return;
+            }
             playerState.setIsBuffering(data.isBuffering);
             Animated.timing(bufferOpacity, {
                 toValue: data.isBuffering ? 1 : 0,
@@ -262,7 +291,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 useNativeDriver: true
             }).start();
         }
-    }, [bufferOpacity, playerState]);
+    }, [bufferOpacity, isLocalFile, playerState]);
 
     const handleError = useCallback((error: any) => {
         playerState.setIsBuffering(false);
@@ -596,6 +625,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 onBuffer={handleBuffer}
                 onError={handleError}
                 onLoadStart={handleLoadStart}
+                onPlaybackStateChanged={handlePlaybackStateChanged}
                 onEnd={handleEnd}
                 onAudioTracks={handleAudioTracks}
                 onTextTracks={handleTextTracks}
@@ -617,9 +647,15 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 artwork={artwork}
                 isBuffering={playerState.isBuffering}
                 hasStartedPlaying={playerState.isReady}
+                bufferProgress={effectiveBufferPct}
             />
 
-            <WaitingLobby hasStartedPlaying={playerState.isReady} opacity={bufferOpacity} />
+            <WaitingLobby
+                hasStartedPlaying={playerState.isReady}
+                isBuffering={playerState.isBuffering}
+                opacity={bufferOpacity}
+                bufferProgress={effectiveBufferPct}
+            />
 
             <TouchableOpacity style={styles.touchArea} activeOpacity={1} onPress={handleOverlayPress} />
 

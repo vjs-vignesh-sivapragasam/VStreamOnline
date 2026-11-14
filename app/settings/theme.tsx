@@ -15,7 +15,7 @@ import BottomSpacing from '@/components/BottomSpacing';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeSelector } from '@/components/settings/ThemeSelector';
-import { AppTheme } from '@/constants/Colors';
+import { AppTheme, DEFAULT_THEME_ID } from '@/constants/Colors';
 
 const ThemeSettingsScreen: React.FC = () => {
   const { theme, availableThemes, themeId, setThemeId } = useTheme();
@@ -86,7 +86,7 @@ const ThemeSettingsScreen: React.FC = () => {
                       ]}
                     />
                     <View>
-                      <Text style={styles.themeRowTitle}>{item.displayName}{item.id === 'purple' ? ' (Default)' : ''}</Text>
+                      <Text style={styles.themeRowTitle}>{item.displayName}{item.id === DEFAULT_THEME_ID ? ' (Default)' : ''}</Text>
                       <Text style={styles.themeRowSubtitle}>
                         {item.subtitle} • {item.primary}
                       </Text>
@@ -101,7 +101,11 @@ const ThemeSettingsScreen: React.FC = () => {
                           { backgroundColor: item.primary },
                         ]}
                       >
-                        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                        <Ionicons
+                          name="checkmark"
+                          size={14}
+                          color={item.id === 'white' ? '#000000' : '#FFFFFF'}
+                        />
                       </View>
                     ) : (
                       <View style={styles.unselectedRing} />

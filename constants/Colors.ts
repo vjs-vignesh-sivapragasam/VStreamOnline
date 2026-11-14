@@ -1,4 +1,4 @@
-export type ThemeId = 'purple' | 'blue' | 'green' | 'yellow' | 'red' | 'accent';
+export type ThemeId = 'yellow' | 'orange' | 'purple' | 'blue' | 'green' | 'red' | 'white' | 'accent';
 
 export interface AppTheme {
   id: ThemeId;
@@ -77,6 +77,36 @@ export const THEMES: Record<ThemeId, AppTheme> = {
     glow: 'rgba(255, 184, 0, 0.4)',
     gradientColors: ['#000000', '#1a1300', '#261b00'],
   },
+  orange: {
+    id: 'orange',
+    name: 'Orange',
+    displayName: 'Sunset Orange',
+    subtitle: 'Vibrant Sunset',
+    primary: '#FF6D00',
+    primaryLight: '#FF9E40',
+    primaryDark: '#D65100',
+    cardBorder: 'rgba(255, 109, 0, 0.25)',
+    iconBg: 'rgba(255, 109, 0, 0.15)',
+    indicator: 'rgba(255, 109, 0, 0.35)',
+    ripple: 'rgba(255, 109, 0, 0.2)',
+    glow: 'rgba(255, 109, 0, 0.45)',
+    gradientColors: ['#000000', '#1a0c00', '#261200'],
+  },
+  white: {
+    id: 'white',
+    name: 'White',
+    displayName: 'Pure White',
+    subtitle: 'Minimal Monochrome',
+    primary: '#FFFFFF',
+    primaryLight: '#F5F5F7',
+    primaryDark: '#D1D1D6',
+    cardBorder: 'rgba(255, 255, 255, 0.25)',
+    iconBg: 'rgba(255, 255, 255, 0.12)',
+    indicator: 'rgba(255, 255, 255, 0.35)',
+    ripple: 'rgba(255, 255, 255, 0.2)',
+    glow: 'rgba(255, 255, 255, 0.35)',
+    gradientColors: ['#000000', '#121214', '#1c1c1f'],
+  },
   red: {
     id: 'red',
     name: 'Red',
@@ -109,7 +139,7 @@ export const THEMES: Record<ThemeId, AppTheme> = {
   },
 };
 
-export const DEFAULT_THEME_ID: ThemeId = 'purple';
+export const DEFAULT_THEME_ID: ThemeId = 'yellow';
 
 export function getTheme(id?: string | null): AppTheme {
   if (id && id in THEMES) {
@@ -122,15 +152,15 @@ export default {
   light: {
     text: '#000',
     background: '#fff',
-    tint: THEMES.purple.primary,
+    tint: THEMES.yellow.primary,
     tabIconDefault: '#ccc',
-    tabIconSelected: THEMES.purple.primary,
+    tabIconSelected: THEMES.yellow.primary,
   },
   dark: {
     text: '#fff',
     background: '#000',
-    tint: THEMES.purple.primary,
+    tint: THEMES.yellow.primary,
     tabIconDefault: '#ccc',
-    tabIconSelected: THEMES.purple.primary,
+    tabIconSelected: THEMES.yellow.primary,
   },
 };

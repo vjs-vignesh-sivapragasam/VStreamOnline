@@ -1,5 +1,6 @@
 import { MagnetParser } from '@/utils/MagnetParser';
 import { StorageKeys, storageService } from '@/utils/StorageService';
+import { tmdbService } from '@/services/TmdbService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState, useCallback } from 'react';
 
@@ -595,7 +596,7 @@ export async function autoDiscoverWorkingDomain(): Promise<string | null> {
 }
 
 export type Language = 'tamil' | 'english' | 'hindi' | 'telugu' | 'malayalam' | 'kannada';
-export type Category = 'predvd' | 'webhd' | 'hdrip' | 'dvd' | 'hdtv' | 'series' | 'multiaudio';
+export type Category = 'predvd' | 'webhd' | 'hdrip' | 'dvd' | 'hdtv' | 'series' | 'multiaudio' | 'recentlyadded';
 
 const FORUM_IDS: Record<Language, Partial<Record<Category, string>>> = {
   tamil: {
@@ -646,6 +647,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
   hdrip: 'HD Rip',
   dvd: 'DVD9 / DVD5',
   hdtv: 'HD TV',
+  recentlyadded: 'Recently Added',
 };
 
 const CATEGORY_TYPE: Record<Category, 'movie' | 'series'> = {
@@ -656,6 +658,7 @@ const CATEGORY_TYPE: Record<Category, 'movie' | 'series'> = {
   hdtv: 'movie',
   multiaudio: 'movie',
   series: 'series',
+  recentlyadded: 'movie',
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1406,96 +1409,12 @@ export async function searchTamilMV(
 
 // ─── 1TamilMV Homepage "Recently Added" & "Top Releases" Scraper ─────────────
 
-export async function fetchTamilMVRecentlyAdded(
-  forceRefresh: boolean = false,
-  customBaseUrl?: string
-): Promise<GroupedItem[]> {
-  const baseUrl = customBaseUrl || getTamilMVBaseUrl();
-  const cacheKey = 'tamilmv:recently_added';
-
-  if (!forceRefresh) {
-    try {
-      const raw = storageService.getItem(cacheKey);
-      if (raw) {
-        const entry: { data: GroupedItem[]; timestamp: number } = JSON.parse(raw);
-        if (Date.now() - entry.timestamp < 10 * 60 * 1000) {
-          return entry.data;
-        }
-      }
-    } catch {}
-  }
-
-  const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter(m => m !== baseUrl)];
-  let html = '';
-  let successfulBase = baseUrl;
-
-  for (const mirror of mirrorsToTry) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-    try {
-      const res = await fetch(mirror, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Connection': 'close',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      if (res.ok) {
-        html = await res.text();
-        successfulBase = mirror;
-        break;
-      }
-    } catch {
-      clearTimeout(timeout);
-    }
-  }
-
-  if (!html) {
-    try {
-      const raw = storageService.getItem(cacheKey);
-      if (raw) return JSON.parse(raw).data;
-    } catch {}
-    return [];
-  }
-
-  const recIdx = html.indexOf('RECENTLY ADDED');
-  if (recIdx === -1) return [];
-
-  const topIdx = html.indexOf('TOP RELEASES THIS WEEK');
-  const startIdx = topIdx !== -1 && topIdx < recIdx ? topIdx : recIdx;
-
-  const endIdx = html.indexOf('id="elForumRow_', startIdx) !== -1
-    ? html.indexOf('id="elForumRow_', startIdx)
-    : html.indexOf('ipsLayout_sidebar', startIdx) !== -1
-      ? html.indexOf('ipsLayout_sidebar', startIdx)
-      : startIdx + 80000;
-
-  const sectionHtml = html.substring(startIdx, endIdx);
+function parseHomepageLines(
+  sectionHtml: string,
+  successfulBase: string,
+  posterLookup: Map<string, string>
+): GroupedItem[] {
   const rawLines = sectionHtml.split(/<br\s*\/?>/i);
-
-  // Build local poster lookup from cached RSS
-  const posterLookup = new Map<string, string>();
-  try {
-    const langs: Language[] = ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'];
-    const cats: Category[] = ['predvd', 'webhd', 'multiaudio', 'hdrip', 'dvd', 'hdtv', 'series'];
-    for (const l of langs) {
-      for (const c of cats) {
-        const raw = storageService.getItem(getCacheKey(l, c));
-        if (raw) {
-          const entry: CacheEntry = JSON.parse(raw);
-          (entry.data || []).forEach(g => {
-            if (g.name) {
-              const p = g.items.find(i => i.poster)?.poster;
-              if (p) posterLookup.set(g.name.toLowerCase().trim(), p);
-            }
-          });
-        }
-      }
-    }
-  } catch {}
-
   const grouped: Record<string, GroupedItem> = {};
 
   for (const line of rawLines) {
@@ -1545,18 +1464,236 @@ export async function fetchTamilMVRecentlyAdded(
       };
       (grouped[key] as any).type = isSeries ? 'series' : 'movie';
     } else {
-      if (!grouped[key].items.some(i => i.guid === topicUrl)) {
+      if (!grouped[key].items.some((i) => i.guid === topicUrl)) {
         grouped[key].items.push(torrentItem);
       }
     }
   }
 
-  const results = Object.values(grouped);
+  return Object.values(grouped);
+}
+
+export interface TamilMVHomepageData {
+  topReleases: GroupedItem[];
+  recentlyAdded: GroupedItem[];
+}
+
+export async function fetchTamilMVHomepageData(
+  forceRefresh: boolean = false,
+  customBaseUrl?: string
+): Promise<TamilMVHomepageData> {
+  const baseUrl = customBaseUrl || getTamilMVBaseUrl();
+  const cacheKey = 'tamilmv:homepage_data_v2';
+
+  if (!forceRefresh) {
+    try {
+      const raw = storageService.getItem(cacheKey);
+      if (raw) {
+        const entry: { data: TamilMVHomepageData; timestamp: number } = JSON.parse(raw);
+        if (Date.now() - entry.timestamp < 10 * 60 * 1000) {
+          return entry.data;
+        }
+      }
+    } catch {}
+  }
+
+  const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter((m) => m !== baseUrl)];
+  let html = '';
+  let successfulBase = baseUrl;
+
+  for (const mirror of mirrorsToTry) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const res = await fetch(mirror, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Connection': 'close',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.ok) {
+        html = await res.text();
+        successfulBase = mirror;
+        break;
+      }
+    } catch {
+      clearTimeout(timeout);
+    }
+  }
+
+  if (!html) {
+    try {
+      const raw = storageService.getItem(cacheKey);
+      if (raw) return JSON.parse(raw).data;
+    } catch {}
+    return { topReleases: [], recentlyAdded: [] };
+  }
+
+  const recIdx = html.indexOf('RECENTLY ADDED');
+  const topIdx = html.indexOf('TOP RELEASES THIS WEEK');
+
+  if (recIdx === -1 && topIdx === -1) {
+    return { topReleases: [], recentlyAdded: [] };
+  }
+
+  const endIdx =
+    html.indexOf('id="elForumRow_', recIdx !== -1 ? recIdx : topIdx) !== -1
+      ? html.indexOf('id="elForumRow_', recIdx !== -1 ? recIdx : topIdx)
+      : html.indexOf('ipsLayout_sidebar', recIdx !== -1 ? recIdx : topIdx) !== -1
+        ? html.indexOf('ipsLayout_sidebar', recIdx !== -1 ? recIdx : topIdx)
+        : (recIdx !== -1 ? recIdx : topIdx) + 80000;
+
+  // Build local poster lookup from cached RSS
+  const posterLookup = new Map<string, string>();
   try {
-    storageService.setItem(cacheKey, JSON.stringify({ data: results, timestamp: Date.now() }));
+    const langs: Language[] = ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'];
+    const cats: Category[] = ['predvd', 'webhd', 'multiaudio', 'hdrip', 'dvd', 'hdtv', 'series'];
+    for (const l of langs) {
+      for (const c of cats) {
+        const raw = storageService.getItem(getCacheKey(l, c));
+        if (raw) {
+          const entry: CacheEntry = JSON.parse(raw);
+          (entry.data || []).forEach((g) => {
+            if (g.name) {
+              const p = g.items.find((i) => i.poster)?.poster;
+              if (p) posterLookup.set(g.name.toLowerCase().trim(), p);
+            }
+          });
+        }
+      }
+    }
   } catch {}
 
-  return results;
+  let topReleases: GroupedItem[] = [];
+  let recentlyAdded: GroupedItem[] = [];
+
+  if (topIdx !== -1 && recIdx !== -1 && topIdx < recIdx) {
+    const topHtml = html.substring(topIdx, recIdx);
+    const recHtml = html.substring(recIdx, endIdx);
+    topReleases = parseHomepageLines(topHtml, successfulBase, posterLookup);
+    recentlyAdded = parseHomepageLines(recHtml, successfulBase, posterLookup);
+  } else if (recIdx !== -1) {
+    const recHtml = html.substring(recIdx, endIdx);
+    recentlyAdded = parseHomepageLines(recHtml, successfulBase, posterLookup);
+  } else if (topIdx !== -1) {
+    const topHtml = html.substring(topIdx, endIdx);
+    topReleases = parseHomepageLines(topHtml, successfulBase, posterLookup);
+  }
+
+  // Enrich topReleases missing posters using TMDB so carousel always displays high-res artwork
+  await Promise.all(
+    topReleases.map(async (group) => {
+      const item = group.items[0];
+      if (item && !item.poster) {
+        try {
+          const tmdb = await tmdbService.getMovieFullInfo(
+            item.name || '',
+            item.year || undefined,
+            (group as any).type
+          );
+          if (tmdb?.backdropUrl || tmdb?.posterUrl) {
+            item.poster = tmdb.backdropUrl || tmdb.posterUrl;
+          }
+        } catch {}
+      }
+    })
+  );
+
+  const result: TamilMVHomepageData = { topReleases, recentlyAdded };
+
+  try {
+    storageService.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
+    storageService.setItem(
+      'tamilmv:recently_added',
+      JSON.stringify({ data: recentlyAdded, timestamp: Date.now() })
+    );
+  } catch {}
+
+  return result;
+}
+
+export async function fetchTamilMVTopReleases(
+  forceRefresh: boolean = false,
+  customBaseUrl?: string
+): Promise<GroupedItem[]> {
+  const data = await fetchTamilMVHomepageData(forceRefresh, customBaseUrl);
+  return data.topReleases;
+}
+
+export async function fetchTamilMVRecentlyAdded(
+  forceRefresh: boolean = false,
+  customBaseUrl?: string
+): Promise<GroupedItem[]> {
+  const data = await fetchTamilMVHomepageData(forceRefresh, customBaseUrl);
+  return data.recentlyAdded;
+}
+
+export function useTamilMVTopReleases(language?: Language) {
+  const [groups, setGroups] = useState<GroupedItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const load = useCallback(
+    async (forceRefresh = false) => {
+      setLoading(true);
+      try {
+        const items = await fetchTamilMVTopReleases(forceRefresh);
+        const filtered =
+          language && language !== 'tamil'
+            ? items.filter(
+                (g) => (g.items[0]?.language || '').toLowerCase() === language.toLowerCase()
+              )
+            : items;
+        setGroups(filtered.length > 0 ? filtered : items);
+      } catch {
+        setGroups([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [language]
+  );
+
+  useEffect(() => {
+    load(false);
+  }, [load]);
+
+  return { groups, loading, refresh: () => load(true) };
+}
+
+export function useTamilMVRecentlyAdded(language?: Language) {
+  const [groups, setGroups] = useState<GroupedItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const load = useCallback(
+    async (forceRefresh = false) => {
+      setLoading(true);
+      try {
+        const items = await fetchTamilMVRecentlyAdded(forceRefresh);
+        const filtered =
+          language && language !== 'tamil'
+            ? items.filter(
+                (g) => (g.items[0]?.language || '').toLowerCase() === language.toLowerCase()
+              )
+            : items;
+        setGroups(filtered.length > 0 ? filtered : items);
+      } catch {
+        setGroups([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [language]
+  );
+
+  useEffect(() => {
+    load(false);
+  }, [load]);
+
+  return { groups, loading, refresh: () => load(true) };
 }
 
 // ─── Fetch All Movies (Recently Added + All Major Catalog Feeds) ─────────────
@@ -1708,6 +1845,28 @@ export async function fetchTamilMVCategoryPage(
   forceRefresh: boolean = false,
   customBaseUrl?: string
 ): Promise<CategoryPageResult> {
+  if (category === 'recentlyadded') {
+    const allRecent = await fetchTamilMVRecentlyAdded(forceRefresh, customBaseUrl);
+    const filtered = (language && language !== 'tamil')
+      ? allRecent.filter((g) => {
+          const l = g.items[0]?.language;
+          return l && l.toLowerCase() === language.toLowerCase();
+        })
+      : allRecent;
+    const finalItems = filtered.length > 0 ? filtered : allRecent;
+
+    const pageSize = 20;
+    const totalPages = Math.max(1, Math.ceil(finalItems.length / pageSize));
+    const start = (page - 1) * pageSize;
+    const pagedItems = finalItems.slice(start, start + pageSize);
+
+    return {
+      items: pagedItems,
+      totalPages,
+      currentPage: page,
+    };
+  }
+
   const forumSlug = FORUM_IDS[language]?.[category];
   if (!forumSlug) {
     throw new Error(`Category "${category}" is not configured for language "${language}"`);

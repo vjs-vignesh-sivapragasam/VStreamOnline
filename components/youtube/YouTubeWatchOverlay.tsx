@@ -129,6 +129,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
     playbackError,
     togglePlay,
     pauseVideo,
+    resumeVideo,
     minimize,
     expand,
     close,
@@ -600,7 +601,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   return (
     <>
       {/* Minimized Floating Mini Player Bar */}
-      {isMinimized && (
+      {isMinimized ? (
         <View
           style={[
             styles.miniPlayerContainer,
@@ -660,7 +661,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
 
       {/* Full Real YouTube Watch Screen (kept mounted so audio never stops and expand is instantaneous) */}
       <View
@@ -692,6 +693,8 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             topInset={isFullScreen ? 0 : insets.top}
             isFullScreen={isFullScreen}
             onTogglePlay={togglePlay}
+            onPlay={resumeVideo}
+            onPause={pauseVideo}
             onMinimize={isFullScreen ? () => handleFullScreen(false) : handleGoBackPrevious}
             onSwipeExit={isFullScreen ? () => handleFullScreen(false) : handleGoBackPrevious}
             onFullScreen={() => handleFullScreen()}

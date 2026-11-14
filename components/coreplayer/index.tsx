@@ -11,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { ResizeMode } from 'react-native-video';
 import { GlassView } from 'expo-glass-effect';
+import { useTheme } from '@/contexts/ThemeContext';
 
 // ==================== CONSTANTS ====================
 export const CONSTANTS = {
@@ -41,6 +42,8 @@ export interface ExtendedMediaPlayerProps extends MediaPlayerProps {
     streams?: Stream[];
     currentStreamIndex?: number;
     onStreamChange?: (index: number) => void;
+    torrentBufferProgress?: number;
+    isTorrent?: boolean;
 }
 
 // ==================== HOOKS ====================
@@ -369,12 +372,29 @@ export const WaitingLobby: React.FC<{
     hasStartedPlaying: boolean;
     opacity: Animated.Value;
     error?: boolean;
-}> = ({ hasStartedPlaying, opacity, error }) => {
-    if (hasStartedPlaying || error) return null;
+    bufferProgress?: number;
+    bufferText?: string;
+    isBuffering?: boolean;
+}> = ({ hasStartedPlaying, opacity, error, bufferProgress, bufferText, isBuffering }) => {
+    const { theme } = useTheme();
+    if (error) return null;
+    if (!isBuffering && hasStartedPlaying) return null;
+    if (bufferProgress !== undefined && bufferProgress >= 100 && hasStartedPlaying) return null;
+
+    const pct = bufferProgress !== undefined && bufferProgress >= 0 && bufferProgress < 100
+        ? Math.min(Math.max(Math.round(bufferProgress), 0), 100)
+        : null;
+
+    const displayText = bufferText || (
+        pct !== null && pct > 0 && !hasStartedPlaying
+            ? `Buffering: ${pct}%`
+            : (hasStartedPlaying ? "Buffering..." : "Connecting to stream...")
+    );
+
     return (
         <Animated.View style={[styles.bufferingContainer, { opacity }]} pointerEvents="none">
-            <ActivityIndicator size="large" color="#535aff" />
-            <Text style={styles.bufferingText}>{"Loading..."}</Text>
+            <ActivityIndicator size="large" color={theme.primary} />
+            <Text style={styles.bufferingText}>{displayText}</Text>
         </Animated.View>
     );
 };
@@ -384,16 +404,27 @@ export const ArtworkBackground: React.FC<{
     isBuffering: boolean;
     hasStartedPlaying?: boolean;
     error?: boolean;
-}> = ({ artwork, isBuffering, hasStartedPlaying = true, error }) => {
+    bufferProgress?: number;
+    bufferText?: string;
+}> = ({ artwork, isBuffering, hasStartedPlaying = true, error, bufferProgress, bufferText }) => {
+    const { theme } = useTheme();
     if (!artwork || hasStartedPlaying || error) return null;
+    const pct = bufferProgress !== undefined && bufferProgress >= 0 && bufferProgress < 100
+        ? Math.min(Math.max(Math.round(bufferProgress), 0), 100)
+        : null;
+    const displayText = bufferText || (
+        pct !== null && pct > 0 && !hasStartedPlaying
+            ? `Buffering: ${pct}%`
+            : (hasStartedPlaying ? "Buffering..." : "Connecting to stream...")
+    );
     return (
         <View style={styles.artworkContainer}>
             <Image source={{ uri: artwork }} style={styles.artworkImage} resizeMode="cover" />
             <View style={styles.artworkOverlay} />
             {isBuffering && (
                 <View style={styles.artworkLoadingOverlay}>
-                    <ActivityIndicator size="large" color="#535aff" />
-                    <Text style={styles.bufferingText}>Loading...</Text>
+                    <ActivityIndicator size="large" color={theme.primary} />
+                    <Text style={styles.bufferingText}>{displayText}</Text>
                 </View>
             )}
         </View>

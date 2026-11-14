@@ -231,36 +231,45 @@ class YouTubeService {
 
   /**
    * Resolves the active base URL for the YouTube engine.
-   * Checks loopback, developer LAN IP, and custom server settings.
+   * Checks loopback, developer LAN IP, and custom server settings concurrently for instant pick up (<50ms).
    */
-  async resolveActiveBaseUrl(timeoutMs = 1500): Promise<string | null> {
+  async resolveActiveBaseUrl(timeoutMs = 1200): Promise<string | null> {
     const now = Date.now();
-    if (this.activeBaseUrl && now - this.lastPingTime < 10000) {
+    if (this.activeBaseUrl && now - this.lastPingTime < 15000) {
       return this.activeBaseUrl;
     }
 
     const candidates = getEngineCandidates();
 
-    for (const url of candidates) {
+    // Ping candidates concurrently for instant pickup (<50ms) instead of sequential blocking
+    const pingCandidate = async (url: string): Promise<string> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
         const res = await fetch(`${url}/yt/ping`, {
           signal: controller.signal,
-        }).finally(() => clearTimeout(timer));
+        });
+        if (res.ok) return url;
+        throw new Error('Candidate not ok');
+      } finally {
+        clearTimeout(timer);
+      }
+    };
 
-        if (res.ok) {
-          this.activeBaseUrl = url;
-          this.lastPingTime = now;
-          console.log(`[YouTubeService] Connected to engine at ${url}`);
-          return url;
-        }
-      } catch {}
+    try {
+      const fastestUrl = await Promise.any(candidates.map((c) => pingCandidate(c)));
+      this.activeBaseUrl = fastestUrl;
+      this.lastPingTime = now;
+      console.log(`[YouTubeService] ⚡ Connected to fastest engine at ${fastestUrl}`);
+      return fastestUrl;
+    } catch {
+      // All pings timed out or failed
     }
 
     // On mobile, fallback directly to the embedded Stremio engine (same port 11470 as TamilMV)
     if (Platform.OS !== 'web') {
-      return `http://127.0.0.1:${STREMIO_ENGINE_PORT}`;
+      this.activeBaseUrl = `http://127.0.0.1:${STREMIO_ENGINE_PORT}`;
+      return this.activeBaseUrl;
     }
 
     this.activeBaseUrl = null;
@@ -1034,7 +1043,7 @@ class YouTubeService {
   }
 
   getActiveBaseUrl(): string {
-    return this.activeBaseUrl || getEngineCandidates()[0] || `http://127.0.0.1:${YT_ENGINE_PORT}`;
+    return this.activeBaseUrl || getEngineCandidates()[0] || `http://127.0.0.1:${STREMIO_ENGINE_PORT}`;
   }
 
   getProxyStreamUrl(directUrl: string): string {

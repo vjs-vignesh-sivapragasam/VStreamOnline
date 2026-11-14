@@ -16,6 +16,7 @@ import { isHapticsSupported } from '@/utils/platform';
 import { DefaultPosterImgXml } from '@/utils/Svg';
 import { Ionicons } from '@expo/vector-icons';
 import { TorrentItem, GroupedItem, Language, Category } from '@/hooks/useTamilMv';
+import { tmdbService } from '@/services/TmdbService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,7 +67,25 @@ const PosterItem = ({
 }) => {
   const [imgError, setImgError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
+  const [posterUri, setPosterUri] = useState<string | null>(item.poster);
 
+  useEffect(() => {
+    setPosterUri(item.poster);
+    if (!item.poster && item.name) {
+      let isMounted = true;
+      tmdbService
+        .getMovieFullInfo(item.name, item.year || undefined, item.type)
+        .then((info) => {
+          if (isMounted && info?.posterUrl) {
+            setPosterUri(info.posterUrl);
+          }
+        })
+        .catch(() => {});
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [item.poster, item.name, item.year, item.type]);
 
   const handlePress = async () => {
     if (await isHapticsSupported()) {
@@ -80,13 +99,16 @@ const PosterItem = ({
         title: item.name,
         magnetUrl: item.magnetUrl,
         infoHash: item.infoHash,
-        poster: item.poster ?? '',
+        poster: posterUri || item.poster || '',
+        year: item.year || (item.publishDate ? new Date(item.publishDate).getFullYear().toString() : ''),
         type: item.type,
         publishDate: item.publishDate,
         allItems: JSON.stringify(item.allItems),
       },
     });
   };
+
+  const activePoster = posterUri || item.poster;
 
   return (
     <Pressable
@@ -100,9 +122,9 @@ const PosterItem = ({
       ]}
     >
       <View style={{ position: 'relative' }}>
-        {item.poster && !imgError ? (
+        {activePoster && !imgError ? (
           <Image
-            source={{ uri: item.poster }}
+            source={{ uri: activePoster }}
             onError={() => setImgError(true)}
             style={[styles.posterImage, { width: posterWidth, height: posterHeight }]}
             resizeMode="cover"

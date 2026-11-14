@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect } from 'react';
+import React, { useRef, useMemo, useState, useEffect, useCallback } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -10,6 +10,7 @@ import {
   Modal,
   FlatList,
   Image,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { StatusBar, Text, View } from '../../components/Themed';
@@ -17,29 +18,24 @@ import BottomSpacing from '@/components/BottomSpacing';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported, showAlert } from '@/utils/platform';
 import { Ionicons } from '@expo/vector-icons';
-import { TorrentItem, fetchTamilMVTopicMagnets, searchTamilMV, cleanTopicTitle } from '@/hooks/useTamilMv';
+import {
+  TorrentItem,
+  fetchTamilMVTopicMagnets,
+  searchTamilMV,
+  cleanTopicTitle,
+  Language,
+  getTamilMVBaseUrl,
+} from '@/hooks/useTamilMv';
 import { StreamingServerClient, TorrentFile, resolveStreamingServerClient } from '@/clients/stremio';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { myListService } from '@/services/MyListService';
-import { tmdbService, TmdbDetails } from '@/services/TmdbService';
+import { tmdbService, TmdbDetails, detectLanguageCode, cleanMovieQuery } from '@/services/TmdbService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
+import { ensureEmbeddedServerRunning } from '@/utils/StremioServerManager';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-function getActiveStreamingClient(): StreamingServerClient {
-  try {
-    const raw = storageService.getItem(StorageKeys.SERVERS_KEY);
-    if (raw) {
-      const servers: any[] = JSON.parse(raw);
-      const active = servers.find((s) => s.current);
-      if (active?.serverUrl) {
-        return new StreamingServerClient(active.serverUrl);
-      }
-    }
-  } catch {}
-  return new StreamingServerClient();
-}
+import { useTheme } from '@/contexts/ThemeContext';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function extractQualityTag(title: string): string | null {
@@ -71,6 +67,149 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1e3).toFixed(0)} KB`;
 }
 
+const KNOWN_LANGUAGES: { name: string; regex: RegExp }[] = [
+  { name: 'Tamil', regex: /\b(tamil|tam)\b/i },
+  { name: 'English', regex: /\b(english|eng)\b/i },
+  { name: 'Telugu', regex: /\b(telugu|tel)\b/i },
+  { name: 'Hindi', regex: /\b(hindi|hin)\b/i },
+  { name: 'Malayalam', regex: /\b(malayalam|mal)\b/i },
+  { name: 'Kannada', regex: /\b(kannada|kan)\b/i },
+  { name: 'Korean', regex: /\b(korean|kor)\b/i },
+  { name: 'Japanese', regex: /\b(japanese|jap)\b/i },
+  { name: 'Chinese', regex: /\b(chinese|chi)\b/i },
+  { name: 'Spanish', regex: /\b(spanish|spa)\b/i },
+  { name: 'French', regex: /\b(french|fre)\b/i },
+  { name: 'German', regex: /\b(german|ger)\b/i },
+];
+
+function extractLanguagesFromText(text: string): string[] {
+  if (!text) return [];
+  const matches: { name: string; index: number }[] = [];
+
+  // 1. Look inside square brackets [ ... ] or parentheses ( ... ) where audio languages are listed
+  const bracketMatches = Array.from(text.matchAll(/[\[\(]([^\]\)]+)[\]\)]/g));
+  const bracketText = bracketMatches.map((m) => m[1]).join(' ');
+  const target = bracketText.length > 0 ? bracketText : text;
+
+  for (const lang of KNOWN_LANGUAGES) {
+    const idx = target.search(lang.regex);
+    if (idx !== -1) {
+      matches.push({ name: lang.name, index: idx });
+    }
+  }
+
+  // 2. Fallback to searching the whole title if bracket text didn't match languages
+  if (matches.length === 0 && target !== text) {
+    for (const lang of KNOWN_LANGUAGES) {
+      const idx = text.search(lang.regex);
+      if (idx !== -1) {
+        matches.push({ name: lang.name, index: idx });
+      }
+    }
+  }
+
+  matches.sort((a, b) => a.index - b.index);
+  return matches.map((m) => m.name);
+}
+
+function getAllMovieLanguages(
+  topicTitle: string,
+  items: TorrentItem[],
+  tmdbLanguages?: string,
+  fallbackLang: string = 'Tamil'
+): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (lang: string) => {
+    if (!lang) return;
+    const key = lang.trim().toLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      const formatted = lang.trim().charAt(0).toUpperCase() + lang.trim().slice(1);
+      result.push(formatted);
+    }
+  };
+
+  // 1. Extract from topic title
+  extractLanguagesFromText(topicTitle).forEach(add);
+
+  // 2. Extract from variant torrent item titles & language tags
+  if (items && items.length > 0) {
+    for (const it of items) {
+      if (it.title) {
+        extractLanguagesFromText(it.title).forEach(add);
+      }
+      if (it.language) {
+        const normalized = it.language.charAt(0).toUpperCase() + it.language.slice(1).toLowerCase();
+        if (['Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English'].includes(normalized)) {
+          add(normalized);
+        }
+      }
+    }
+  }
+
+  // 3. Extract from TMDB languages
+  if (tmdbLanguages) {
+    const list = tmdbLanguages.split(',').map((s) => s.trim()).filter(Boolean);
+    for (const t of list) {
+      const match = KNOWN_LANGUAGES.find((k) => k.regex.test(t));
+      if (match) add(match.name);
+      else if (t.length > 0 && t.length < 25) add(t);
+    }
+  }
+
+  // 4. Fallback if empty
+  if (result.length === 0 && fallbackLang) {
+    add(fallbackLang);
+  }
+
+  return result;
+}
+
+function getItemLanguages(item: TorrentItem, topicTitle?: string): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (lang: string) => {
+    if (!lang) return;
+    const formatted = lang.trim().charAt(0).toUpperCase() + lang.trim().slice(1).toLowerCase();
+    const key = formatted.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(formatted);
+    }
+  };
+
+  // 1. Extract from item title
+  if (item.title) {
+    extractLanguagesFromText(item.title).forEach(add);
+  }
+  // 2. Extract from item name
+  if (item.name && item.name !== item.title) {
+    extractLanguagesFromText(item.name).forEach(add);
+  }
+
+  // 3. If item mentions multi-audio or dual-audio, or has no specific languages,
+  // check if topicTitle has languages
+  const combinedText = `${item.title || ''} ${item.name || ''}`.toLowerCase();
+  const isMultiOrDual = combinedText.includes('multi') || combinedText.includes('dual');
+
+  if ((result.length === 0 || isMultiOrDual) && topicTitle) {
+    extractLanguagesFromText(topicTitle).forEach(add);
+  }
+
+  // 4. Check item.language (only as a fallback if nothing detected yet)
+  if (result.length === 0 && item.language) {
+    const formatted = item.language.trim().charAt(0).toUpperCase() + item.language.trim().slice(1).toLowerCase();
+    if (['Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English'].includes(formatted)) {
+      add(formatted);
+    }
+  }
+
+  return result;
+}
+
 function parseQualityMeta(title: string) {
   const is4K = /\b(4k|2160p|uhd)\b/i.test(title);
   const is1080p = /\b(1080p|fhd)\b/i.test(title);
@@ -94,6 +233,8 @@ function parseQualityMeta(title: string) {
   const codecMatch = title.match(/\b(HEVC|x265|x264|AVC|10bit|HDR10\+?|HDR)\b/i);
   const codec = codecMatch ? codecMatch[1].toUpperCase() : null;
 
+  const languages = extractLanguagesFromText(title);
+
   return {
     is4K,
     is1080p,
@@ -102,8 +243,18 @@ function parseQualityMeta(title: string) {
     fileSize,
     audio,
     codec,
+    languages,
   };
 }
+
+const LANGUAGE_NAMES: Record<Language, string> = {
+  tamil: 'Tamil',
+  english: 'English',
+  malayalam: 'Malayalam',
+  hindi: 'Hindi',
+  telugu: 'Telugu',
+  kannada: 'Kannada',
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const TorrentDetails = () => {
@@ -111,6 +262,7 @@ const TorrentDetails = () => {
     title,
     poster,
     publishDate,
+    year: paramYear,
     type,
     allItems: allItemsRaw,
     topicUrl,
@@ -119,6 +271,7 @@ const TorrentDetails = () => {
     title: string;
     poster: string;
     publishDate?: string;
+    year?: string;
     type?: string;
     allItems?: string;
     topicUrl?: string;
@@ -128,7 +281,8 @@ const TorrentDetails = () => {
   const { height, width } = useWindowDimensions();
   const isPortrait = height > width;
   const insets = useSafeAreaInsets();
-  const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const { theme } = useTheme();
 
   // ── TMDB State ──
   const [tmdbData, setTmdbData] = useState<TmdbDetails | null>(null);
@@ -151,7 +305,13 @@ const TorrentDetails = () => {
     let isMounted = true;
     setIsTmdbLoading(true);
 
-    tmdbService.getMovieFullInfo(title, undefined, type)
+    const targetYear =
+      paramYear ||
+      cleanMovieQuery(title).year ||
+      cleanTopicTitle(title).year ||
+      (publishDate ? new Date(publishDate).getFullYear().toString() : undefined);
+
+    tmdbService.getMovieFullInfo(title, targetYear, type)
       .then((info) => {
         if (isMounted) {
           setTmdbData(info);
@@ -169,7 +329,7 @@ const TorrentDetails = () => {
     return () => {
       isMounted = false;
     };
-  }, [title, type]);
+  }, [title, type, publishDate, paramYear]);
 
   // Subscribe to real-time download updates (speed, peers, progress)
   useEffect(() => {
@@ -315,6 +475,134 @@ const TorrentDetails = () => {
     setInMyList(added);
   };
 
+  // Resolve the TamilMV web page URL for this movie
+  const getMovieWebUrl = useCallback((): string => {
+    const currentBase = getTamilMVBaseUrl();
+    const candidate =
+      topicUrl ||
+      (groupid?.startsWith('http') ? groupid : null) ||
+      allItems.find((i) => i.groupid && i.groupid.startsWith('http'))?.groupid ||
+      allItems.find((i) => i.guid && i.guid.startsWith('http') && i.guid.includes('/forums/topic/'))?.guid;
+
+    if (candidate) {
+      try {
+        const parsed = new URL(candidate);
+        const baseParsed = new URL(currentBase);
+        return `${baseParsed.origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+      } catch {
+        if (candidate.startsWith('/')) {
+          return `${currentBase.replace(/\/$/, '')}${candidate}`;
+        }
+        return candidate;
+      }
+    }
+
+    // Fallback: search TamilMV for this movie title
+    const searchName = getMovieSearchTitle(tmdbData?.title || title);
+    return `${currentBase.replace(/\/$/, '')}/index.php?/search/&q=${encodeURIComponent(searchName)}&quick=1`;
+  }, [topicUrl, groupid, allItems, tmdbData?.title, title]);
+
+  const handleOpenWebPage = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    const webUrl = getMovieWebUrl();
+    router.push({
+      pathname: '/browser',
+      params: { url: webUrl },
+    } as any);
+  }, [getMovieWebUrl]);
+
+  const handleOpenExternalWebPage = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    const webUrl = getMovieWebUrl();
+    try {
+      const supported = await Linking.canOpenURL(webUrl);
+      if (supported) {
+        await Linking.openURL(webUrl);
+        return;
+      }
+    } catch {}
+    router.push({
+      pathname: '/browser',
+      params: { url: webUrl },
+    } as any);
+  }, [getMovieWebUrl]);
+
+  // ── Language Detection & Category Feeds (matching index.tsx categories) ──
+  const movieLanguage: Language = useMemo(() => {
+    const rawParsed: TorrentItem[] = allItemsRaw ? (() => {
+      try { return JSON.parse(allItemsRaw); } catch { return []; }
+    })() : [];
+    const firstLang = rawParsed[0]?.language?.toLowerCase() || items[0]?.language?.toLowerCase();
+    if (firstLang && ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'].includes(firstLang)) {
+      return firstLang as Language;
+    }
+    const code = detectLanguageCode(title);
+    const codeMap: Record<string, Language> = {
+      ta: 'tamil',
+      te: 'telugu',
+      hi: 'hindi',
+      ml: 'malayalam',
+      kn: 'kannada',
+      en: 'english',
+    };
+    return codeMap[code] || 'tamil';
+  }, [allItemsRaw, items, title]);
+
+  const displayLanguage = LANGUAGE_NAMES[movieLanguage] || 'Tamil';
+  const isSeries = type === 'series';
+
+  // ── Available Languages (Detected from title, torrent items, and TMDB) ──
+  const availableLanguages = useMemo(() => {
+    if (items && items.length > 0) {
+      const allVariantLangs = new Set<string>();
+      items.forEach((it) => {
+        getItemLanguages(it, title).forEach((l) => allVariantLangs.add(l));
+      });
+      if (allVariantLangs.size > 0) {
+        return Array.from(allVariantLangs);
+      }
+    }
+    return getAllMovieLanguages(title, items, tmdbData?.languages, displayLanguage);
+  }, [title, items, tmdbData?.languages, displayLanguage]);
+
+  // ── Modal Language Filter State ──
+  const [selectedModalLanguage, setSelectedModalLanguage] = useState<string>('All');
+
+  const languageCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: allItems.length };
+    availableLanguages.forEach((lang) => {
+      counts[lang] = allItems.filter((item) =>
+        getItemLanguages(item, title).some((l) => l.toLowerCase() === lang.toLowerCase())
+      ).length;
+    });
+    return counts;
+  }, [allItems, availableLanguages, title]);
+
+  const filteredModalItems = useMemo(() => {
+    if (selectedModalLanguage === 'All') return allItems;
+    return allItems.filter((item) => {
+      const langs = getItemLanguages(item, title);
+      return langs.some((l) => l.toLowerCase() === selectedModalLanguage.toLowerCase());
+    });
+  }, [allItems, selectedModalLanguage, title]);
+
+  // ── Metadata Values for Hero Header ──
+  const releaseYear = tmdbData?.year || (publishDate ? new Date(publishDate).getFullYear().toString() : '');
+  const genresText = tmdbData?.genres
+    ? tmdbData.genres.split(',').slice(0, 3).map((g) => g.trim()).join(', ')
+    : '';
+  const runtimeText = tmdbData?.runtimeFormatted || (isSeries ? 'Series' : '');
+  const certificationText = tmdbData?.certification || '';
+
+  const imdbRating = tmdbData?.imdbRating;
+  const tmdbRating = tmdbData?.tmdbRating;
+  const rtScore = tmdbData?.rtScore;
+  const audienceScore = tmdbData?.audienceScore;
+
   // ── Trailer Press Handler ──
   const handleTrailerPress = async () => {
     if (await isHapticsSupported()) {
@@ -324,7 +612,7 @@ const TorrentDetails = () => {
   };
 
   // ── Watch Now Handler ──
-  const handleWatchNow = async () => {
+  const handleWatchNow = async (preselectedLang?: string) => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -334,6 +622,7 @@ const TorrentDetails = () => {
     }
 
     if (allItems.length > 0) {
+      setSelectedModalLanguage(preselectedLang || 'All');
       setQualityModalMode('watch');
       setQualityModalVisible(true);
     } else {
@@ -355,6 +644,7 @@ const TorrentDetails = () => {
     }
 
     if (allItems.length > 0) {
+      setSelectedModalLanguage('All');
       setQualityModalMode('download');
       setQualityModalVisible(true);
     } else {
@@ -382,19 +672,34 @@ const TorrentDetails = () => {
 
   // ── Navigate to player ──
   const navigateToPlayer = (item: TorrentItem, fileIdx: number, streamUrl?: string) => {
+    const streamList = allItems.length > 0 ? allItems : [item];
+    const itemIndex = streamList.findIndex(
+      (i) => (i.guid && i.guid === item.guid) || (i.infoHash && i.infoHash === item.infoHash)
+    );
+    const selectedIdx = itemIndex >= 0 ? itemIndex : 0;
     const safeIdx = typeof fileIdx === 'number' && fileIdx >= 0 ? fileIdx : 0;
-    const streams = JSON.stringify([
-      {
-        name: item.title,
-        title: item.title,
-        infoHash: item.infoHash,
-        fileIdx: safeIdx,
-        url: streamUrl,
-      },
-    ]);
+
+    const streams = JSON.stringify(
+      streamList.map((it) => ({
+        name: it.title,
+        title: it.title,
+        infoHash: it.infoHash,
+        magnet: it.magnetUrl,
+        magnetLink: it.magnetUrl,
+        fileIdx: (it.guid === item.guid || it.infoHash === item.infoHash) ? safeIdx : safeIdx,
+        url: (it.guid === item.guid || it.infoHash === item.infoHash) ? streamUrl : undefined,
+      }))
+    );
+
     router.push({
       pathname: '/stream/player',
-      params: { streams, selectedStreamIndex: '0', title, poster: poster ?? tmdbData?.posterUrl ?? '' },
+      params: {
+        streams,
+        selectedStreamIndex: String(selectedIdx),
+        title: tmdbData?.title || cleanTitle(title),
+        poster: poster ?? tmdbData?.posterUrl ?? '',
+        allItems: JSON.stringify(allItems),
+      },
     });
   };
 
@@ -406,31 +711,53 @@ const TorrentDetails = () => {
 
     setLoadingItem(item.guid);
     try {
-      const client = await resolveStreamingServerClient();
-      const isOnline = await client.isServerOnline(2000);
-      if (!isOnline) {
-        showAlert(
-          'Streaming Server Offline',
-          `Could not connect to the Stremio streaming server (${client.getBaseURL()}). Please make sure the server is running or configure it in Settings.`
-        );
-        return;
-      }
+      // Warm up embedded streaming server
+      ensureEmbeddedServerRunning().catch(() => {});
 
-      const files = await client.getTorrentFiles(item.infoHash, 8000).catch(() => []);
+      const client = await resolveStreamingServerClient();
+      const files = await client.getTorrentFiles(item.infoHash, 4000, item.magnetUrl).catch(() => []);
 
       if (files && files.length > 1) {
-        setPendingItem(item);
-        setPickerFiles(files);
-        setPickerMode('stream');
-        setPickerVisible(true);
+        // Filter out non-video files (txt, nfo, sample)
+        const videoFiles = files.filter((f) => {
+          const ext = f.name.split('.').pop()?.toLowerCase();
+          return ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(ext || '');
+        });
+
+        if (videoFiles.length === 1) {
+          // Exactly 1 main video file
+          setQualityModalVisible(false);
+          const safeIdx = typeof videoFiles[0].id === 'number' && videoFiles[0].id >= 0 ? videoFiles[0].id : 0;
+          const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl).catch(() => undefined);
+          navigateToPlayer(item, safeIdx, streamUrl);
+        } else if (videoFiles.length > 1) {
+          // Multiple video files (episodes or multi-part)
+          setQualityModalVisible(false);
+          setPendingItem(item);
+          setPickerFiles(videoFiles);
+          setPickerMode('stream');
+          setPickerVisible(true);
+        } else {
+          // Fallback to largest file
+          const sorted = [...files].sort((a, b) => b.length - a.length);
+          setQualityModalVisible(false);
+          const safeIdx = sorted[0]?.id !== undefined && sorted[0].id >= 0 ? sorted[0].id : 0;
+          const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl).catch(() => undefined);
+          navigateToPlayer(item, safeIdx, streamUrl);
+        }
+      } else if (files && files.length === 1) {
+        setQualityModalVisible(false);
+        const safeIdx = typeof files[0].id === 'number' && files[0].id >= 0 ? files[0].id : 0;
+        const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl).catch(() => undefined);
+        navigateToPlayer(item, safeIdx, streamUrl);
       } else {
-        const fileIdx = files && files.length === 1 ? (files[0].id ?? 0) : 0;
-        const streamUrl = await client.getStreamingURL(item.infoHash, fileIdx);
-        navigateToPlayer(item, fileIdx, streamUrl);
+        setQualityModalVisible(false);
+        const streamUrl = await client.getStreamingURL(item.infoHash, 0, item.magnetUrl).catch(() => undefined);
+        navigateToPlayer(item, 0, streamUrl);
       }
     } catch (e) {
       console.warn('[TorrentDetails] Could not fetch file list from streaming server:', e);
-      showAlert('Notice', 'Starting stream with default settings.');
+      setQualityModalVisible(false);
       navigateToPlayer(item, 0);
     } finally {
       setLoadingItem(null);
@@ -445,7 +772,7 @@ const TorrentDetails = () => {
       }
       const client = await resolveStreamingServerClient();
       const safeIdx = typeof fileIdx === 'number' && fileIdx >= 0 ? fileIdx : 0;
-      const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx);
+      const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl);
       const clean = cleanTitle(item.title);
       const finalFileName = fileName || `${clean}.mp4`;
 
@@ -472,7 +799,7 @@ const TorrentDetails = () => {
     try {
       const clean = cleanTitle(item.title);
       const client = await resolveStreamingServerClient();
-      const files = await client.getTorrentFiles(item.infoHash, 4000).catch(() => []);
+      const files = await client.getTorrentFiles(item.infoHash, 4000, item.magnetUrl).catch(() => []);
 
       if (files && files.length > 1) {
         setPendingItem(item);
@@ -548,25 +875,50 @@ const TorrentDetails = () => {
             onPress={() => router.back()}
             activeOpacity={0.7}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
           >
             <Ionicons name="chevron-back" size={24} color="#ffffff" />
+          </TouchableOpacity>
+
+          {/* Circular Web Page Button (top right, near My List) */}
+          <TouchableOpacity
+            style={[
+              styles.webPageButton,
+              { top: Math.max(insets.top + 6, 20) },
+            ]}
+            onPress={handleOpenWebPage}
+            onLongPress={handleOpenExternalWebPage}
+            activeOpacity={0.7}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+            accessibilityRole="button"
+            accessibilityLabel="Open Movie Web Page"
+            accessibilityHint="Opens TamilMV movie page in built-in browser"
+          >
+            <Ionicons name="globe-outline" size={21} color="#ffffff" />
           </TouchableOpacity>
 
           {/* Circular My List Button (top right in front of poster image) */}
           <TouchableOpacity
             style={[
               styles.bookmarkButton,
-              inMyList && styles.bookmarkButtonActive,
+              inMyList && {
+                backgroundColor: theme.primary + '33',
+                borderWidth: 1,
+                borderColor: theme.primary,
+              },
               { top: Math.max(insets.top + 6, 20) },
             ]}
             onPress={handleToggleMyList}
             activeOpacity={0.7}
             hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+            accessibilityRole="button"
+            accessibilityLabel={inMyList ? 'Remove from My List' : 'Add to My List'}
           >
             <Ionicons
               name={inMyList ? 'bookmark' : 'bookmark-outline'}
               size={22}
-              color={inMyList ? '#535aff' : '#ffffff'}
+              color={inMyList ? theme.primary : '#ffffff'}
             />
           </TouchableOpacity>
         </View>
@@ -574,9 +926,78 @@ const TorrentDetails = () => {
         {/* ── Movie Title (Centered & Bold) ── */}
         <View style={styles.titleSection}>
           <Text style={styles.movieTitleMain}>{getMovieSearchTitle(tmdbData?.title || title)}</Text>
+
+          {/* Metadata Row: 2024 · Adventure, Thriller · 2h 15m · PG-13 */}
+          {(releaseYear || genresText || runtimeText) ? (
+            <Text style={styles.metaRowText} numberOfLines={1}>
+              {[releaseYear, genresText, runtimeText, certificationText].filter(Boolean).join('  ·  ')}
+            </Text>
+          ) : null}
+
+          {/* Ratings Badges Row (IMDb, TMDB, RT, Popcorn) */}
+          {(imdbRating || tmdbRating) && (
+            <View style={styles.ratingsRow}>
+              {imdbRating ? (
+                <View style={styles.badgePill}>
+                  <View style={styles.imdbLabel}>
+                    <Text style={styles.imdbLabelText}>IMDb</Text>
+                  </View>
+                  <Text style={styles.badgeScoreText}>{imdbRating}</Text>
+                </View>
+              ) : null}
+
+              {tmdbRating ? (
+                <View style={styles.badgePill}>
+                  <View style={styles.tmdbLabel}>
+                    <Text style={styles.tmdbLabelText}>TMDB</Text>
+                  </View>
+                  <Text style={styles.badgeScoreText}>{tmdbRating}</Text>
+                </View>
+              ) : null}
+
+              {rtScore ? (
+                <View style={styles.badgePill}>
+                  <View style={styles.rtLabel}>
+                    <Text style={styles.rtLabelText}>RT</Text>
+                  </View>
+                  <Text style={styles.badgeScoreText}>{rtScore}</Text>
+                </View>
+              ) : null}
+
+              {audienceScore ? (
+                <View style={[styles.badgePill, styles.popcornPill]}>
+                  <Text style={styles.popcornText}>🍿 {audienceScore}</Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+
+          {/* Languages Badges Row: [ 🔊 Tamil ] [ 🔊 English ] ... */}
+          {availableLanguages.length > 0 && (
+            <View style={styles.languagesBadgeRow}>
+              <View style={styles.languagesPillsWrap}>
+                <View style={styles.languagesInlineHeader}>
+                  <Ionicons name="volume-medium" size={13} color={theme.primary} style={{ marginRight: 4 }} />
+                  <Text style={[styles.languagesHeaderLabel, { color: theme.primary }]}>
+                    {availableLanguages.length > 1 ? 'Audio:' : 'Language:'}
+                  </Text>
+                </View>
+                {availableLanguages.map((lang) => (
+                  <TouchableOpacity
+                    key={lang}
+                    style={styles.languagePill}
+                    onPress={() => handleWatchNow(lang)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.languagePillText}>{lang}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
         </View>
 
-        {/* ── Action Row (Trailer on Left, Centered Watch Now, Download on Right) ── */}
+        {/* ── Action Row (Trailer on Left, Centered Play, Download on Right) ── */}
         <View style={styles.actionRowContainer}>
           {/* Left: Circular Trailer Button */}
           <TouchableOpacity
@@ -587,20 +1008,20 @@ const TorrentDetails = () => {
             <Ionicons name="film-outline" size={22} color="#ffffff" />
           </TouchableOpacity>
 
-          {/* Center: Watch Now Pill Button */}
+          {/* Center: Play Pill Button */}
           <TouchableOpacity
             style={styles.watchNowBtn}
-            onPress={handleWatchNow}
+            onPress={() => handleWatchNow()}
             activeOpacity={0.8}
             disabled={isLoadingVariants}
           >
             {isLoadingVariants ? (
-              <ActivityIndicator size="small" color="#000000" style={{ marginRight: 8 }} />
+              <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 8 }} />
             ) : (
               <Ionicons name="play" size={20} color="#000000" style={{ marginRight: 8 }} />
             )}
             <Text style={styles.watchNowBtnText}>
-              {isLoadingVariants ? 'Loading...' : 'Watch Now'}
+              {isLoadingVariants ? 'Loading...' : 'Play'}
             </Text>
           </TouchableOpacity>
 
@@ -608,7 +1029,11 @@ const TorrentDetails = () => {
           <TouchableOpacity
             style={[
               styles.circularActionBtn,
-              hasActiveDownload && styles.circularActionBtnActive,
+              hasActiveDownload && {
+                backgroundColor: theme.primary + '25',
+                borderColor: theme.primary,
+                borderWidth: 1,
+              },
               hasCompletedDownload && styles.circularActionBtnCompleted,
             ]}
             onPress={handleDownloadPress}
@@ -616,7 +1041,7 @@ const TorrentDetails = () => {
             disabled={isLoadingVariants}
           >
             {hasActiveDownload ? (
-              <Ionicons name="arrow-down" size={22} color="#535aff" />
+              <Ionicons name="arrow-down" size={22} color={theme.primary} />
             ) : hasCompletedDownload ? (
               <Ionicons name="checkmark-circle" size={22} color="#00e676" />
             ) : (
@@ -688,11 +1113,11 @@ const TorrentDetails = () => {
         )}
 
         {/* ── Section: Information ── */}
-        {tmdbData && (
+        {(tmdbData || formattedDate || availableLanguages.length > 0) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Information</Text>
             <View style={styles.infoTable}>
-              {tmdbData.releaseDateFormatted ? (
+              {tmdbData?.releaseDateFormatted ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Released On:</Text>
                   <Text style={styles.infoValue}>{tmdbData.releaseDateFormatted}</Text>
@@ -704,7 +1129,7 @@ const TorrentDetails = () => {
                 </View>
               ) : null}
 
-              {tmdbData.imdbRating ? (
+              {tmdbData?.imdbRating ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>IMDB Rating:</Text>
                   <View style={styles.ratingValueRow}>
@@ -714,154 +1139,34 @@ const TorrentDetails = () => {
                 </View>
               ) : null}
 
-              {tmdbData.genres ? (
+              {tmdbData?.genres ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Genre:</Text>
                   <Text style={styles.infoValue}>{tmdbData.genres}</Text>
                 </View>
               ) : null}
 
-              {tmdbData.runtimeFormatted ? (
+              {tmdbData?.runtimeFormatted ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Runtime:</Text>
                   <Text style={styles.infoValue}>{tmdbData.runtimeFormatted}</Text>
                 </View>
               ) : null}
 
-              {tmdbData.country ? (
+              {tmdbData?.country ? (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Country:</Text>
                   <Text style={styles.infoValue}>{tmdbData.country}</Text>
                 </View>
               ) : null}
 
-              {tmdbData.languages ? (
+              {availableLanguages.length > 0 && (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Languages:</Text>
-                  <Text style={styles.infoValue}>{tmdbData.languages}</Text>
+                  <Text style={styles.infoValue}>{availableLanguages.join(', ')}</Text>
                 </View>
-              ) : null}
-            </View>
-          </View>
-        )}
-
-        {/* ── Section: Recommended ── */}
-        {tmdbData?.recommended && tmdbData.recommended.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Recommended</Text>
-              <TouchableOpacity
-                style={styles.seeAllRow}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/search',
-                    params: { query: getMovieSearchTitle(title) },
-                  } as any)
-                }
-              >
-                <Text style={styles.seeAllText}>See All</Text>
-                <Ionicons name="chevron-forward" size={14} color="#8E8E93" />
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={tmdbData.recommended}
-              keyExtractor={(item) => `rec-${item.id}`}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.mediaListContent}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.mediaCard}
-                  onPress={() => {
-                    router.push({
-                      pathname: '/torrent/details',
-                      params: {
-                        title: item.title,
-                        poster: item.posterUrl || '',
-                        type: 'movie',
-                        publishDate: item.year ? `${item.year}-01-01` : undefined,
-                      },
-                    });
-                  }}
-                  activeOpacity={0.75}
-                >
-                  <View style={styles.mediaPosterWrap}>
-                    <Image
-                      source={{ uri: item.posterUrl || '' }}
-                      style={styles.mediaPoster}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  <Text style={styles.mediaTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  {item.year ? (
-                    <Text style={styles.mediaYear}>{item.year}</Text>
-                  ) : null}
-                </TouchableOpacity>
               )}
-            />
-          </View>
-        )}
-
-        {/* ── Section: Similar to this ── */}
-        {tmdbData?.similar && tmdbData.similar.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Similar to this</Text>
-              <TouchableOpacity
-                style={styles.seeAllRow}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(tabs)/search',
-                    params: { query: getMovieSearchTitle(title) },
-                  } as any)
-                }
-              >
-                <Text style={styles.seeAllText}>See All</Text>
-                <Ionicons name="chevron-forward" size={14} color="#8E8E93" />
-              </TouchableOpacity>
             </View>
-
-            <FlatList
-              data={tmdbData.similar}
-              keyExtractor={(item) => `sim-${item.id}`}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.mediaListContent}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.mediaCard}
-                  onPress={() => {
-                    router.push({
-                      pathname: '/torrent/details',
-                      params: {
-                        title: item.title,
-                        poster: item.posterUrl || '',
-                        type: 'movie',
-                        publishDate: item.year ? `${item.year}-01-01` : undefined,
-                      },
-                    });
-                  }}
-                  activeOpacity={0.75}
-                >
-                  <View style={styles.mediaPosterWrap}>
-                    <Image
-                      source={{ uri: item.posterUrl || '' }}
-                      style={styles.mediaPoster}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  <Text style={styles.mediaTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  {item.year ? (
-                    <Text style={styles.mediaYear}>{item.year}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              )}
-            />
           </View>
         )}
 
@@ -885,11 +1190,11 @@ const TorrentDetails = () => {
               <View style={styles.qualityModalHeaderRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.modalTitle}>
-                    {qualityModalMode === 'watch' ? 'Choose Quality to Watch' : 'Choose Quality to Download'}
+                    {qualityModalMode === 'watch' ? 'Choose Quality to Play' : 'Choose Quality to Download'}
                   </Text>
                   <Text style={styles.modalSubtitle}>
-                    {allItems.length} {allItems.length === 1 ? 'quality' : 'qualities'} available •{' '}
-                    {qualityModalMode === 'watch' ? 'Tap to start streaming' : 'Tap to start download'}
+                    {filteredModalItems.length} {filteredModalItems.length === 1 ? 'quality' : 'qualities'} available •{' '}
+                    {qualityModalMode === 'watch' ? 'Tap to start playback' : 'Tap to start download'}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -902,8 +1207,82 @@ const TorrentDetails = () => {
               </View>
             </View>
 
+            {/* Language Filter Chips in Modal */}
+            {availableLanguages.length > 1 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.modalFilterScrollView}
+                contentContainerStyle={styles.modalFilterScroll}
+              >
+                {['All', ...availableLanguages].map((lang) => {
+                  const isSelected = selectedModalLanguage === lang;
+                  const count = languageCounts[lang] ?? 0;
+                  return (
+                    <TouchableOpacity
+                      key={lang}
+                      style={[
+                        styles.modalFilterChip,
+                        isSelected && [
+                          styles.modalFilterChipActive,
+                          { backgroundColor: theme.primary, borderColor: theme.primary },
+                        ],
+                      ]}
+                      onPress={() => setSelectedModalLanguage(lang)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name={lang === 'All' ? 'layers-outline' : 'volume-medium'}
+                        size={13}
+                        color={isSelected ? '#000000' : theme.primary}
+                        style={{ marginRight: 2 }}
+                      />
+                      <Text
+                        style={[
+                          styles.modalFilterChipText,
+                          isSelected && styles.modalFilterChipTextActive,
+                        ]}
+                      >
+                        {lang}
+                      </Text>
+                      <View
+                        style={[
+                          styles.modalFilterChipCount,
+                          isSelected && styles.modalFilterChipCountActive,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.modalFilterChipCountText,
+                            isSelected && { color: '#000000' },
+                          ]}
+                        >
+                          {count}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {filteredModalItems.length === 0 ? (
+              <View style={styles.emptyFilterContainer}>
+                <Ionicons name="filter-outline" size={32} color="#8E8E93" />
+                <Text style={styles.emptyFilterTitle}>No qualities found for {selectedModalLanguage}</Text>
+                <Text style={styles.emptyFilterSubtitle}>
+                  This title may only have other audio languages available.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.emptyFilterBtn, { backgroundColor: theme.primary }]}
+                  onPress={() => setSelectedModalLanguage('All')}
+                >
+                  <Text style={styles.emptyFilterBtnText}>Show All ({allItems.length})</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
             <FlatList
-              data={allItems}
+              data={filteredModalItems}
               keyExtractor={(item, index) => item.guid || `${item.infoHash}-${index}`}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.qualityListContent}
@@ -1029,6 +1408,15 @@ const TorrentDetails = () => {
                           </View>
                         ) : null}
 
+                        {meta.languages && meta.languages.length > 0 && (
+                          <View style={[styles.qualityMetaBadge, { backgroundColor: theme.primary + '18', borderColor: theme.primary + '40' }]}>
+                            <Ionicons name="volume-medium" size={10} color={theme.primary} />
+                            <Text style={[styles.qualityMetaBadgeText, { color: theme.primary, fontWeight: '700' }]}>
+                              {meta.languages.join(' + ')}
+                            </Text>
+                          </View>
+                        )}
+
                         {isItemCompleted && (
                           <View style={styles.qualityDownloadedBadge}>
                             <Ionicons name="checkmark-circle" size={10} color="#00e676" />
@@ -1040,7 +1428,7 @@ const TorrentDetails = () => {
                           <View style={styles.qualityDownloadingBadge}>
                             <Ionicons name="arrow-down" size={10} color="#00e676" />
                             <Text style={styles.qualityDownloadingText}>
-                              {downloadInfo.progress}% • {downloadInfo.speedFormatted || '0 KB/s'}
+                              {downloadInfo.progress}% • {downloadInfo.speedFormatted || '0 Mbps'}
                             </Text>
                           </View>
                         )}
@@ -1050,21 +1438,21 @@ const TorrentDetails = () => {
                     <View style={styles.qualityPlayActionWrap}>
                       {isWatchMode ? (
                         isLoadingStream ? (
-                          <ActivityIndicator size="small" color="#535aff" />
+                          <ActivityIndicator size="small" color={theme.primary} />
                         ) : isItemCompleted ? (
                           <View style={[styles.qualityPlayBtn, styles.qualityPlayBtnOffline]}>
                             <Ionicons name="play" size={12} color="#00e676" />
                             <Text style={[styles.qualityPlayBtnText, { color: '#00e676' }]}>Play</Text>
                           </View>
                         ) : (
-                          <View style={styles.qualityPlayBtn}>
-                            <Ionicons name="play" size={12} color="#ffffff" />
-                            <Text style={styles.qualityPlayBtnText}>Watch</Text>
+                          <View style={[styles.qualityPlayBtn, { backgroundColor: theme.primary }]}>
+                            <Ionicons name="play" size={12} color="#000000" />
+                            <Text style={[styles.qualityPlayBtnText, { color: '#000000' }]}>Play</Text>
                           </View>
                         )
                       ) : (
                         isStartingDownload ? (
-                          <ActivityIndicator size="small" color="#535aff" />
+                          <ActivityIndicator size="small" color={theme.primary} />
                         ) : isItemCompleted ? (
                           <View style={[styles.qualityPlayBtn, styles.qualityDownloadBtnCompleted]}>
                             <Ionicons name="checkmark-circle" size={13} color="#00e676" />
@@ -1081,9 +1469,9 @@ const TorrentDetails = () => {
                             <Text style={[styles.qualityPlayBtnText, { color: '#7b82ff' }]}>Resume</Text>
                           </View>
                         ) : (
-                          <View style={[styles.qualityPlayBtn, styles.qualityDownloadBtn]}>
-                            <Ionicons name="download-outline" size={13} color="#ffffff" />
-                            <Text style={styles.qualityPlayBtnText}>Download</Text>
+                          <View style={[styles.qualityPlayBtn, { backgroundColor: theme.primary }]}>
+                            <Ionicons name="download-outline" size={13} color="#000000" />
+                            <Text style={[styles.qualityPlayBtnText, { color: '#000000' }]}>Download</Text>
                           </View>
                         )
                       )}
@@ -1092,6 +1480,7 @@ const TorrentDetails = () => {
                 );
               }}
             />
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -1133,7 +1522,7 @@ const TorrentDetails = () => {
                     onPress={() => handleFilePick(file)}
                   >
                     <View style={styles.fileIconWrap}>
-                      <Ionicons name="document-outline" size={22} color="#535aff" />
+                      <Ionicons name="document-outline" size={22} color={theme.primary} />
                     </View>
                     <View style={styles.fileBody}>
                       <Text style={styles.fileName} numberOfLines={2}>
@@ -1160,7 +1549,7 @@ const TorrentDetails = () => {
                       }}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <Ionicons name="arrow-down-circle-outline" size={24} color="#535aff" />
+                      <Ionicons name="arrow-down-circle-outline" size={24} color={theme.primary} />
                     </TouchableOpacity>
 
                     <Ionicons name="play-circle-outline" size={26} color="#ffffff" />
@@ -1171,6 +1560,8 @@ const TorrentDetails = () => {
           </Pressable>
         </Pressable>
       </Modal>
+
+
     </>
   );
 };
@@ -1194,6 +1585,18 @@ const styles = StyleSheet.create({
   backButton: {
     position: 'absolute',
     left: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 99,
+    elevation: 12,
+  },
+  webPageButton: {
+    position: 'absolute',
+    right: 68,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -1314,27 +1717,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   sectionTitle: {
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
     marginBottom: 14,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  seeAllRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  seeAllText: {
-    fontSize: 13,
-    color: '#8E8E93',
-    fontWeight: '600',
   },
   variantBadge: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -1421,37 +1808,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     flex: 1,
-  },
-
-  /* Recommended & Similar */
-  mediaListContent: {
-    gap: 12,
-    paddingRight: 20,
-  },
-  mediaCard: {
-    width: 105,
-  },
-  mediaPosterWrap: {
-    width: 105,
-    height: 155,
-    borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: '#1c1c1e',
-    marginBottom: 6,
-  },
-  mediaPoster: {
-    width: '100%',
-    height: '100%',
-  },
-  mediaTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  mediaYear: {
-    fontSize: 11,
-    color: '#8E8E93',
-    marginTop: 2,
   },
 
   /* Torrent list */
@@ -1829,6 +2185,201 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: '#00e676',
+  },
+
+  /* Metadata Row under title */
+  metaRowText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#D1D1D6',
+    textAlign: 'center',
+    marginTop: 6,
+    letterSpacing: 0.2,
+  },
+
+  /* Ratings Row */
+  ratingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    marginTop: 10,
+    flexWrap: 'wrap',
+  },
+  badgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  imdbLabel: {
+    paddingVertical: 0,
+  },
+  imdbLabelText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#F5C518',
+    letterSpacing: -0.2,
+  },
+  tmdbLabel: {
+    paddingVertical: 0,
+  },
+  tmdbLabelText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#01B4E4',
+    letterSpacing: -0.2,
+  },
+  rtLabel: {
+    paddingVertical: 0,
+  },
+  rtLabelText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#FA320A',
+    letterSpacing: -0.2,
+  },
+  badgeScoreText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  popcornPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  popcornText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+
+  /* Languages Badges Row */
+  languagesBadgeRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    width: '100%',
+  },
+  languagesPillsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  languagesInlineHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 2,
+  },
+  languagesHeaderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  languagePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  languagePillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.3,
+  },
+
+  /* Modal Language Filter Chips */
+  modalFilterScrollView: {
+    flexGrow: 0,
+    marginBottom: 12,
+  },
+  modalFilterScroll: {
+    paddingHorizontal: 16,
+    paddingBottom: 2,
+    gap: 8,
+    alignItems: 'center',
+  },
+  modalFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 18,
+    backgroundColor: '#252528',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 5,
+  },
+  modalFilterChipActive: {
+    backgroundColor: '#535aff',
+    borderColor: '#535aff',
+  },
+  modalFilterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  modalFilterChipTextActive: {
+    color: '#000000',
+    fontWeight: '800',
+  },
+  modalFilterChipCount: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 8,
+    minWidth: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalFilterChipCountActive: {
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+  },
+  modalFilterChipCountText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#8E8E93',
+  },
+  emptyFilterContainer: {
+    paddingVertical: 36,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  emptyFilterTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  emptyFilterSubtitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  emptyFilterBtn: {
+    marginTop: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  emptyFilterBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000000',
   },
 });
 

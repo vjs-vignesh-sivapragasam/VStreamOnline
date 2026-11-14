@@ -6,6 +6,14 @@ import { confirmAction, showAlert } from '@/utils/platform';
 import { MaterialIcons } from '@expo/vector-icons';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { getDevHostIp } from '@/clients/stremio';
+import { startEmbeddedNodeServer } from '@/utils/StremioServerManager';
+import {
+  isBackgroundAudioKeepAliveEnabled,
+  setBackgroundAudioKeepAliveEnabled,
+  isScreenKeepAwakeEnabled,
+  setScreenKeepAwakeEnabled,
+  subscribeKeepAliveSettings,
+} from '@/utils/StremioKeepAliveManager';
 
 interface ServerConfigProps {
   serverName: string;
@@ -50,6 +58,26 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
   const [inlineEditValue, setInlineEditValue] = useState<string>('');
   const [animatedValues, setAnimatedValues] = useState<{ [key: string]: { rotation: Animated.Value, height: Animated.Value } }>({});
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({});
+  const [isBackgroundKeepAlive, setIsBackgroundKeepAlive] = useState<boolean>(() => isBackgroundAudioKeepAliveEnabled());
+  const [isKeepAwake, setIsKeepAwake] = useState<boolean>(() => isScreenKeepAwakeEnabled());
+
+  useEffect(() => {
+    const unsubscribe = subscribeKeepAliveSettings(() => {
+      setIsBackgroundKeepAlive(isBackgroundAudioKeepAliveEnabled());
+      setIsKeepAwake(isScreenKeepAwakeEnabled());
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleToggleBackgroundKeepAlive = (value: boolean) => {
+    setIsBackgroundKeepAlive(value);
+    setBackgroundAudioKeepAliveEnabled(value);
+  };
+
+  const handleToggleKeepAwake = (value: boolean) => {
+    setIsKeepAwake(value);
+    setScreenKeepAwakeEnabled(value);
+  };
 
   const serverConfigsRef = useRef<ServerConfig[]>(serverConfigs);
   const isCheckingRef = useRef<boolean>(false);
@@ -197,8 +225,8 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
     const cleanUrl = server.serverUrl.replace(/\/+$/, '');
     const endpoints = [`${cleanUrl}/stats.json`, `${cleanUrl}/`];
 
-    // Retry with brief delay to accommodate socket/OS resume lag
-    const maxRetries = 2;
+    // Retry with brief delay (up to 4 attempts) to accommodate socket/OS resume lag
+    const maxRetries = 4;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       for (const ep of endpoints) {
         const ok = await probeServer(ep, 1500);
@@ -208,7 +236,7 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
       }
 
       if (attempt < maxRetries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await new Promise((resolve) => setTimeout(resolve, 350));
       }
     }
 
@@ -270,7 +298,7 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
           if (isMounted && serverConfigsRef.current.length > 0) {
             checkAllConnections();
           }
-        }, 300);
+        }, 500);
       }
     });
 
@@ -800,6 +828,73 @@ const ServerConfiguration: React.FC<ServerConfigProps> = ({ serverName, serverTy
           )}
         </View>
       )}
+      {/* Keep-Alive & Stability Section for Stremio Server */}
+      {serverType === 'stremio' && !editingId && !isAddingNew && (
+        <View style={[styles.section, { marginTop: 8 }]}>
+          <View style={styles.headerRow}>
+            <View>
+              <Text style={styles.sectionTitle}>Keep-Alive & Stability</Text>
+              <Text style={styles.sectionCount}>Prevent sleep & connection drops</Text>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            {/* Option 1: Background Audio Keep-Alive */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingIconContainer}>
+                <MaterialIcons name="surround-sound" size={22} color="#535aff" />
+              </View>
+              <View style={styles.settingTextContainer}>
+                <View style={styles.settingTitleRow}>
+                  <Text style={[styles.settingTitle, { marginBottom: 0 }]}>Background Audio Keep-Alive</Text>
+                  {isBackgroundKeepAlive ? (
+                    <View style={styles.alwaysOnBadge}>
+                      <Text style={styles.alwaysOnBadgeText}>Active</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.settingSubtitle}>
+                  Maintains silent audio playback so iOS & Android do not suspend the Stremio server when the screen is locked.
+                </Text>
+              </View>
+              <Switch
+                value={isBackgroundKeepAlive}
+                onValueChange={handleToggleBackgroundKeepAlive}
+                trackColor={{ false: '#3A3A3C', true: '#535aff' }}
+                thumbColor={isBackgroundKeepAlive ? '#FFFFFF' : '#8E8E93'}
+              />
+            </View>
+
+            <View style={styles.settingDivider} />
+
+            {/* Option 2: Keep Awake */}
+            <View style={styles.settingItem}>
+              <View style={styles.settingIconContainer}>
+                <MaterialIcons name="screen-lock-portrait" size={22} color="#535aff" />
+              </View>
+              <View style={styles.settingTextContainer}>
+                <View style={styles.settingTitleRow}>
+                  <Text style={[styles.settingTitle, { marginBottom: 0 }]}>Prevent Screen Lock (Keep Awake)</Text>
+                  {isKeepAwake ? (
+                    <View style={styles.alwaysOnBadge}>
+                      <Text style={styles.alwaysOnBadgeText}>Always On</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.settingSubtitle}>
+                  Keeps the screen awake while using the app to prevent auto-lock from interrupting the server.
+                </Text>
+              </View>
+              <Switch
+                value={isKeepAwake}
+                onValueChange={handleToggleKeepAwake}
+                trackColor={{ false: '#3A3A3C', true: '#535aff' }}
+                thumbColor={isKeepAwake ? '#FFFFFF' : '#8E8E93'}
+              />
+            </View>
+          </View>
+        </View>
+      )}
     </ScrollView>
   );
 };
@@ -1072,6 +1167,61 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 11,
     borderRadius: 8,
+  },
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    gap: 12,
+  },
+  settingIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#262626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingTextContainer: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  settingTitle: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  settingTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginBottom: 4,
+  },
+  alwaysOnBadge: {
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
+    borderColor: 'rgba(48, 209, 88, 0.4)',
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: 8,
+  },
+  alwaysOnBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#30d158',
+    letterSpacing: 0.2,
+  },
+  settingSubtitle: {
+    fontSize: 13,
+    color: '#8A8A8A',
+    lineHeight: 18,
+  },
+  settingDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginHorizontal: 16,
   },
   emptyBtnText: {
     fontSize: 15,

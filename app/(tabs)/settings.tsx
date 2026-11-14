@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, Pressable, View, ScrollView, Modal, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { StatusBar, Text } from '@/components/Themed';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,8 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
+import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
+import { isScreenKeepAwakeEnabled, isBackgroundAudioKeepAliveEnabled } from '@/utils/StremioKeepAliveManager';
 
 
 const PopupSheet: React.FC<{ children: React.ReactNode; style: any }> = ({ children, style }) => {
@@ -36,6 +38,9 @@ const SettingsScreen = () => {
   const [themeModalVisible, setThemeModalVisible] = useState(false);
   const [storageModalVisible, setStorageModalVisible] = useState(false);
   const [dataStats, setDataStats] = useState<DataConsumptionStats | null>(null);
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [screenKeepAwake, setScreenKeepAwake] = useState(true);
+  const [bgAudioKeepAlive, setBgAudioKeepAlive] = useState(false);
 
   const loadDataStats = useCallback(async () => {
     try {
@@ -46,16 +51,55 @@ const SettingsScreen = () => {
     }
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      setNotifEnabled(tamilMVNotificationService.isNotificationsEnabled());
+      setScreenKeepAwake(isScreenKeepAwakeEnabled());
+      setBgAudioKeepAlive(isBackgroundAudioKeepAliveEnabled());
+      loadDataStats();
+    }, [loadDataStats])
+  );
+
   useEffect(() => {
     loadDataStats();
   }, [loadDataStats, storageModalVisible]);
 
-  const sourceList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'Connection', route: '/settings/tamilmv', icon: 'globe-outline' },
+  const sourceList: {
+    title: string;
+    route: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    subtitle?: string;
+    badgeText?: string;
+    badgeColor?: string;
+  }[] = [
+    {
+      title: 'Connection & Movie Alerts',
+      route: '/settings/tamilmv',
+      icon: 'globe-outline',
+      subtitle: 'Mirror domain & push notification alerts',
+      badgeText: notifEnabled ? 'Alerts On' : undefined,
+      badgeColor: '#30d158',
+    },
   ];
 
-  const integrationList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'Server', route: '/settings/stremioserver', icon: 'server-outline' },
+  const integrationList: {
+    title: string;
+    route: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    subtitle?: string;
+    badgeText?: string;
+    badgeColor?: string;
+  }[] = [
+    {
+      title: 'Server',
+      route: '/settings/stremioserver',
+      icon: 'server-outline',
+      subtitle: screenKeepAwake
+        ? 'Streaming server & screen keep-awake active'
+        : 'Streaming server configuration',
+      badgeText: screenKeepAwake ? 'Keep Awake On' : undefined,
+      badgeColor: '#30d158',
+    },
     { title: 'OpenSubtitles', route: '/settings/opensubtitles', icon: 'chatbox-ellipses-outline' },
   ];
 
@@ -156,17 +200,7 @@ const SettingsScreen = () => {
             <SettingItem
               title="Theme Selection"
               icon="color-palette-outline"
-              badgeText={
-                theme.id === 'purple'
-                  ? 'Purple'
-                  : theme.id === 'blue'
-                  ? 'Ocean Blue'
-                  : theme.id === 'green'
-                  ? 'Emerald Green'
-                  : theme.id === 'accent'
-                  ? 'Apple Music'
-                  : theme.name
-              }
+              badgeText={theme.displayName || theme.name}
               badgeColor={theme.primary}
               onPress={async () => {
                 if (await isHapticsSupported()) {
@@ -216,6 +250,9 @@ const SettingsScreen = () => {
                   key={index}
                   title={item.title}
                   icon={item.icon}
+                  subtitle={item.subtitle}
+                  badgeText={item.badgeText}
+                  badgeColor={item.badgeColor}
                   onPress={() => onSettingsItemPress(item)}
                   isFirst={index === 0}
                   isLast={index === sourceList.length - 1}
@@ -235,6 +272,9 @@ const SettingsScreen = () => {
                   key={index}
                   title={item.title}
                   icon={item.icon}
+                  subtitle={item.subtitle}
+                  badgeText={item.badgeText}
+                  badgeColor={item.badgeColor}
                   onPress={() => onSettingsItemPress(item)}
                   isFirst={index === 0}
                   isLast={index === integrationList.length - 1}
