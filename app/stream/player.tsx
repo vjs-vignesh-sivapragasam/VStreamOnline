@@ -14,6 +14,8 @@ import { isKSPlayerAvailable } from "@/components/ksplayer/KSPlayerView";
 import { useTheme } from "@/contexts/ThemeContext";
 import { ensureEmbeddedServerRunning } from "@/utils/StremioServerManager";
 import { Ionicons } from "@expo/vector-icons";
+import { File } from "expo-file-system";
+import { externalPlayerService } from "@/utils/ExternalPlayerService";
 
 interface UpdateProgressEvent {
   progress: number;
@@ -160,7 +162,18 @@ const MediaPlayerScreen: React.FC = () => {
       }
 
       if (directVideoUrl) {
-        setVideoUrl(directVideoUrl as string);
+        const urlStr = directVideoUrl as string;
+        if (urlStr.startsWith('file:') || (!urlStr.startsWith('http://') && !urlStr.startsWith('https://'))) {
+          try {
+            const f = new File(urlStr);
+            if (!f.exists || (f.size !== undefined && f.size === 0)) {
+              setStreamError('The downloaded video file is missing or empty. Please re-download this title.');
+              setIsLoadingStream(false);
+              return;
+            }
+          } catch {}
+        }
+        setVideoUrl(urlStr);
         setIsLoadingStream(false);
         return;
       }
@@ -432,7 +445,7 @@ const MediaPlayerScreen: React.FC = () => {
   };
 
   const handlePlaybackError = (event: PlaybackErrorEvent) => {
-    if (currentPlayerType === "native" && !hasTriedNative && Platform.OS !== "web") {
+    if (currentPlayerType === "native" && !hasTriedNative && Platform.OS !== "web" && isKSPlayerAvailable()) {
       setHasTriedNative(true);
       setStreamError('');
       setCurrentPlayerType("ksplayer");
@@ -520,7 +533,7 @@ const MediaPlayerScreen: React.FC = () => {
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
-  if (streamError && !videoUrl) {
+  if (streamError) {
     return (
       <GestureHandlerRootView style={styles.rootContainer}>
         <StatusBar hidden={true} style="light" />
@@ -533,9 +546,22 @@ const MediaPlayerScreen: React.FC = () => {
             </Text>
             <TouchableOpacity
               style={styles.retryBtn}
-              onPress={() => loadStream(currentStreamIndex)}
+              onPress={() => {
+                if (videoUrl && (videoUrl.startsWith('file:') || (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')))) {
+                  externalPlayerService.promptPlayerSelection({
+                    fileUri: videoUrl,
+                    title: (title as string) || 'Movie',
+                    onPlayInternal: () => {
+                      setStreamError('');
+                      setIsLoadingStream(false);
+                    },
+                  });
+                } else {
+                  loadStream(currentStreamIndex);
+                }
+              }}
             >
-              <Text style={styles.retryBtnText}>Retry</Text>
+              <Text style={styles.retryBtnText}>{videoUrl && (videoUrl.startsWith('file:') || (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))) ? 'Open with External Player' : 'Retry'}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.retryBtn, { backgroundColor: 'transparent', marginTop: 8 }]}

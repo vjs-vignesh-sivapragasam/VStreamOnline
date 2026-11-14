@@ -587,6 +587,13 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 },
             };
         }
+        if (isLocalFile) {
+            const isMkv = videoUrl.toLowerCase().includes('.mkv');
+            return {
+                uri: videoUrl,
+                type: isMkv ? 'mkv' : undefined,
+            };
+        }
         return { uri: videoUrl };
     }, [videoUrl]);
 
