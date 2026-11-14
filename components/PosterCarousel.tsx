@@ -22,6 +22,7 @@ interface CarouselItem {
     magnetUrl: string;
     infoHash: string;
     publishDate: string;
+    year?: string;
     type: 'movie' | 'series';
     groupid: string;
     guid: string;
@@ -50,6 +51,7 @@ function pickItemFromGroup(
         magnetUrl:   torrent.magnetUrl || '',
         infoHash:    torrent.infoHash || '',
         publishDate: torrent.publishDate,
+        year:        group.year || (torrent.publishDate ? new Date(torrent.publishDate).getFullYear().toString() : undefined),
         type:        (group as any).type || type,
         groupid:     torrent.groupid,
         guid:        torrent.guid,
@@ -95,6 +97,7 @@ const CarouselSlideItem = ({
     }, [item.title, item.publishDate, item.type]);
 
     const backdropUri = tmdb?.backdropUrl || item.posterUrl;
+
     const cleanTitle = useMemo(() => {
         const raw = tmdb?.title || item.title;
         return cleanTopicTitle(raw).name.replace(/^[a-z0-9\.-]+\.[a-z]{2,6}\s*[-_:]\s*/i, '').trim();
@@ -415,6 +418,7 @@ export default function PosterCarousel({
                 initialNumToRender={3}
                 maxToRenderPerBatch={3}
                 windowSize={5}
+                extraData={activeIndex}
                 getItemLayout={(_data, index) => ({
                     length: dimensions.width,
                     offset: dimensions.width * index,

@@ -100,6 +100,7 @@ const PosterItem = ({
         magnetUrl: item.magnetUrl,
         infoHash: item.infoHash,
         poster: posterUri || item.poster || '',
+        year: item.year || (item.publishDate ? new Date(item.publishDate).getFullYear().toString() : ''),
         type: item.type,
         publishDate: item.publishDate,
         allItems: JSON.stringify(item.allItems),

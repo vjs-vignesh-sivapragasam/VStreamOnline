@@ -64,6 +64,10 @@ export default function RootLayout() {
   });
   const [splashFinished, setSplashFinished] = useState(false);
 
+  const handleSplashFinish = React.useCallback(() => {
+    setSplashFinished(true);
+  }, []);
+
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
     if (error) throw error;
@@ -85,9 +89,9 @@ export default function RootLayout() {
       <View style={{ flex: 1 }}>
         <RootLayoutNav />
         {!splashFinished && (
-          <SplashErrorBoundary onFallback={() => setSplashFinished(true)}>
+          <SplashErrorBoundary onFallback={handleSplashFinish}>
             <VplexCinematicSplash
-              onAnimationComplete={() => setSplashFinished(true)}
+              onAnimationComplete={handleSplashFinish}
             />
           </SplashErrorBoundary>
         )}

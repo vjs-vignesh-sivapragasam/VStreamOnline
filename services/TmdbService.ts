@@ -67,8 +67,12 @@ export function cleanMovieQuery(raw: string): { query: string; year?: string } {
   if (!raw) return { query: '' };
 
   let title = raw;
-  // Remove domain prefix like 'www.1TamilMV.win - ' or '1TamilMV.cz - '
-  title = title.replace(/^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me)\s*[-_:]\s*/i, '');
+  // Remove domain prefix like 'www.1TamilMV.win - ' or '1TamilMV.cz - ' or 'www.1TamilMV.solar - '
+  title = title.replace(
+    /^(?:https?:\/\/)?(?:www\.)?[\w\.-]+\.(?:com|org|net|cz|win|pm|re|to|yt|wf|ws|me|solar|style|cards|pizza|fi|live|mx|tf|cloud|art)\s*[-_:]\s*/i,
+    ''
+  );
+  title = title.replace(/^(?:https?:\/\/)?(?:www\.)?(?:1?tamilmv|[a-z0-9\.-]+\.[a-z]{2,10})\s*[-_:]\s*/i, '');
   title = title.replace(/^www\.[^-]+-\s*/i, '');
 
   // Extract year if present (4 digits from 1900 to 2099)
@@ -93,8 +97,8 @@ export function cleanMovieQuery(raw: string): { query: string; year?: string } {
     }
   }
 
-  // Remove parentheses, brackets, extra symbols
-  clean = clean.replace(/[()[\]{}]/g, ' ').replace(/[-_:]+$/, '').trim();
+  // Remove parentheses, brackets, extra symbols, trailing punctuation
+  clean = clean.replace(/[()[\]{}]/g, ' ').replace(/[-_:\s]+$/, '').trim();
   clean = clean.replace(/\s+/g, ' ');
 
   return {
@@ -155,6 +159,7 @@ class TmdbService {
 
     try {
       const apiKey = this.getApiKey();
+      const preferredLang = detectLanguageCode(rawTitle);
       const isSeries = passedType === 'series';
       const searchEndpoint = isSeries
         ? `${TMDB_BASE_URL}/search/tv?api_key=${apiKey}&query=${encodeURIComponent(query)}${
@@ -167,7 +172,7 @@ class TmdbService {
       const res = await fetch(searchEndpoint);
       if (res.ok) {
         const data = await res.json();
-        const best = data.results?.[0];
+        const best = this.findBestMatch(data.results, query, searchYear, preferredLang);
         if (best?.poster_path) {
           const posterUrl = `${TMDB_IMAGE_BASE}/w342${best.poster_path}`;
           this.posterCache.set(cacheKey, posterUrl);
@@ -179,6 +184,93 @@ class TmdbService {
     } catch {
       return null;
     }
+  }
+
+  private scoreCandidate(
+    r: any,
+    index: number,
+    query: string,
+    targetYear?: string,
+    preferredLang?: string
+  ): number {
+    const norm = (s?: string) => (s || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+    const q = norm(query);
+    const t = norm(r.title || r.name);
+    const ot = norm(r.original_title);
+
+    let score = 0;
+
+    // 1. Title matching
+    if (t === q || ot === q) {
+      score += 100;
+    } else if (t.startsWith(q) || ot.startsWith(q)) {
+      score += 70;
+    } else if (q.startsWith(t) || t.includes(q) || ot.includes(q)) {
+      score += 40;
+    } else {
+      score += 10;
+    }
+
+    // 2. Year matching
+    const rDate = r.release_date || r.first_air_date;
+    const candYear = rDate ? parseInt(rDate.slice(0, 4), 10) : null;
+    const numTargetYear = targetYear ? parseInt(targetYear, 10) : null;
+
+    if (numTargetYear && candYear) {
+      const diff = Math.abs(candYear - numTargetYear);
+      if (diff === 0) score += 80;
+      else if (diff <= 1) score += 50;
+      else if (diff <= 3) score += 20;
+      else if (diff > 10) score -= 60; // Strong penalty for decade-old movies
+    } else if (candYear) {
+      if (candYear >= 2015) score += 15;
+      else if (candYear < 1980) score -= 40; // Penalize ancient movies when search is modern
+    }
+
+    // 3. TMDB Rank & Popularity
+    score += Math.max(0, 20 - index);
+    score += Math.min(25, Math.log10((r.popularity || 1) + 1) * 10);
+
+    // 4. Language as tie-breaker
+    if (preferredLang && r.original_language === preferredLang) {
+      if (t === q || ot === q || t.startsWith(q) || ot.startsWith(q)) {
+        score += 25;
+      } else {
+        score += 5;
+      }
+    } else if (
+      preferredLang &&
+      ['ta', 'te', 'ml', 'kn', 'hi'].includes(preferredLang) &&
+      ['ta', 'te', 'ml', 'kn', 'hi'].includes(r.original_language)
+    ) {
+      score += 5;
+    }
+
+    return score;
+  }
+
+  private findBestMatch(
+    results: any[],
+    query: string,
+    targetYear?: string,
+    preferredLang?: string
+  ): any {
+    if (!results || results.length === 0) return null;
+    if (results.length === 1) return results[0];
+
+    let bestItem = results[0];
+    let bestScore = -Infinity;
+
+    for (let i = 0; i < results.length; i++) {
+      const item = results[i];
+      const score = this.scoreCandidate(item, i, query, targetYear, preferredLang);
+      if (score > bestScore) {
+        bestScore = score;
+        bestItem = item;
+      }
+    }
+
+    return bestItem;
   }
 
   private getApiKey(): string {
@@ -217,34 +309,6 @@ class TmdbService {
     const apiKey = this.getApiKey();
     const preferredLang = detectLanguageCode(rawTitle);
 
-    const findBestMatch = (results: any[]): any => {
-      if (!results || results.length === 0) return null;
-      if (preferredLang) {
-        // 1. Exact match on title and language
-        const exact = results.find(
-          (r: any) =>
-            (r.title?.toLowerCase() === query.toLowerCase() ||
-              r.original_title?.toLowerCase() === query.toLowerCase() ||
-              r.name?.toLowerCase() === query.toLowerCase()) &&
-            r.original_language === preferredLang
-        );
-        if (exact) return exact;
-
-        // 2. Any match with preferred language
-        const langMatch = results.find((r: any) => r.original_language === preferredLang);
-        if (langMatch) return langMatch;
-
-        // 3. If preferred is an Indian language, prioritize any Indian regional language
-        if (['ta', 'te', 'ml', 'kn', 'hi'].includes(preferredLang)) {
-          const indianMatch = results.find((r: any) =>
-            ['ta', 'te', 'ml', 'kn', 'hi'].includes(r.original_language)
-          );
-          if (indianMatch) return indianMatch;
-        }
-      }
-      return results[0];
-    };
-
     try {
       // 1. Search for movie / TV on TMDB
       let matchedId: number | null = null;
@@ -263,7 +327,7 @@ class TmdbService {
       const res = await fetch(searchEndpoint);
       if (res.ok) {
         const data = await res.json();
-        const best = findBestMatch(data.results);
+        const best = this.findBestMatch(data.results, query, searchYear, preferredLang);
         if (best) {
           matchedId = best.id;
           matchedMediaType = isSeries ? 'tv' : 'movie';
@@ -278,7 +342,7 @@ class TmdbService {
         const fbRes = await fetch(fallbackEndpoint);
         if (fbRes.ok) {
           const fbData = await fbRes.json();
-          const best = findBestMatch(fbData.results);
+          const best = this.findBestMatch(fbData.results, query, undefined, preferredLang);
           if (best) {
             matchedId = best.id;
             matchedMediaType = isSeries ? 'tv' : 'movie';
@@ -295,7 +359,7 @@ class TmdbService {
           const valid = mData.results?.filter(
             (r: any) => r.media_type === 'movie' || r.media_type === 'tv'
           );
-          const best = findBestMatch(valid);
+          const best = this.findBestMatch(valid, query, searchYear, preferredLang);
           if (best) {
             matchedId = best.id;
             matchedMediaType = best.media_type === 'tv' ? 'tv' : 'movie';

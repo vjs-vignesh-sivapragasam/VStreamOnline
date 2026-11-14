@@ -30,7 +30,7 @@ import { StreamingServerClient, TorrentFile, resolveStreamingServerClient } from
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { myListService } from '@/services/MyListService';
-import { tmdbService, TmdbDetails, detectLanguageCode } from '@/services/TmdbService';
+import { tmdbService, TmdbDetails, detectLanguageCode, cleanMovieQuery } from '@/services/TmdbService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
 import { ensureEmbeddedServerRunning } from '@/utils/StremioServerManager';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -262,6 +262,7 @@ const TorrentDetails = () => {
     title,
     poster,
     publishDate,
+    year: paramYear,
     type,
     allItems: allItemsRaw,
     topicUrl,
@@ -270,6 +271,7 @@ const TorrentDetails = () => {
     title: string;
     poster: string;
     publishDate?: string;
+    year?: string;
     type?: string;
     allItems?: string;
     topicUrl?: string;
@@ -303,7 +305,13 @@ const TorrentDetails = () => {
     let isMounted = true;
     setIsTmdbLoading(true);
 
-    tmdbService.getMovieFullInfo(title, undefined, type)
+    const targetYear =
+      paramYear ||
+      cleanMovieQuery(title).year ||
+      cleanTopicTitle(title).year ||
+      (publishDate ? new Date(publishDate).getFullYear().toString() : undefined);
+
+    tmdbService.getMovieFullInfo(title, targetYear, type)
       .then((info) => {
         if (isMounted) {
           setTmdbData(info);
@@ -321,7 +329,7 @@ const TorrentDetails = () => {
     return () => {
       isMounted = false;
     };
-  }, [title, type]);
+  }, [title, type, publishDate, paramYear]);
 
   // Subscribe to real-time download updates (speed, peers, progress)
   useEffect(() => {

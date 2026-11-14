@@ -144,6 +144,7 @@ export default function HomeScreen() {
         poster:      item.posterUrl,
         type:        item.type,
         publishDate: item.publishDate,
+        year:        item.year || (item.publishDate ? new Date(item.publishDate).getFullYear().toString() : undefined),
         allItems:    JSON.stringify(item.allItems),
       },
     });

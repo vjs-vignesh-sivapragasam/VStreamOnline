@@ -273,6 +273,14 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
   enableHaptics = true,
 }) => {
   const hasFinishedRef = useRef(false);
+  const onAnimationCompleteRef = useRef(onAnimationComplete);
+  onAnimationCompleteRef.current = onAnimationComplete;
+
+  const enableHapticsRef = useRef(enableHaptics);
+  enableHapticsRef.current = enableHaptics;
+
+  const enableSoundRef = useRef(enableSound);
+  enableSoundRef.current = enableSound;
 
   // Animation values (all 100% native driver compatible)
   const masterFade = useRef(new Animated.Value(1)).current;
@@ -321,7 +329,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
   // then slowly reduces/decays in strength like a musical reverb wave.
   const triggerHaptic = useCallback(
     async (intensity: 'start' | 'swell' | 'peak' | 'decay_1' | 'decay_2' | 'decay_3') => {
-      if (!enableHaptics) return;
+      if (!enableHapticsRef.current) return;
 
       try {
         if (Platform.OS === 'android') {
@@ -374,7 +382,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
         console.warn('[VplexSplash] Vibration fallback:', err);
       }
     },
-    [enableHaptics]
+    []
   );
 
   // Complete Splash Transition smoothly into Home
@@ -388,17 +396,17 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
     Animated.timing(masterFade, {
       toValue: 0,
-      duration: 500,
+      duration: 450,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start(() => {
-      onAnimationComplete?.();
+      onAnimationCompleteRef.current?.();
     });
-  }, [masterFade, onAnimationComplete]);
+  }, [masterFade]);
 
   // Web Audio fallback
   useEffect(() => {
-    if (Platform.OS === 'web' && enableSound) {
+    if (Platform.OS === 'web' && enableSoundRef.current) {
       try {
         const audioAsset = require('@/assets/audio/vplex_cinematic_splash.wav');
         const audio = new Audio(audioAsset);
@@ -408,11 +416,13 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
         // Silently fallback if audio cannot autoplay
       }
     }
-  }, [enableSound]);
+  }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
     // ------------------------------------------------------------------
-    // TIMELINE: 4.6s Cinematic Splash Sequence (White Canvas + Music Flow)
+    // TIMELINE: 4.6s Cinematic Splash Sequence (Dark Canvas + Music Flow)
     // ------------------------------------------------------------------
 
     // T = 0.0s - 1.0s: Opening golden light streak & ambient glow
@@ -455,6 +465,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
     // 1. T = 1.0s: V Reveal + Vibration Starts Smoothly
     const timerV = setTimeout(() => {
+      if (!isMounted) return;
       triggerHaptic('start');
 
       Animated.parallel([
@@ -480,6 +491,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
     // 2. T = 1.35s - 2.1s: Staggered P-L-E-X Reveal
     const timerP = setTimeout(() => {
+      if (!isMounted) return;
       Animated.parallel([
         Animated.timing(pTranslateY, {
           toValue: 0,
@@ -501,6 +513,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
     }, 1350);
 
     const timerL = setTimeout(() => {
+      if (!isMounted) return;
       Animated.parallel([
         Animated.timing(lTranslateY, {
           toValue: 0,
@@ -523,10 +536,12 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
     // Vibration swell as plex letters lock into place
     const timerPlexSwell = setTimeout(() => {
+      if (!isMounted) return;
       triggerHaptic('swell');
     }, 1650);
 
     const timerE = setTimeout(() => {
+      if (!isMounted) return;
       Animated.parallel([
         Animated.timing(eTranslateY, {
           toValue: 0,
@@ -548,6 +563,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
     }, 1750);
 
     const timerX = setTimeout(() => {
+      if (!isMounted) return;
       Animated.parallel([
         Animated.timing(xTranslateY, {
           toValue: 0,
@@ -570,6 +586,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
     // 3. T = 2.4s: Signature Chevron Light Sweep Effect + Vibration Climax Peak
     const timerSignature = setTimeout(() => {
+      if (!isMounted) return;
       triggerHaptic('peak');
 
       Animated.parallel([
@@ -625,11 +642,13 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
     // 4. T = 2.8s: Musical Decay Step 1 (Vibration starts reducing smoothly)
     const timerDecay1 = setTimeout(() => {
+      if (!isMounted) return;
       triggerHaptic('decay_1');
     }, 2800);
 
     // 5. T = 3.2s: Final Reveal Settle + Musical Decay Step 2 (Softer pulse as logo settles)
     const timerFinal = setTimeout(() => {
+      if (!isMounted) return;
       triggerHaptic('decay_2');
 
       Animated.parallel([
@@ -654,15 +673,18 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
     // 6. T = 3.7s: Musical Decay Step 3 (Whisper fade-out into silence)
     const timerDecay3 = setTimeout(() => {
+      if (!isMounted) return;
       triggerHaptic('decay_3');
     }, 3700);
 
     // 7. T = 4.4s: Hold finished logo and smoothly transition to home
     const timerEnd = setTimeout(() => {
+      if (!isMounted) return;
       finishSplash();
     }, 4400);
 
     return () => {
+      isMounted = false;
       clearTimeout(timerV);
       clearTimeout(timerP);
       clearTimeout(timerL);
@@ -678,42 +700,13 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
         Vibration.cancel();
       } catch {}
     };
-  }, [
-    streakScaleX,
-    streakOpacity,
-    auraScale,
-    auraOpacity,
-    flareOpacity,
-    vTranslateX,
-    vScale,
-    vOpacity,
-    pTranslateY,
-    pScale,
-    pOpacity,
-    lTranslateY,
-    lScale,
-    lOpacity,
-    eTranslateY,
-    eScale,
-    eOpacity,
-    xTranslateY,
-    xScale,
-    xOpacity,
-    chevronScale,
-    chevronGlowOpacity,
-    shimmerTranslateX,
-    shimmerOpacity,
-    logoSettleScale,
-    finalGlowOpacity,
-    triggerHaptic,
-    finishSplash,
-  ]);
+  }, []);
 
   return (
     <Animated.View style={[styles.container, { opacity: masterFade }]}>
       {/* Tap anywhere to skip straight to home screen with clean subtle touch feedback */}
       <Pressable
-        style={StyleSheet.absoluteFill}
+        style={styles.pressable}
         onPress={() => {
           try {
             Vibration.cancel();
@@ -741,8 +734,8 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
           </View>
         )}
 
-        {/* 1. Pure Crisp White Backdrop */}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#ffffff' }]} />
+        {/* 1. Deep Cinematic Dark Backdrop */}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#08080a' }]} />
 
         {/* 2. Soft Golden Radial Aura behind logo */}
         <Animated.View
@@ -845,7 +838,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
             {/* Layer 2: Solid Black P */}
             <Animated.Image
-              source={require('@/assets/images/vplex_layer_p.png')}
+              source={require('@/assets/images/vplex_layer_p_white.png')}
               style={[
                 styles.layerImage,
                 {
@@ -861,7 +854,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
             {/* Layer 3: Solid Black L */}
             <Animated.Image
-              source={require('@/assets/images/vplex_layer_l.png')}
+              source={require('@/assets/images/vplex_layer_l_white.png')}
               style={[
                 styles.layerImage,
                 {
@@ -877,7 +870,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
             {/* Layer 4: Solid Black E */}
             <Animated.Image
-              source={require('@/assets/images/vplex_layer_e.png')}
+              source={require('@/assets/images/vplex_layer_e_white.png')}
               style={[
                 styles.layerImage,
                 {
@@ -893,7 +886,7 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 
             {/* Layer 5: Solid Black left wing of X */}
             <Animated.Image
-              source={require('@/assets/images/vplex_layer_x_black.png')}
+              source={require('@/assets/images/vplex_layer_x_white.png')}
               style={[
                 styles.layerImage,
                 {
@@ -986,9 +979,14 @@ export const VplexCinematicSplash: React.FC<VplexCinematicSplashProps> = ({
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#08080a',
     zIndex: 999999,
     elevation: 999999,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pressable: {
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1073,7 +1071,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 2.5,
-    color: '#888888',
+    color: '#8E8E93',
     textTransform: 'uppercase',
   },
 

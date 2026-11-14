@@ -42,6 +42,7 @@ const MenuWrapper: React.FC<any> = (props) => {
 
 export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     videoUrl,
+    isTorrent,
     title,
     back: onBack,
     progress,
@@ -58,6 +59,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         return (
             <NativePlayer
                 videoUrl={videoUrl}
+                isTorrent={isTorrent}
                 title={title}
                 back={onBack}
                 progress={progress}
@@ -106,10 +108,12 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [videoError, setVideoError] = useState<string | null>(null);
     const [availableAudioTracks, setAvailableAudioTracks] = useState<any[]>([]);
     const [availableTextTracks, setAvailableTextTracks] = useState<any[]>([]);
-    const [playbackBufferPct, setPlaybackBufferPct] = useState<number | undefined>(undefined);
-    const effectiveBufferPct = (playbackBufferPct !== undefined && playbackBufferPct > 0)
-        ? playbackBufferPct
-        : torrentBufferProgress;
+    const isLocalFile = videoUrl ? (
+        videoUrl.startsWith('file:') ||
+        videoUrl.startsWith('content:') ||
+        (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))
+    ) : false;
+    const effectiveBufferPct = isLocalFile ? undefined : (isTorrent ? torrentBufferProgress : undefined);
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     // NEW: current subtitle line text from the native player
@@ -257,14 +261,28 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         if (!playerState.isDragging && !isSeeking.current) {
             playerState.setCurrentTime(data.currentTime);
         }
-        if (data.duration > 0 && data.playableDuration !== undefined) {
-            const pct = Math.min(Math.round((data.playableDuration / data.duration) * 100), 100);
-            setPlaybackBufferPct(pct);
+        if (data.currentTime > 0) {
+            if (playerState.isBuffering) {
+                playerState.setIsBuffering(false);
+                Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+            }
+            if (!playerState.isReady) {
+                playerState.setIsReady(true);
+            }
         }
-    }, [playerState]);
+    }, [bufferOpacity, playerState]);
+
+    const handleReadyForDisplay = useCallback(() => {
+        playerState.setIsReady(true);
+        playerState.setIsBuffering(false);
+        Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+    }, [bufferOpacity, playerState]);
 
     const handleBuffer = useCallback((data: any) => {
         if (!isSeeking.current && !playerState.isDragging) {
+            if (isLocalFile && playerState.isReady && data.isBuffering) {
+                return;
+            }
             playerState.setIsBuffering(data.isBuffering);
             Animated.timing(bufferOpacity, {
                 toValue: data.isBuffering ? 1 : 0,
@@ -272,7 +290,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 useNativeDriver: true
             }).start();
         }
-    }, [bufferOpacity, playerState]);
+    }, [bufferOpacity, isLocalFile, playerState]);
 
     const handleError = useCallback((error: any) => {
         playerState.setIsBuffering(false);
@@ -572,6 +590,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 onProgress={handleProgress}
                 onBuffer={handleBuffer}
                 onError={handleError}
+                onReadyForDisplay={handleReadyForDisplay}
                 onEnd={handleEnd}
                 onAudioTracks={handleAudioTracks}
                 onTextTracks={handleTextTracks}

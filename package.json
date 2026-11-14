@@ -46,6 +46,7 @@
     "expo-updates": "~57.0.25",
     "expo-web-browser": "~57.0.3",
     "install": "^0.13.0",
+    "jpeg-js": "^0.4.4",
     "nodejs-mobile-react-native": "^18.20.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",

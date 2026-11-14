@@ -558,9 +558,11 @@ const MediaPlayerScreen: React.FC = () => {
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={theme.primary} />
             <Text style={styles.loadingText}>
-              {streamBufferProgress > 0
+              {streamBufferProgress > 0 && streamBufferProgress < 100
                 ? `Buffering: ${streamBufferProgress}%`
-                : (streamPeers > 0 ? `Connecting to ${streamPeers} peers...` : 'Connecting to stream...')}
+                : (streamBufferProgress >= 100
+                    ? 'Starting playback...'
+                    : (streamPeers > 0 ? `Connecting to ${streamPeers} peers...` : 'Connecting to stream...'))}
             </Text>
           </View>
         </View>

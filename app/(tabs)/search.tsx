@@ -409,6 +409,7 @@ const SearchScreen = () => {
         magnetUrl: best.magnetUrl,
         infoHash: best.infoHash,
         poster: best.poster ?? '',
+        year: group.year || (best.publishDate ? new Date(best.publishDate).getFullYear().toString() : ''),
         type,
         publishDate: best.publishDate,
         allItems: JSON.stringify(group.items),
