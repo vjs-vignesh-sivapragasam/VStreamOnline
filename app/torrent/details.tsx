@@ -295,6 +295,9 @@ const TorrentDetails = () => {
     allItems: allItemsRaw,
     topicUrl,
     groupid,
+    magnetUrl: paramMagnetUrl,
+    infoHash: paramInfoHash,
+    guid: paramGuid,
   } = useLocalSearchParams<{
     title: string;
     poster: string;
@@ -304,6 +307,9 @@ const TorrentDetails = () => {
     allItems?: string;
     topicUrl?: string;
     groupid?: string;
+    magnetUrl?: string;
+    infoHash?: string;
+    guid?: string;
   }>();
 
   const { height, width } = useWindowDimensions();
@@ -373,10 +379,26 @@ const TorrentDetails = () => {
 
   const [items, setItems] = useState<TorrentItem[]>(() => {
     try {
-      return allItemsRaw ? JSON.parse(allItemsRaw) : [];
+      const parsed = allItemsRaw ? JSON.parse(allItemsRaw) : [];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     } catch {
-      return [];
+      // ignore
     }
+    if (paramMagnetUrl) {
+      return [{
+        guid: paramGuid || topicUrl || groupid || title,
+        groupid: groupid || topicUrl || '',
+        name: title,
+        title: title,
+        year: paramYear,
+        language: 'tamil',
+        poster,
+        magnetUrl: paramMagnetUrl,
+        infoHash: paramInfoHash || '',
+        publishDate: publishDate || new Date().toISOString(),
+      }];
+    }
+    return [];
   });
   const [isLoadingVariants, setIsLoadingVariants] = useState(false);
 
@@ -384,9 +406,27 @@ const TorrentDetails = () => {
   useEffect(() => {
     let isMounted = true;
 
-    const rawParsed: TorrentItem[] = allItemsRaw ? (() => {
-      try { return JSON.parse(allItemsRaw); } catch { return []; }
-    })() : [];
+    const rawParsed: TorrentItem[] = (() => {
+      try {
+        const parsed = allItemsRaw ? JSON.parse(allItemsRaw) : [];
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+      if (paramMagnetUrl) {
+        return [{
+          guid: paramGuid || topicUrl || groupid || title,
+          groupid: groupid || topicUrl || '',
+          name: title,
+          title: title,
+          year: paramYear,
+          language: 'tamil',
+          poster,
+          magnetUrl: paramMagnetUrl,
+          infoHash: paramInfoHash || '',
+          publishDate: publishDate || new Date().toISOString(),
+        }];
+      }
+      return [];
+    })();
 
     // Immediately display preloaded items with zero waiting delay
     if (rawParsed.length > 0) {
@@ -478,7 +518,7 @@ const TorrentDetails = () => {
     return () => {
       isMounted = false;
     };
-  }, [allItemsRaw, topicUrl, groupid, title, publishDate]);
+  }, [allItemsRaw, topicUrl, groupid, title, publishDate, paramMagnetUrl, paramInfoHash, paramGuid, paramYear, poster]);
 
   const allItems = items;
 
@@ -665,12 +705,8 @@ const TorrentDetails = () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    if (isLoadingVariants) {
-      showAlert('Loading Streams', 'Fetching available streaming qualities. Please wait a moment...');
-      return;
-    }
 
-    if (allItems.length > 0) {
+    if (allItems.length > 0 || isLoadingVariants) {
       setSelectedModalLanguage(preselectedLang || 'All');
       setQualityModalMode('watch');
       setQualityModalVisible(true);
@@ -687,12 +723,8 @@ const TorrentDetails = () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    if (isLoadingVariants) {
-      showAlert('Loading Downloads', 'Fetching available download qualities. Please wait a moment...');
-      return;
-    }
 
-    if (allItems.length > 0) {
+    if (allItems.length > 0 || isLoadingVariants) {
       setSelectedModalLanguage('All');
       setQualityModalMode('download');
       setQualityModalVisible(true);
@@ -1073,16 +1105,9 @@ const TorrentDetails = () => {
             style={styles.watchNowBtn}
             onPress={() => handleWatchNow()}
             activeOpacity={0.8}
-            disabled={isLoadingVariants}
           >
-            {isLoadingVariants ? (
-              <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 8 }} />
-            ) : (
-              <Ionicons name="play" size={20} color="#000000" style={{ marginRight: 8 }} />
-            )}
-            <Text style={styles.watchNowBtnText}>
-              {isLoadingVariants ? 'Loading...' : 'Play'}
-            </Text>
+            <Ionicons name="play" size={20} color="#000000" style={{ marginRight: 8 }} />
+            <Text style={styles.watchNowBtnText}>Play</Text>
           </TouchableOpacity>
 
           {/* Right: Circular Download Button */}
@@ -1098,7 +1123,6 @@ const TorrentDetails = () => {
             ]}
             onPress={handleDownloadPress}
             activeOpacity={0.7}
-            disabled={isLoadingVariants}
           >
             {hasActiveDownload ? (
               <Ionicons name="arrow-down" size={22} color={theme.primary} />
@@ -1253,8 +1277,11 @@ const TorrentDetails = () => {
                     {qualityModalMode === 'watch' ? 'Choose Quality to Play' : 'Choose Quality to Download'}
                   </Text>
                   <Text style={styles.modalSubtitle}>
-                    {filteredModalItems.length} {filteredModalItems.length === 1 ? 'quality' : 'qualities'} available •{' '}
-                    {qualityModalMode === 'watch' ? 'Tap to start playback' : 'Tap to start download'}
+                    {isLoadingVariants && allItems.length === 0
+                      ? 'Fetching streaming qualities...'
+                      : `${filteredModalItems.length} ${filteredModalItems.length === 1 ? 'quality' : 'qualities'} available${isLoadingVariants ? ' (loading more...)' : ''} • ${
+                          qualityModalMode === 'watch' ? 'Tap to start playback' : 'Tap to start download'
+                        }`}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -1326,7 +1353,15 @@ const TorrentDetails = () => {
               </ScrollView>
             )}
 
-            {filteredModalItems.length === 0 ? (
+            {isLoadingVariants && allItems.length === 0 ? (
+              <View style={styles.emptyFilterContainer}>
+                <ActivityIndicator size="large" color={theme.primary} style={{ marginBottom: 16 }} />
+                <Text style={styles.emptyFilterTitle}>Fetching Available Qualities...</Text>
+                <Text style={styles.emptyFilterSubtitle}>
+                  Loading all resolutions and audio streams from TamilMV.
+                </Text>
+              </View>
+            ) : filteredModalItems.length === 0 ? (
               <View style={styles.emptyFilterContainer}>
                 <Ionicons name="filter-outline" size={32} color="#8E8E93" />
                 <Text style={styles.emptyFilterTitle}>No qualities found for {selectedModalLanguage}</Text>
