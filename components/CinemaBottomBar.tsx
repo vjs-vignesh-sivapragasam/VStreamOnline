@@ -85,7 +85,9 @@ export default function CinemaBottomBar({
   const { theme } = useTheme();
   const safeAreaInsets = useSafeAreaInsets();
   const insets = propInsets || safeAreaInsets;
-  const bottomPadding = Math.max(insets?.bottom ?? 0, Platform.OS === 'android' ? 10 : 8);
+  const bottomInset = insets?.bottom ?? 0;
+  // Ensure generous breathing room above Android 3-button bar / gesture bar and iOS home indicator
+  const bottomPadding = bottomInset > 0 ? bottomInset + 6 : (Platform.OS === 'android' ? 14 : 10);
 
   return (
     <View style={[styles.wrapper, { paddingBottom: bottomPadding }]}>
@@ -299,8 +301,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingTop: 3,
-    height: 58,
+    paddingTop: 6,
+    paddingBottom: 4,
+    paddingHorizontal: 8,
+    height: 62,
   },
   tabButton: {
     flex: 1,
@@ -356,7 +360,8 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: 10.5,
-    marginTop: 2,
+    marginTop: 3,
+    marginBottom: 1,
     letterSpacing: 0.2,
   },
   tabLabelActive: {
