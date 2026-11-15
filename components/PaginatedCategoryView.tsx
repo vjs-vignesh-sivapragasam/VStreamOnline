@@ -58,7 +58,6 @@ const CategoryItemCard = ({
   const best = getBestItem(group);
   const [posterUri, setPosterUri] = useState<string | null>(best?.poster || null);
   const releasesCount = group.items.length;
-  const lang = best?.language || 'tamil';
   const type = category === 'series' ? 'series' : 'movie';
 
   const cleanedTitle = useMemo(() => {
@@ -112,20 +111,7 @@ const CategoryItemCard = ({
           </View>
         )}
 
-        {/* Top Badges */}
-        <View style={styles.topBadgesRow}>
-          {group.year ? (
-            <View style={styles.yearBadge}>
-              <Text style={styles.yearBadgeText}>{group.year}</Text>
-            </View>
-          ) : null}
 
-          {lang ? (
-            <View style={styles.langBadge}>
-              <Text style={styles.langBadgeText}>{lang.toUpperCase()}</Text>
-            </View>
-          ) : null}
-        </View>
 
         {releasesCount > 1 ? (
           <View style={styles.releaseBadge}>
