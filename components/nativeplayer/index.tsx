@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { TouchableOpacity, Animated, Platform, Dimensions, UIManager, useWindowDimensions, AppState } from "react-native";
+import { TouchableOpacity, Modal, Animated, Platform, Dimensions, UIManager, useWindowDimensions, AppState } from "react-native";
 import Video, { OnLoadData, OnProgressData, VideoRef, OnBufferData, ResizeMode, SelectedTrack } from "react-native-video";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { MenuComponentRef, MenuView } from '@react-native-menu/menu';
@@ -113,6 +113,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const hasAutoPresentedFullscreenRef = useRef(false);
     const [hasRenderedVideo, setHasRenderedVideo] = useState(false);
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const [availableVideoTracks, setAvailableVideoTracks] = useState<any[]>([]);
@@ -164,6 +165,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             height: h,
         };
     }, [containerDimensions, windowWidth, windowHeight]);
+
+    useEffect(() => {
+        hasAutoPresentedFullscreenRef.current = false;
+    }, [videoUrl]);
 
     // Restore progress
     useEffect(() => {
@@ -312,6 +317,15 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         }
     }, []);
 
+        const autoPresentFullscreen = useCallback(() => {
+        if (Platform.OS === 'android' && !hasAutoPresentedFullscreenRef.current) {
+            hasAutoPresentedFullscreenRef.current = true;
+            setTimeout(() => {
+                videoRef.current?.presentFullscreenPlayer();
+            }, 100);
+        }
+    }, []);
+
     const handleProgress = useCallback((data: OnProgressData) => {
         if (!playerState.isReady && data.currentTime > 0) {
             playerState.setIsReady(true);
@@ -328,15 +342,17 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             if (!playerState.isReady) {
                 playerState.setIsReady(true);
             }
+            autoPresentFullscreen();
         }
-    }, [bufferOpacity, playerState]);
+    }, [bufferOpacity, playerState, autoPresentFullscreen]);
 
-        const handleReadyForDisplay = useCallback(() => {
+    const handleReadyForDisplay = useCallback(() => {
         playerState.setIsReady(true);
         playerState.setIsBuffering(false);
         setHasRenderedVideo(true);
         Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
-        }, [bufferOpacity, playerState]);
+        autoPresentFullscreen();
+    }, [bufferOpacity, playerState, autoPresentFullscreen]);
 
     const handlePlaybackStateChanged = useCallback((e: { isPlaying: boolean; isSeeking: boolean }) => {
         if (e.isPlaying) {
@@ -565,6 +581,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         hasReportedErrorRef.current = false;
         setHasRenderedVideo(false);
         setVideoTrackChecked(false);
+        hasAutoPresentedFullscreenRef.current = false;
         playerState.setIsReady(false);
         playerState.setIsBuffering(true);
         if (videoRef.current) videoRef.current.seek(0);
@@ -673,6 +690,165 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             type: streamType,
         };
     }, [videoUrl, title, isLocalFile, isTorrent]);
+    const renderControlsOverlay = (isInModal: boolean = false) => {
+        const onBackPress = () => {
+            if (isInModal) {
+                videoRef.current?.dismissFullscreenPlayer();
+                setIsFullscreen(false);
+            }
+            handleBack();
+        };
+
+        return (
+            <>
+                <TouchableOpacity style={styles.touchArea} activeOpacity={1} onPress={handleOverlayPress} />
+
+                {uiState.showControls && (
+                    <Animated.View style={[styles.controlsOverlay, { opacity: controlsOpacity }]} pointerEvents="box-none">
+                        <View style={styles.topControls}>
+                            <TouchableOpacity style={styles.backButton} onPress={onBackPress}>
+                                <Ionicons name="chevron-back" size={28} color="white" />
+                            </TouchableOpacity>
+
+                            <View style={styles.titleContainer}>
+                                <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
+                            </View>
+
+                            <GlassView glassEffectStyle="clear" style={styles.topRightControls}>
+                                {streams.length > 1 && (
+                                    <MenuWrapper
+                                        style={{ zIndex: 1000 }}
+                                        ref={streamMenuRef}
+                                        title="Select Stream"
+                                        onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
+                                        actions={streamActions}
+                                        shouldOpenOnLongPress={false}
+                                        themeVariant="dark"
+                                        onOpenMenu={handleMenuOpen}
+                                        onCloseMenu={handleMenuClose}
+                                    >
+                                        <TouchableOpacity style={styles.controlButton} onPress={() => {
+                                            if (Platform.OS === 'android') streamMenuRef.current?.show();
+                                        }}>
+                                            <MaterialIcons name="ondemand-video" size={24} color="white" />
+                                        </TouchableOpacity>
+                                    </MenuWrapper>
+                                )}
+
+                                <TouchableOpacity style={styles.controlButton} onPress={handleMuteToggle}>
+                                    <Ionicons name={settings.isMuted ? "volume-mute" : "volume-high"} size={24} color="white" />
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.controlButton} onPress={cycleContentFit}>
+                                    <MaterialIcons name={getContentFitIcon()} size={24} color="white" />
+                                </TouchableOpacity>
+                                {Platform.OS !== 'web' && (
+                                    <TouchableOpacity
+                                        style={styles.controlButton}
+                                        onPress={toggleFullscreen}
+                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                    >
+                                        <MaterialIcons
+                                            name={isFullscreen ? "fullscreen-exit" : "fullscreen"}
+                                            size={24}
+                                            color="white"
+                                        />
+                                    </TouchableOpacity>
+                                )}
+
+                                {availableAudioTracks.length > 0 && (
+                                    <MenuWrapper
+                                        style={{ zIndex: 1000 }}
+                                        title="Audio Track"
+                                        ref={audioMenuRef}
+                                        onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
+                                        actions={audioActions}
+                                        shouldOpenOnLongPress={false}
+                                        themeVariant="dark"
+                                        onOpenMenu={handleMenuOpen}
+                                        onCloseMenu={handleMenuClose}
+                                    >
+                                        <TouchableOpacity style={styles.controlButton} onPress={() => {
+                                            if (Platform.OS === 'android') audioMenuRef.current?.show();
+                                        }}>
+                                            <MaterialIcons name="multitrack-audio" size={24} color="white" />
+                                        </TouchableOpacity>
+                                    </MenuWrapper>
+                                )}
+
+                                {availableTextTracks.length > 0 && (
+                                    <MenuWrapper
+                                        style={{ zIndex: 1000 }}
+                                        title="Subtitles"
+                                        ref={subtitleMenuRef}
+                                        onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
+                                        actions={subtitleActions}
+                                        shouldOpenOnLongPress={false}
+                                        themeVariant="dark"
+                                        onOpenMenu={handleMenuOpen}
+                                        onCloseMenu={handleMenuClose}
+                                    >
+                                        <TouchableOpacity style={styles.controlButton} onPress={() => {
+                                            if (Platform.OS === 'android') subtitleMenuRef.current?.show();
+                                        }}>
+                                            <MaterialIcons name="closed-caption" size={24} color="white" />
+                                        </TouchableOpacity>
+                                    </MenuWrapper>
+                                )}
+
+                                <MenuWrapper
+                                    style={{ zIndex: 1000 }}
+                                    title="Settings"
+                                    ref={settingsMenuRef}
+                                    onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
+                                    actions={settingsActions}
+                                    shouldOpenOnLongPress={false}
+                                    themeVariant="dark"
+                                    onOpenMenu={handleMenuOpen}
+                                    onCloseMenu={handleMenuClose}
+                                >
+                                    <TouchableOpacity style={styles.controlButton} onPress={() => {
+                                        if (Platform.OS === 'android') settingsMenuRef.current?.show();
+                                    }}>
+                                        <MaterialIcons name="settings" size={24} color="white" />
+                                    </TouchableOpacity>
+                                </MenuWrapper>
+                            </GlassView>
+                        </View>
+
+                        <CenterControls
+                            isPlaying={!isPaused}
+                            isReady={playerState.isReady}
+                            isBuffering={playerState.isBuffering}
+                            onPlayPause={togglePlayPause}
+                            onSkipBackward={handleSkipBackward}
+                            onSkipForward={handleSkipForward}
+                        />
+
+                        <View style={styles.bottomControls}>
+                            <ProgressBar
+                                currentTime={displayTime}
+                                duration={playerState.duration}
+                                sliderValue={sliderValue}
+                                isReady={playerState.isReady}
+                                onValueChange={handleSliderChange}
+                                onSlidingStart={handleSliderStart}
+                                onSlidingComplete={handleSliderComplete}
+                                showSpeed={settings.playbackSpeed !== 1.0}
+                                playbackSpeed={settings.playbackSpeed}
+                            />
+                        </View>
+                    </Animated.View>
+                )}
+
+                <ContentFitLabel
+                    show={showContentFitLabel}
+                    contentFit={contentFit}
+                    opacity={contentFitLabelOpacity}
+                />
+            </>
+        );
+    };
+
 
     if (videoError) {
         return <ErrorDisplay error={videoError} onBack={handleBack} onRetry={handleRetry} />;
@@ -734,151 +910,27 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 opacity={bufferOpacity}
                 bufferProgress={effectiveBufferPct}
             />
+            {/* In-app controls overlay (when not in native fullscreen modal) */}
+            {!isFullscreen && renderControlsOverlay(false)}
 
-            <TouchableOpacity style={styles.touchArea} activeOpacity={1} onPress={handleOverlayPress} />
-
-            {uiState.showControls && (
-                <Animated.View style={[styles.controlsOverlay, { opacity: controlsOpacity }]} pointerEvents="box-none">
-                    <View style={styles.topControls}>
-                        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-                            <Ionicons name="chevron-back" size={28} color="white" />
-                        </TouchableOpacity>
-
-                        <View style={styles.titleContainer}>
-                            <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
-                        </View>
-
-                        <GlassView glassEffectStyle="clear" style={styles.topRightControls}>
-                            {streams.length > 1 && (
-                                <MenuWrapper
-                                    style={{ zIndex: 1000 }}
-                                    ref={streamMenuRef}
-                                    title="Select Stream"
-                                    onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
-                                    actions={streamActions}
-                                    shouldOpenOnLongPress={false}
-                                    themeVariant="dark"
-                                    onOpenMenu={handleMenuOpen}
-                                    onCloseMenu={handleMenuClose}
-                                >
-                                    <TouchableOpacity style={styles.controlButton} onPress={() => {
-                                        if (Platform.OS === 'android') streamMenuRef.current?.show();
-                                    }}>
-                                        <MaterialIcons name="ondemand-video" size={24} color="white" />
-                                    </TouchableOpacity>
-                                </MenuWrapper>
-                            )}
-
-                            <TouchableOpacity style={styles.controlButton} onPress={handleMuteToggle}>
-                                <Ionicons name={settings.isMuted ? "volume-mute" : "volume-high"} size={24} color="white" />
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.controlButton} onPress={cycleContentFit}>
-                                <MaterialIcons name={getContentFitIcon()} size={24} color="white" />
-                            </TouchableOpacity>
-                            {Platform.OS !== 'web' && (
-                                <TouchableOpacity
-                                    style={styles.controlButton}
-                                    onPress={toggleFullscreen}
-                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                >
-                                    <MaterialIcons
-                                        name={isFullscreen ? "fullscreen-exit" : "fullscreen"}
-                                        size={24}
-                                        color="white"
-                                    />
-                                </TouchableOpacity>
-                            )}
-
-                            {availableAudioTracks.length > 0 && (
-                                <MenuWrapper
-                                    style={{ zIndex: 1000 }}
-                                    title="Audio Track"
-                                    ref={audioMenuRef}
-                                    onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
-                                    actions={audioActions}
-                                    shouldOpenOnLongPress={false}
-                                    themeVariant="dark"
-                                    onOpenMenu={handleMenuOpen}
-                                    onCloseMenu={handleMenuClose}
-                                >
-                                    <TouchableOpacity style={styles.controlButton} onPress={() => {
-                                        if (Platform.OS === 'android') audioMenuRef.current?.show();
-                                    }}>
-                                        <MaterialIcons name="multitrack-audio" size={24} color="white" />
-                                    </TouchableOpacity>
-                                </MenuWrapper>
-                            )}
-
-                            {availableTextTracks.length > 0 && (
-                                <MenuWrapper
-                                    style={{ zIndex: 1000 }}
-                                    title="Subtitles"
-                                    ref={subtitleMenuRef}
-                                    onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
-                                    actions={subtitleActions}
-                                    shouldOpenOnLongPress={false}
-                                    themeVariant="dark"
-                                    onOpenMenu={handleMenuOpen}
-                                    onCloseMenu={handleMenuClose}
-                                >
-                                    <TouchableOpacity style={styles.controlButton} onPress={() => {
-                                        if (Platform.OS === 'android') subtitleMenuRef.current?.show();
-                                    }}>
-                                        <MaterialIcons name="closed-caption" size={24} color="white" />
-                                    </TouchableOpacity>
-                                </MenuWrapper>
-                            )}
-
-                            <MenuWrapper
-                                style={{ zIndex: 1000 }}
-                                title="Settings"
-                                ref={settingsMenuRef}
-                                onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
-                                actions={settingsActions}
-                                shouldOpenOnLongPress={false}
-                                themeVariant="dark"
-                                onOpenMenu={handleMenuOpen}
-                                onCloseMenu={handleMenuClose}
-                            >
-                                <TouchableOpacity style={styles.controlButton} onPress={() => {
-                                    if (Platform.OS === 'android') settingsMenuRef.current?.show();
-                                }}>
-                                    <MaterialIcons name="settings" size={24} color="white" />
-                                </TouchableOpacity>
-                            </MenuWrapper>
-                        </GlassView>
+            {/* Transparent overlay Modal on top of Native Fullscreen Window */}
+            {Platform.OS === 'android' && isFullscreen && (
+                <Modal
+                    visible={isFullscreen}
+                    transparent={true}
+                    statusBarTranslucent={true}
+                    animationType="none"
+                    onRequestClose={() => {
+                        videoRef.current?.dismissFullscreenPlayer();
+                        setIsFullscreen(false);
+                        handleBack();
+                    }}
+                >
+                    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
+                        {renderControlsOverlay(true)}
                     </View>
-
-                    <CenterControls
-                        isPlaying={!isPaused}
-                        isReady={playerState.isReady}
-                        isBuffering={playerState.isBuffering}
-                        onPlayPause={togglePlayPause}
-                        onSkipBackward={handleSkipBackward}
-                        onSkipForward={handleSkipForward}
-                    />
-
-                    <View style={styles.bottomControls}>
-                        <ProgressBar
-                            currentTime={displayTime}
-                            duration={playerState.duration}
-                            sliderValue={sliderValue}
-                            isReady={playerState.isReady}
-                            onValueChange={handleSliderChange}
-                            onSlidingStart={handleSliderStart}
-                            onSlidingComplete={handleSliderComplete}
-                            showSpeed={settings.playbackSpeed !== 1.0}
-                            playbackSpeed={settings.playbackSpeed}
-                        />
-                    </View>
-                </Animated.View>
+                </Modal>
             )}
-
-            <ContentFitLabel
-                show={showContentFitLabel}
-                contentFit={contentFit}
-                opacity={contentFitLabelOpacity}
-            />
         </View>
     );
 };
