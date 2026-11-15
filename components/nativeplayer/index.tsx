@@ -319,7 +319,12 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, []);
 
         const autoPresentFullscreen = useCallback(() => {
-        // Disabled: In-app player with custom glass controls is used directly
+        if (Platform.OS === 'android' && !hasAutoPresentedFullscreenRef.current) {
+            hasAutoPresentedFullscreenRef.current = true;
+            setTimeout(() => {
+                videoRef.current?.presentFullscreenPlayer();
+            }, 100);
+        }
     }, []);
 
     const handleProgress = useCallback((data: OnProgressData) => {

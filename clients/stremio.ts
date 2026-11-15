@@ -193,7 +193,7 @@ export function getDevHostIp(): string | null {
 
   // 7. Fallback to developer PC LAN IP during development on local network
   if (__DEV__) {
-    return '192.168.1.3';
+    return '192.168.1.5';
   }
 
   return null;
