@@ -3,7 +3,7 @@ import { AppCrashErrorBoundary } from '@/utils/crashLogger';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 
 import { useFonts } from 'expo-font';
-import { Stack, useRouter, DarkTheme, Theme, ThemeProvider } from 'expo-router';
+import { Stack, useRouter, usePathname, DarkTheme, Theme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from 'react';
 import 'react-native-reanimated';
@@ -118,7 +118,7 @@ export default function RootLayout() {
   return (
     <AppCrashErrorBoundary>
       <AppThemeProvider>
-        <View style={{ flex: 1, backgroundColor: '#08080a' }}>
+        <View style={{ flex: 1, backgroundColor: 'transparent' }}>
           <RootLayoutNav />
           {!splashFinished && (
             <SplashErrorBoundary onFallback={handleSplashFinish}>
@@ -152,6 +152,8 @@ const InvisibleHeaderBackground = () => (
 function RootLayoutNav() {
   const { theme: appTheme } = useTheme();
   const router = useRouter();
+  const pathname = usePathname();
+  const isPlayerScreen = pathname?.includes('stream/player');
 
   useEffect(() => {
     tamilMVNotificationService.initialize().catch((err: any) => {
@@ -178,13 +180,15 @@ function RootLayoutNav() {
 
   return (
     <View style={styles.container}>
-      {/* Global Background Gradient */}
-      <LinearGradient
-        colors={appTheme.gradientColors}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.backgroundGradient}
-      />
+      {/* Global Background Gradient - hidden on video player screen so native SurfaceView is not occluded */}
+      {!isPlayerScreen && (
+        <LinearGradient
+          colors={appTheme.gradientColors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.backgroundGradient}
+        />
+      )}
 
       <ActionSheetProvider>
         <ThemeProvider value={navTheme}>
@@ -262,7 +266,7 @@ function RootLayoutNav() {
                   headerShown: false,
                   headerTransparent: true,
                   headerBackground: InvisibleHeaderBackground,
-                  contentStyle: { backgroundColor: '#000000' },
+                  contentStyle: { backgroundColor: 'transparent' },
                 }}
               />
               <Stack.Screen

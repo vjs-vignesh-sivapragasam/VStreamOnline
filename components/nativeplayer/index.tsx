@@ -121,11 +121,18 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [dismissAudioAlert, setDismissAudioAlert] = useState(false);
 
     const videoDimensions = useMemo(() => {
-        const w = windowWidth > 0 ? windowWidth : Dimensions.get('window').width;
-        const h = windowHeight > 0 ? windowHeight : Dimensions.get('window').height;
+        const win = Dimensions.get('window');
+        const screen = Dimensions.get('screen');
+        const maxDim = Math.max(windowWidth, windowHeight, win.width, win.height, screen.width, screen.height);
+        const minDim = Math.min(
+            windowWidth > 0 ? windowWidth : maxDim,
+            windowHeight > 0 ? windowHeight : maxDim,
+            win.width > 0 ? win.width : maxDim,
+            win.height > 0 ? win.height : maxDim
+        );
         return {
-            width: w,
-            height: h,
+            width: maxDim,
+            height: minDim,
         };
     }, [windowWidth, windowHeight]);
 

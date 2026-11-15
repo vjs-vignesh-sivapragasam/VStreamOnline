@@ -371,3 +371,32 @@ if (fs.existsSync(expoRouterUseScreensPath)) {
     console.log('ℹ️ expo-router useScreens.js already patched');
   }
 }
+
+// ── 8. Patch react-native-video ExoPlayerView.kt (ensure SurfaceView z-order above window backgrounds) ──
+const exoPlayerViewKtPath = path.join(
+  rootDir,
+  'node_modules',
+  'react-native-video',
+  'android',
+  'src',
+  'main',
+  'java',
+  'com',
+  'brentvatne',
+  'exoplayer',
+  'ExoPlayerView.kt'
+);
+
+if (fs.existsSync(exoPlayerViewKtPath)) {
+  let content = fs.readFileSync(exoPlayerViewKtPath, 'utf8');
+  if (!content.includes('setZOrderMediaOverlay')) {
+    content = content.replace(
+      'addView(playerView, playerViewLayoutParams)',
+      'addView(playerView, playerViewLayoutParams)\n        post {\n            (playerView.videoSurfaceView as? android.view.SurfaceView)?.setZOrderMediaOverlay(true)\n        }'
+    );
+    fs.writeFileSync(exoPlayerViewKtPath, content, 'utf8');
+    console.log('✅ Patched react-native-video ExoPlayerView.kt for SurfaceView z-order');
+  } else {
+    console.log('ℹ️ react-native-video ExoPlayerView.kt already patched');
+  }
+}
