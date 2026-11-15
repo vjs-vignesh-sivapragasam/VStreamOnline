@@ -645,7 +645,7 @@ const MediaPlayerScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  rootContainer: { flex: 1, backgroundColor: 'transparent' },
+  rootContainer: { flex: 1, backgroundColor: '#000000' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
   backdropImage: { position: 'absolute', width: '100%', height: '100%', resizeMode: 'cover', opacity: 0.5 },
   loadingOverlay: { justifyContent: 'center', alignItems: 'center' },

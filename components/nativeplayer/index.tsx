@@ -671,12 +671,14 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             <Video
                 ref={videoRef}
                 source={videoSource}
-                style={[styles.video, videoDimensions]}
+                style={styles.video}
                 paused={isPaused}
                 muted={settings.isMuted}
                 rate={settings.playbackSpeed}
                 resizeMode={contentFit}
                 ignoreSilentSwitch="ignore"
+                useTextureView={Platform.OS === 'android'}
+                hideShutterView={true}
                 shutterColor="transparent"
                 onReadyForDisplay={handleReadyForDisplay}
                 onLoad={handleLoad}

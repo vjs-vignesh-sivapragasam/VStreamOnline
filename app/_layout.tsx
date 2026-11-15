@@ -118,7 +118,7 @@ export default function RootLayout() {
   return (
     <AppCrashErrorBoundary>
       <AppThemeProvider>
-        <View style={{ flex: 1, backgroundColor: 'transparent' }}>
+        <View style={{ flex: 1, backgroundColor: '#08080a' }}>
           <RootLayoutNav />
           {!splashFinished && (
             <SplashErrorBoundary onFallback={handleSplashFinish}>
@@ -266,7 +266,7 @@ function RootLayoutNav() {
                   headerShown: false,
                   headerTransparent: true,
                   headerBackground: InvisibleHeaderBackground,
-                  contentStyle: { backgroundColor: 'transparent' },
+                  contentStyle: { backgroundColor: '#000000' },
                 }}
               />
               <Stack.Screen
