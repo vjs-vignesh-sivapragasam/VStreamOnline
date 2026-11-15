@@ -4,7 +4,7 @@ export const styles = StyleSheet.create({
     // Container
     container: {
         flex: 1,
-        backgroundColor: '#000000',
+        backgroundColor: 'transparent',
     },
 
     // Video
@@ -496,6 +496,24 @@ export const styles = StyleSheet.create({
         color: 'rgba(255, 255, 255, 0.5)',
         fontSize: 12,
         marginTop: 2,
+    },
+
+    // Direct VLC Button
+    vlcDirectBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 152, 0, 0.18)',
+        borderColor: '#FF9800',
+        borderWidth: 1.2,
+        borderRadius: 20,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        marginRight: 10,
+    },
+    vlcDirectBtnText: {
+        color: '#FF9800',
+        fontSize: 13,
+        fontWeight: '700',
     },
 
     // Audio-Only Alert Pill / Banner

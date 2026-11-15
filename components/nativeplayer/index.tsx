@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { TouchableOpacity, Animated, Platform, Dimensions, UIManager } from "react-native";
+import { TouchableOpacity, Animated, Platform, Dimensions, UIManager, useWindowDimensions } from "react-native";
 import Video, { OnLoadData, OnProgressData, VideoRef, OnBufferData, ResizeMode, SelectedTrack } from "react-native-video";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { MenuComponentRef, MenuView } from '@react-native-menu/menu';
@@ -115,6 +115,19 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [hasRenderedVideo, setHasRenderedVideo] = useState(false);
+    const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+    const [availableVideoTracks, setAvailableVideoTracks] = useState<any[]>([]);
+    const [videoTrackChecked, setVideoTrackChecked] = useState(false);
+    const [dismissAudioAlert, setDismissAudioAlert] = useState(false);
+
+    const videoDimensions = useMemo(() => {
+        const w = windowWidth > 0 ? windowWidth : Dimensions.get('window').width;
+        const h = windowHeight > 0 ? windowHeight : Dimensions.get('window').height;
+        return {
+            width: w,
+            height: h,
+        };
+    }, [windowWidth, windowHeight]);
 
     // Restore progress
     useEffect(() => {
@@ -210,7 +223,11 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         setVideoError(null);
         hasReportedErrorRef.current = false;
         if (data.naturalSize && data.naturalSize.width > 0 && data.naturalSize.height > 0) {
-            setHasRenderedVideo(true);
+            if (data.videoTracks && data.videoTracks.length > 0) {
+                setAvailableVideoTracks(data.videoTracks);
+                setVideoTrackChecked(true);
+                setHasRenderedVideo(true);
+            }
         }
 
         Animated.timing(bufferOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
@@ -233,6 +250,15 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             setAvailableTextTracks(data.textTracks);
         }
     }, [bufferOpacity, playerState, selectedAudioTrack, settings]);
+
+    const handleVideoTracks = useCallback((data: { videoTracks: any[] }) => {
+        const tracks = data.videoTracks || [];
+        setAvailableVideoTracks(tracks);
+        setVideoTrackChecked(true);
+        if (tracks.length > 0) {
+            setHasRenderedVideo(true);
+        }
+    }, []);
 
     const handleAudioTracks = useCallback((data: { audioTracks: any[] }) => {
         if (data.audioTracks && Array.isArray(data.audioTracks) && data.audioTracks.length > 0) {
@@ -270,11 +296,13 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, [bufferOpacity, playerState]);
 
     const handleReadyForDisplay = useCallback(() => {
-        setHasRenderedVideo(true);
         playerState.setIsReady(true);
         playerState.setIsBuffering(false);
         Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
-    }, [bufferOpacity, playerState]);
+        if (availableVideoTracks.length > 0) {
+            setHasRenderedVideo(true);
+        }
+    }, [bufferOpacity, playerState, availableVideoTracks.length]);
 
     const handlePlaybackStateChanged = useCallback((e: { isPlaying: boolean; isSeeking: boolean }) => {
         if (e.isPlaying) {
@@ -502,6 +530,8 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         setVideoError(null);
         hasReportedErrorRef.current = false;
         setHasRenderedVideo(false);
+        setVideoTrackChecked(false);
+        setDismissAudioAlert(false);
         playerState.setIsReady(false);
         playerState.setIsBuffering(true);
         if (videoRef.current) videoRef.current.seek(0);
@@ -620,19 +650,26 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         return <ErrorDisplay error={videoError} onBack={handleBack} onRetry={handleRetry} />;
     }
 
+    const isAudioOnlyOrVideoBlack = (
+        !dismissAudioAlert &&
+        playerState.currentTime > 1.2 &&
+        (
+            (videoTrackChecked && availableVideoTracks.length === 0) ||
+            (!hasRenderedVideo && playerState.currentTime > 2.5)
+        )
+    );
+
     return (
         <View style={styles.container}>
             <Video
                 ref={videoRef}
                 source={videoSource}
-                style={styles.video}
+                style={[styles.video, videoDimensions]}
                 paused={isPaused}
                 muted={settings.isMuted}
                 rate={settings.playbackSpeed}
                 resizeMode={contentFit}
                 ignoreSilentSwitch="ignore"
-                useTextureView={false}
-                hideShutterView={true}
                 shutterColor="transparent"
                 onReadyForDisplay={handleReadyForDisplay}
                 onLoad={handleLoad}
@@ -644,6 +681,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 onEnd={handleEnd}
                 onAudioTracks={handleAudioTracks}
                 onTextTracks={handleTextTracks}
+                onVideoTracks={handleVideoTracks}
                 progressUpdateInterval={250}
                 selectedAudioTrack={selectedAudioTrack >= 0 ? { type: 'index', value: selectedAudioTrack } as SelectedTrack : undefined}
                 selectedTextTrack={videoSelectedTextTrack}
@@ -672,7 +710,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 bufferProgress={effectiveBufferPct}
             />
 
-            {playerState.currentTime > 2.5 && !hasRenderedVideo && (
+            {isAudioOnlyOrVideoBlack && (
                 <View style={styles.audioOnlyAlertContainer} pointerEvents="box-none">
                     <TouchableOpacity
                         style={styles.audioOnlyAlertBtn}
@@ -681,12 +719,30 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                     >
                         <Ionicons name="play-circle-outline" size={26} color="#FF9800" style={{ marginRight: 10 }} />
                         <View style={{ flex: 1 }}>
-                            <Text style={styles.audioOnlyAlertTitle}>Audio playing, but video not showing?</Text>
+                            <Text style={styles.audioOnlyAlertTitle}>
+                                {videoTrackChecked && availableVideoTracks.length === 0
+                                    ? "10-bit HEVC Video Codec Unsupported"
+                                    : "Audio playing, but video not showing?"}
+                            </Text>
                             <Text style={styles.audioOnlyAlertSub}>
-                                This video format (e.g. 10-bit HEVC) may exceed your device's hardware decoder. Tap here to play with full video in VLC.
+                                {videoTrackChecked && availableVideoTracks.length === 0
+                                    ? "Your device lacks a hardware decoder for this video format. Tap to play with full video in VLC."
+                                    : "Tap here to play with full video in VLC or an external player."}
                             </Text>
                         </View>
-                        <MaterialIcons name="chevron-right" size={24} color="#FF9800" />
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                            <MaterialIcons name="chevron-right" size={24} color="#FF9800" />
+                            <TouchableOpacity
+                                onPress={(e) => {
+                                    e.stopPropagation();
+                                    setDismissAudioAlert(true);
+                                }}
+                                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                                style={{ marginLeft: 6, padding: 4 }}
+                            >
+                                <Ionicons name="close-circle" size={20} color="#888888" />
+                            </TouchableOpacity>
+                        </View>
                     </TouchableOpacity>
                 </View>
             )}
@@ -703,6 +759,17 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                         <View style={styles.titleContainer}>
                             <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
                         </View>
+
+                        {Platform.OS !== 'web' && (
+                            <TouchableOpacity
+                                style={styles.vlcDirectBtn}
+                                onPress={handleOpenExternal}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="play-circle" size={17} color="#FF9800" style={{ marginRight: 5 }} />
+                                <Text style={styles.vlcDirectBtnText}>Open in VLC</Text>
+                            </TouchableOpacity>
+                        )}
 
                         <GlassView glassEffectStyle="clear" style={styles.topRightControls}>
                             {streams.length > 1 && (
