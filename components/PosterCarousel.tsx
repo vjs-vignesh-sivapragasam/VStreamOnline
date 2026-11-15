@@ -147,7 +147,7 @@ const CarouselSlideItem = ({
                         styles.slideContent,
                         {
                             paddingHorizontal: dimensions.isLandscape ? 40 : 20,
-                            paddingBottom: 28,
+                            paddingBottom: dimensions.isLandscape ? 36 : 52,
                         },
                     ]}
                 >
@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
     slideContent: {
         zIndex: 2,
         alignItems: 'center',
-        paddingBottom: 38,
+        paddingBottom: 52,
     },
     slideTitle: {
         fontSize: 24,
@@ -615,7 +615,7 @@ const styles = StyleSheet.create({
     },
     paginationContainer: {
         position: 'absolute',
-        bottom: 12,
+        bottom: 14,
         alignSelf: 'center',
         borderRadius: 20,
         overflow: 'hidden',
