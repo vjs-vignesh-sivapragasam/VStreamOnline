@@ -17,35 +17,31 @@ function getNotifications(): any {
     return null;
   }
   try {
-    // Check if any native notification module is available before requiring.
-    // On iOS, local notification modules are ExpoNotificationScheduler, ExpoNotificationPresenter,
-    // ExpoNotificationsHandlerModule, and ExpoNotificationPermissionsModule.
-    // On Android, ExpoPushTokenManager or ExpoNotificationScheduler are used.
+    // Check if required native modules are linked in the binary.
+    // On Android, expo-notifications requires ExpoPushTokenManager and ExpoNotificationsHandlerModule.
+    // On iOS, it requires ExpoNotificationsHandlerModule or ExpoNotificationScheduler.
     let nativeAvailable = false;
     try {
-      nativeAvailable = !!(
-        requireOptionalNativeModule('ExpoNotificationScheduler') ||
-        requireOptionalNativeModule('ExpoNotificationPresenter') ||
-        requireOptionalNativeModule('ExpoNotificationsHandlerModule') ||
-        requireOptionalNativeModule('ExpoNotificationPermissionsModule') ||
-        requireOptionalNativeModule('ExpoPushTokenManager')
-      );
+      if (Platform.OS === 'android') {
+        nativeAvailable = !!(
+          requireOptionalNativeModule('ExpoNotificationsHandlerModule') &&
+          requireOptionalNativeModule('ExpoPushTokenManager')
+        );
+      } else {
+        nativeAvailable = !!(
+          requireOptionalNativeModule('ExpoNotificationsHandlerModule') ||
+          requireOptionalNativeModule('ExpoNotificationScheduler') ||
+          requireOptionalNativeModule('ExpoNotificationPresenter')
+        );
+      }
     } catch {
       nativeAvailable = false;
     }
 
     if (!nativeAvailable) {
-      // In certain bundle environments, requireOptionalNativeModule can return null
-      // even when the modules are statically linked. Fallback to a safe direct require.
-      try {
-        const directMod = require('expo-notifications');
-        if (directMod && typeof directMod.scheduleNotificationAsync === 'function') {
-          _notificationsCache = directMod;
-          return _notificationsCache;
-        }
-      } catch {
-        // Native module truly missing
-      }
+      console.log(
+        '[TamilMVNotificationService] Native expo-notifications modules not linked in this binary; notifications inactive.'
+      );
       _notificationsCache = null;
       return null;
     }

@@ -67,34 +67,58 @@ export default function RootLayout() {
     ...FontAwesome.font,
   });
   const [splashFinished, setSplashFinished] = useState(false);
+  const [fontTimeout, setFontTimeout] = useState(false);
 
   const handleSplashFinish = React.useCallback(() => {
     setSplashFinished(true);
   }, []);
 
+  // Safety timer: font loading should never block startup indefinitely
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFontTimeout(true);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Safety timer: splash animation must finish within 5.5s max
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSplashFinished(true);
+    }, 5500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const isReady = loaded || fontTimeout;
+
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
     if (error) {
-      console.error('[APP_BOOT] Font load error caught:', error);
-      throw error;
+      console.warn('[APP_BOOT] Font load error caught, continuing with system font:', error);
     }
   }, [error]);
 
   useEffect(() => {
-    if (loaded) {
+    if (isReady) {
       SplashScreen.hideAsync().catch((e) => console.warn('[APP_BOOT] hideAsync warning:', e));
-      startEmbeddedNodeServer();
+      try {
+        startEmbeddedNodeServer();
+      } catch (e) {
+        console.warn('[APP_BOOT] startEmbeddedNodeServer error:', e);
+      }
     }
-  }, [loaded]);
+  }, [isReady]);
 
-  if (!loaded) {
-    return null;
+  if (!isReady) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#08080a' }} />
+    );
   }
 
   return (
     <AppCrashErrorBoundary>
       <AppThemeProvider>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, backgroundColor: '#08080a' }}>
           <RootLayoutNav />
           {!splashFinished && (
             <SplashErrorBoundary onFallback={handleSplashFinish}>
