@@ -394,7 +394,7 @@ export default function PosterCarousel({
     );
 
 
-    if (loading || !data.length) {
+    if (!data.length) {
         return (
             <View style={[styles.loadingContainer, { height: carouselHeight }]}>
                 {loading

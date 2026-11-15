@@ -1013,6 +1013,25 @@ function readCache(key: string): GroupedItem[] | null {
   }
 }
 
+async function readCacheAsync(key: string): Promise<GroupedItem[] | null> {
+  const sync = readCache(key);
+  if (sync) return sync;
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    const entry: CacheEntry = JSON.parse(raw);
+    if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
+    if (!entry.data || entry.data.length === 0) return null;
+    try { storageService.setItem(key, raw); } catch {}
+    return entry.data;
+  } catch {
+    return null;
+  }
+}
+
+// In-flight request deduplication map
+const inFlightFeeds = new Map<string, Promise<GroupedItem[]>>();
+
 function writeCache(key: string, data: GroupedItem[]): void {
   if (!data || data.length === 0) return;
   try {
@@ -1034,125 +1053,140 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
   const cached = readCache(cacheKey);
   if (cached) return cached;
 
-  const forumId = FORUM_IDS[language]?.[category];
-  if (!forumId) return [];
+  // Deduplicate concurrent requests (e.g. from PosterCarousel + HomeScreen)
+  if (inFlightFeeds.has(cacheKey)) {
+    return inFlightFeeds.get(cacheKey)!;
+  }
 
-  const currentBase = normalizeTamilMvUrl(getTamilMVBaseUrl());
-  const mirrorsToTry = [
-    currentBase,
-    ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
-  ];
+  const promise = (async () => {
+    const forumId = FORUM_IDS[language]?.[category];
+    if (!forumId) return [];
 
-  let lastError: any = null;
+    const currentBase = normalizeTamilMvUrl(getTamilMVBaseUrl());
+    const mirrorsToTry = [
+      currentBase,
+      ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
+    ];
 
-  for (const mirror of mirrorsToTry) {
-    const rssUrl = `${mirror}/index.php?/forums/forum/${forumId}/all.xml`;
+    let lastError: any = null;
 
-    let response: Response | null = null;
-    let xml = '';
+    for (const mirror of mirrorsToTry) {
+      const rssUrl = `${mirror}/index.php?/forums/forum/${forumId}/all.xml`;
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8500);
+      let response: Response | null = null;
+      let xml = '';
 
-      try {
-        response = await fetch(rssUrl, {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const timeoutMs = attempt === 0 ? 5000 : 6000;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+          response = await fetch(rssUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+              'Cache-Control': 'no-cache',
+            },
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const text = await response.text();
+            if (isIspCourtBlock(text)) {
+              response = null;
+              break; // ISP intercepted port, skip to next mirror
+            }
+            xml = text;
+            break;
+          }
+        } catch (e: any) {
+          clearTimeout(timeoutId);
+          lastError = e;
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 150));
+          }
+        }
+      }
+
+      if (response && response.ok && xml) {
+        let groups = parseRSSFeed(xml, language, category);
+
+        // If RSS returns 0 items, fallback to fast HTML parsing of forum page 1
+        if (groups.length === 0) {
+          const htmlUrl = `${mirror}/index.php?/forums/forum/${forumId}/`;
+          try {
+            const htmlRes = await fetch(htmlUrl, {
+              headers: {
+                'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              },
+              signal: AbortSignal.timeout(4500),
+            });
+            if (htmlRes.ok) {
+              const html = await htmlRes.text();
+              if (!isIspCourtBlock(html)) {
+                const parsed = parseCategoryPageHtml(html, mirror, language, category);
+                if (parsed.items.length > 0) {
+                  groups = parsed.items;
+                }
+              }
+            }
+          } catch {}
+        }
+
+        if (groups.length > 0) {
+          if (mirror !== currentBase) {
+            console.log(`[TamilMV] Active domain failed. Auto-switched to working mirror: ${mirror}`);
+            setTamilMVBaseUrl(mirror).catch(() => {});
+          }
+          writeCache(cacheKey, groups);
+          return groups;
+        }
+      }
+    }
+
+    // If all known mirrors fail, attempt online auto-discovery as last resort
+    try {
+      const discovered = await autoDiscoverWorkingDomain();
+      if (discovered && !mirrorsToTry.includes(discovered)) {
+        const retryUrl = `${discovered}/index.php?/forums/forum/${forumId}/all.xml`;
+        const retryRes = await fetch(retryUrl, {
           headers: {
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept': 'application/rss+xml, application/xml, text/xml, */*',
             'Cache-Control': 'no-cache',
           },
-          signal: controller.signal,
+          signal: AbortSignal.timeout(5000),
         });
-
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          const text = await response.text();
-          if (isIspCourtBlock(text)) {
-            response = null;
-            break; // ISP intercepted port, skip to next mirror
-          }
-          xml = text;
-          break;
-        }
-      } catch (e: any) {
-        clearTimeout(timeoutId);
-        lastError = e;
-        if (attempt === 0) {
-          await new Promise((r) => setTimeout(r, 200));
-        }
-      }
-    }
-
-    if (response && response.ok && xml) {
-      let groups = parseRSSFeed(xml, language, category);
-
-      // If RSS returns 0 items, fallback to HTML parsing of forum page 1
-      if (groups.length === 0) {
-        const htmlUrl = `${mirror}/index.php?/forums/forum/${forumId}/`;
-        try {
-          const htmlRes = await fetch(htmlUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            },
-            signal: AbortSignal.timeout(8000),
-          });
-          if (htmlRes.ok) {
-            const html = await htmlRes.text();
-            if (!isIspCourtBlock(html)) {
-              const parsed = parseCategoryPageHtml(html, mirror, language, category);
-              if (parsed.items.length > 0) {
-                groups = parsed.items;
-              }
+        if (retryRes.ok) {
+          const xml = await retryRes.text();
+          if (!isIspCourtBlock(xml)) {
+            const groups = parseRSSFeed(xml, language, category);
+            if (groups.length > 0) {
+              writeCache(cacheKey, groups);
+              return groups;
             }
           }
-        } catch {}
-      }
-
-      if (groups.length > 0) {
-        if (mirror !== currentBase) {
-          console.log(`[TamilMV] Active domain failed. Auto-switched to working mirror: ${mirror}`);
-          setTamilMVBaseUrl(mirror).catch(() => {});
         }
-        writeCache(cacheKey, groups);
-        return groups;
       }
-    }
-  }
+    } catch {}
 
-  // If all known mirrors fail, attempt online auto-discovery as last resort
+    if (lastError) throw lastError;
+    return [];
+  })();
+
+  inFlightFeeds.set(cacheKey, promise);
   try {
-    const discovered = await autoDiscoverWorkingDomain();
-    if (discovered && !mirrorsToTry.includes(discovered)) {
-      const retryUrl = `${discovered}/index.php?/forums/forum/${forumId}/all.xml`;
-      const retryRes = await fetch(retryUrl, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-          'Cache-Control': 'no-cache',
-        },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (retryRes.ok) {
-        const xml = await retryRes.text();
-        if (!isIspCourtBlock(xml)) {
-          const groups = parseRSSFeed(xml, language, category);
-          if (groups.length > 0) {
-            writeCache(cacheKey, groups);
-            return groups;
-          }
-        }
-      }
-    }
-  } catch {}
-
-  if (lastError) throw lastError;
-  return [];
+    return await promise;
+  } finally {
+    inFlightFeeds.delete(cacheKey);
+  }
 }
 
 // ─── Hook: single category ────────────────────────────────────────────────────
@@ -1165,15 +1199,16 @@ interface UseTamilMVResult {
 }
 
 export function useTamilMV(language: Language, category: Category): UseTamilMVResult {
-  const [groups, setGroups] = useState<GroupedItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = getCacheKey(language, category);
+  const [groups, setGroups] = useState<GroupedItem[]>(() => readCache(cacheKey) || []);
+  const [loading, setLoading] = useState(() => groups.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   const refresh = useCallback(() => {
-    deleteCache(getCacheKey(language, category));
+    deleteCache(cacheKey);
     setTick((t) => t + 1);
-  }, [language, category]);
+  }, [cacheKey]);
 
   useEffect(() => {
     return subscribeTamilMVBaseUrl(() => {
@@ -1183,15 +1218,38 @@ export function useTamilMV(language: Language, category: Category): UseTamilMVRe
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+
+    // Check memory cache first
+    const cached = readCache(cacheKey);
+    if (cached && cached.length > 0) {
+      setGroups(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+      readCacheAsync(cacheKey).then((asyncData) => {
+        if (!cancelled && asyncData && asyncData.length > 0) {
+          setGroups(asyncData);
+          setLoading(false);
+        }
+      });
+    }
+
     setError(null);
 
     fetchAndParse(language, category)
-      .then((data) => { if (!cancelled) setGroups(data); })
-      .catch((e: any) => { if (!cancelled) setError(e.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .then((data) => {
+        if (!cancelled) setGroups(data);
+      })
+      .catch((e: any) => {
+        if (!cancelled) setError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [language, category, tick]);
 
   return { groups, loading, error, refresh };
@@ -1206,11 +1264,30 @@ interface UseTamilMVCatalogResult {
   refresh: () => void;
 }
 
+function getSyncCachedSections(lang: Language, cats: Category[]): CatalogSection[] {
+  const sections: CatalogSection[] = [];
+  for (const cat of cats) {
+    const cached = readCache(getCacheKey(lang, cat));
+    if (cached && cached.length > 0) {
+      sections.push({
+        category: cat,
+        label: CATEGORY_LABELS[cat],
+        type: CATEGORY_TYPE[cat],
+        groups: cached,
+      });
+    }
+  }
+  return sections;
+}
+
 export function useTamilMVCatalog(language: Language): UseTamilMVCatalogResult {
   const availableCategories = Object.keys(FORUM_IDS[language]) as Category[];
 
-  const [sections, setSections] = useState<CatalogSection[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 1. Instant sync initialization from memory cache
+  const [sections, setSections] = useState<CatalogSection[]>(() =>
+    getSyncCachedSections(language, availableCategories)
+  );
+  const [loading, setLoading] = useState<boolean>(() => sections.length === 0);
   const [errors, setErrors] = useState<string[]>([]);
   const [tick, setTick] = useState(0);
 
@@ -1227,38 +1304,98 @@ export function useTamilMVCatalog(language: Language): UseTamilMVCatalogResult {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setErrors([]);
-    setSections([]);
 
-    const results: CatalogSection[] = [];
+    // Fast check: if sync cache has sections for this language, show them immediately
+    const syncSections = getSyncCachedSections(language, availableCategories);
+    if (syncSections.length > 0) {
+      setSections(syncSections);
+      setLoading(false);
+    } else {
+      setLoading(true);
+      // Fast async check from AsyncStorage (resolves in ~10ms for cold app starts)
+      const cacheKeys = availableCategories.map((c) => getCacheKey(language, c));
+      AsyncStorage.multiGet(cacheKeys).then((pairs) => {
+        if (cancelled) return;
+        const asyncSections: CatalogSection[] = [];
+        for (const [key, raw] of pairs) {
+          if (!raw) continue;
+          try {
+            const entry: CacheEntry = JSON.parse(raw);
+            if (entry?.data && entry.data.length > 0 && Date.now() - entry.timestamp < CACHE_TTL_MS) {
+              const cat = key.split(':')[2] as Category;
+              try { storageService.setItem(key, raw); } catch {}
+              asyncSections.push({
+                category: cat,
+                label: CATEGORY_LABELS[cat],
+                type: CATEGORY_TYPE[cat],
+                groups: entry.data,
+              });
+            }
+          } catch {}
+        }
+        if (asyncSections.length > 0) {
+          const ordered = availableCategories
+            .map((cat) => asyncSections.find((s) => s.category === cat))
+            .filter((s): s is CatalogSection => Boolean(s));
+          if (ordered.length > 0) {
+            setSections(ordered);
+            setLoading(false);
+          }
+        }
+      });
+    }
+
+    setErrors([]);
+
+    // Progressive Map to hold sections as each category finishes loading
+    const resolvedMap = new Map<Category, CatalogSection>();
+    syncSections.forEach((s) => resolvedMap.set(s.category, s));
+
     const errs: string[] = [];
 
-    Promise.all(
-      availableCategories.map(async (category) => {
-        try {
-          const groups = await fetchAndParse(language, category);
-          results.push({
+    // Prioritize primary/popular categories first
+    const PRIORITY_ORDER: Category[] = ['predvd', 'webhd', 'series', 'multiaudio', 'hdrip', 'dvd', 'hdtv'];
+    const sortedCategories = [...availableCategories].sort((a, b) => {
+      const idxA = PRIORITY_ORDER.indexOf(a);
+      const idxB = PRIORITY_ORDER.indexOf(b);
+      return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+    });
+
+    // Progressive fetch: update UI as soon as any category arrives
+    const fetchPromises = sortedCategories.map(async (category) => {
+      try {
+        const groups = await fetchAndParse(language, category);
+        if (cancelled) return;
+        if (groups && groups.length > 0) {
+          resolvedMap.set(category, {
             category,
             label: CATEGORY_LABELS[category],
             type: CATEGORY_TYPE[category],
             groups,
           });
-        } catch (e: any) {
-          errs.push(`${category}: ${e.message}`);
+
+          // Order according to availableCategories definition
+          const ordered = availableCategories
+            .map((cat) => resolvedMap.get(cat))
+            .filter((s): s is CatalogSection => Boolean(s));
+
+          setSections(ordered);
+          setLoading(false); // As soon as first section loads, stop blocking spinner!
         }
-      }),
-    ).then(() => {
-      if (cancelled) return;
-      const ordered = availableCategories
-        .map((cat) => results.find((r) => r.category === cat))
-        .filter((s): s is CatalogSection => Boolean(s));
-      setSections(ordered);
-      setErrors(errs);
-      setLoading(false);
+      } catch (e: any) {
+        errs.push(`${category}: ${e.message}`);
+      }
     });
 
-    return () => { cancelled = true; };
+    Promise.allSettled(fetchPromises).then(() => {
+      if (cancelled) return;
+      setLoading(false);
+      setErrors(errs);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [language, tick]);
 
   return { sections, loading, errors, refresh };
@@ -1704,6 +1841,21 @@ export interface TamilMVHomepageData {
   recentlyAdded: GroupedItem[];
 }
 
+let inFlightHomepageData: Promise<TamilMVHomepageData> | null = null;
+
+function getCachedHomepageDataSync(): TamilMVHomepageData | null {
+  try {
+    const raw = storageService.getItem('tamilmv:homepage_data_v2');
+    if (raw) {
+      const entry: { data: TamilMVHomepageData; timestamp: number } = JSON.parse(raw);
+      if (Date.now() - entry.timestamp < 15 * 60 * 1000) {
+        return entry.data;
+      }
+    }
+  } catch {}
+  return null;
+}
+
 export async function fetchTamilMVHomepageData(
   forceRefresh: boolean = false,
   customBaseUrl?: string
@@ -1712,154 +1864,175 @@ export async function fetchTamilMVHomepageData(
   const cacheKey = 'tamilmv:homepage_data_v2';
 
   if (!forceRefresh) {
+    const sync = getCachedHomepageDataSync();
+    if (sync) return sync;
+
     try {
-      const raw = storageService.getItem(cacheKey);
+      const raw = await AsyncStorage.getItem(cacheKey);
       if (raw) {
         const entry: { data: TamilMVHomepageData; timestamp: number } = JSON.parse(raw);
-        if (Date.now() - entry.timestamp < 10 * 60 * 1000) {
+        if (Date.now() - entry.timestamp < 15 * 60 * 1000) {
+          try { storageService.setItem(cacheKey, raw); } catch {}
           return entry.data;
         }
       }
     } catch {}
-  }
 
-  const currentBase = normalizeTamilMvUrl(baseUrl);
-  const mirrorsToTry = [
-    currentBase,
-    ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
-  ];
-  let html = '';
-  let successfulBase = currentBase;
-
-  for (const mirror of mirrorsToTry) {
-    let res: Response | null = null;
-    let text = '';
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
-      try {
-        res = await fetch(mirror, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Connection': 'close',
-          },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        if (res.ok) {
-          text = await res.text();
-          if (!isIspCourtBlock(text)) {
-            break;
-          }
-          res = null;
-        }
-      } catch {
-        clearTimeout(timeout);
-        if (attempt === 0) {
-          await new Promise((r) => setTimeout(r, 200));
-        }
-      }
-    }
-
-    if (res && res.ok && text && !isIspCourtBlock(text)) {
-      html = text;
-      successfulBase = mirror;
-      break;
+    if (inFlightHomepageData) {
+      return inFlightHomepageData;
     }
   }
 
-  if (!html) {
-    try {
-      const raw = storageService.getItem(cacheKey);
-      if (raw) return JSON.parse(raw).data;
-    } catch {}
-    return { topReleases: [], recentlyAdded: [] };
-  }
+  const promise = (async () => {
+    const currentBase = normalizeTamilMvUrl(baseUrl);
+    const mirrorsToTry = [
+      currentBase,
+      ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
+    ];
+    let html = '';
+    let successfulBase = currentBase;
 
-  const recIdx = html.indexOf('RECENTLY ADDED');
-  const topIdx = html.indexOf('TOP RELEASES THIS WEEK');
+    for (const mirror of mirrorsToTry) {
+      let res: Response | null = null;
+      let text = '';
 
-  if (recIdx === -1 && topIdx === -1) {
-    return { topReleases: [], recentlyAdded: [] };
-  }
-
-  const endIdx =
-    html.indexOf('id="elForumRow_', recIdx !== -1 ? recIdx : topIdx) !== -1
-      ? html.indexOf('id="elForumRow_', recIdx !== -1 ? recIdx : topIdx)
-      : html.indexOf('ipsLayout_sidebar', recIdx !== -1 ? recIdx : topIdx) !== -1
-        ? html.indexOf('ipsLayout_sidebar', recIdx !== -1 ? recIdx : topIdx)
-        : (recIdx !== -1 ? recIdx : topIdx) + 80000;
-
-  // Build local poster lookup from cached RSS
-  const posterLookup = new Map<string, string>();
-  try {
-    const langs: Language[] = ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'];
-    const cats: Category[] = ['predvd', 'webhd', 'multiaudio', 'hdrip', 'dvd', 'hdtv', 'series'];
-    for (const l of langs) {
-      for (const c of cats) {
-        const raw = storageService.getItem(getCacheKey(l, c));
-        if (raw) {
-          const entry: CacheEntry = JSON.parse(raw);
-          (entry.data || []).forEach((g) => {
-            if (g.name) {
-              const p = g.items.find((i) => i.poster)?.poster;
-              if (p) posterLookup.set(g.name.toLowerCase().trim(), p);
-            }
-          });
-        }
-      }
-    }
-  } catch {}
-
-  let topReleases: GroupedItem[] = [];
-  let recentlyAdded: GroupedItem[] = [];
-
-  if (topIdx !== -1 && recIdx !== -1 && topIdx < recIdx) {
-    const topHtml = html.substring(topIdx, recIdx);
-    const recHtml = html.substring(recIdx, endIdx);
-    topReleases = parseHomepageLines(topHtml, successfulBase, posterLookup);
-    recentlyAdded = parseHomepageLines(recHtml, successfulBase, posterLookup);
-  } else if (recIdx !== -1) {
-    const recHtml = html.substring(recIdx, endIdx);
-    recentlyAdded = parseHomepageLines(recHtml, successfulBase, posterLookup);
-  } else if (topIdx !== -1) {
-    const topHtml = html.substring(topIdx, endIdx);
-    topReleases = parseHomepageLines(topHtml, successfulBase, posterLookup);
-  }
-
-  // Enrich topReleases missing posters using TMDB so carousel always displays high-res artwork
-  await Promise.all(
-    topReleases.map(async (group) => {
-      const item = group.items[0];
-      if (item && !item.poster) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
         try {
-          const tmdb = await tmdbService.getMovieFullInfo(
-            item.name || '',
-            item.year || undefined,
-            (group as any).type
-          );
-          if (tmdb?.backdropUrl || tmdb?.posterUrl) {
-            item.poster = tmdb.backdropUrl || tmdb.posterUrl;
+          res = await fetch(mirror, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Connection': 'close',
+            },
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          if (res.ok) {
+            text = await res.text();
+            if (!isIspCourtBlock(text)) {
+              break;
+            }
+            res = null;
           }
-        } catch {}
+        } catch {
+          clearTimeout(timeout);
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 150));
+          }
+        }
       }
-    })
-  );
 
-  const result: TamilMVHomepageData = { topReleases, recentlyAdded };
+      if (res && res.ok && text && !isIspCourtBlock(text)) {
+        html = text;
+        successfulBase = mirror;
+        break;
+      }
+    }
 
+    if (!html) {
+      try {
+        const raw = storageService.getItem(cacheKey);
+        if (raw) return JSON.parse(raw).data;
+      } catch {}
+      return { topReleases: [], recentlyAdded: [] };
+    }
+
+    const recIdx = html.indexOf('RECENTLY ADDED');
+    const topIdx = html.indexOf('TOP RELEASES THIS WEEK');
+
+    if (recIdx === -1 && topIdx === -1) {
+      return { topReleases: [], recentlyAdded: [] };
+    }
+
+    const endIdx =
+      html.indexOf('id="elForumRow_', recIdx !== -1 ? recIdx : topIdx) !== -1
+        ? html.indexOf('id="elForumRow_', recIdx !== -1 ? recIdx : topIdx)
+        : html.indexOf('ipsLayout_sidebar', recIdx !== -1 ? recIdx : topIdx) !== -1
+          ? html.indexOf('ipsLayout_sidebar', recIdx !== -1 ? recIdx : topIdx)
+          : (recIdx !== -1 ? recIdx : topIdx) + 80000;
+
+    // Build local poster lookup from cached RSS
+    const posterLookup = new Map<string, string>();
+    try {
+      const langs: Language[] = ['tamil', 'telugu', 'hindi', 'malayalam', 'kannada', 'english'];
+      const cats: Category[] = ['predvd', 'webhd', 'multiaudio', 'hdrip', 'dvd', 'hdtv', 'series'];
+      for (const l of langs) {
+        for (const c of cats) {
+          const raw = storageService.getItem(getCacheKey(l, c));
+          if (raw) {
+            const entry: CacheEntry = JSON.parse(raw);
+            (entry.data || []).forEach((g) => {
+              if (g.name) {
+                const p = g.items.find((i) => i.poster)?.poster;
+                if (p) posterLookup.set(g.name.toLowerCase().trim(), p);
+              }
+            });
+          }
+        }
+      }
+    } catch {}
+
+    let topReleases: GroupedItem[] = [];
+    let recentlyAdded: GroupedItem[] = [];
+
+    if (topIdx !== -1 && recIdx !== -1 && topIdx < recIdx) {
+      const topHtml = html.substring(topIdx, recIdx);
+      const recHtml = html.substring(recIdx, endIdx);
+      topReleases = parseHomepageLines(topHtml, successfulBase, posterLookup);
+      recentlyAdded = parseHomepageLines(recHtml, successfulBase, posterLookup);
+    } else if (recIdx !== -1) {
+      const recHtml = html.substring(recIdx, endIdx);
+      recentlyAdded = parseHomepageLines(recHtml, successfulBase, posterLookup);
+    } else if (topIdx !== -1) {
+      const topHtml = html.substring(topIdx, endIdx);
+      topReleases = parseHomepageLines(topHtml, successfulBase, posterLookup);
+    }
+
+    // Save to cache immediately so UI gets data without waiting for TMDB
+    const result: TamilMVHomepageData = { topReleases, recentlyAdded };
+    try {
+      storageService.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
+      storageService.setItem(
+        'tamilmv:recently_added',
+        JSON.stringify({ data: recentlyAdded, timestamp: Date.now() })
+      );
+    } catch {}
+
+    // Non-blocking background TMDB poster enrichment
+    Promise.all(
+      topReleases.map(async (group) => {
+        const item = group.items[0];
+        if (item && !item.poster) {
+          try {
+            const tmdb = await tmdbService.getMovieFullInfo(
+              item.name || '',
+              item.year || undefined,
+              (group as any).type
+            );
+            if (tmdb?.backdropUrl || tmdb?.posterUrl) {
+              item.poster = tmdb.backdropUrl || tmdb.posterUrl;
+            }
+          } catch {}
+        }
+      })
+    ).then(() => {
+      try {
+        storageService.setItem(cacheKey, JSON.stringify({ data: { topReleases, recentlyAdded }, timestamp: Date.now() }));
+      } catch {}
+    }).catch(() => {});
+
+    return result;
+  })();
+
+  inFlightHomepageData = promise;
   try {
-    storageService.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
-    storageService.setItem(
-      'tamilmv:recently_added',
-      JSON.stringify({ data: recentlyAdded, timestamp: Date.now() })
-    );
-  } catch {}
-
-  return result;
+    return await promise;
+  } finally {
+    inFlightHomepageData = null;
+  }
 }
 
 export async function fetchTamilMVTopReleases(
@@ -1879,12 +2052,22 @@ export async function fetchTamilMVRecentlyAdded(
 }
 
 export function useTamilMVTopReleases(language?: Language) {
-  const [groups, setGroups] = useState<GroupedItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [groups, setGroups] = useState<GroupedItem[]>(() => {
+    const cached = getCachedHomepageDataSync();
+    if (cached?.topReleases?.length) {
+      return language && language !== 'tamil'
+        ? cached.topReleases.filter(
+            (g) => (g.items[0]?.language || '').toLowerCase() === language.toLowerCase()
+          )
+        : cached.topReleases;
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => groups.length === 0);
 
   const load = useCallback(
     async (forceRefresh = false) => {
-      setLoading(true);
+      if (groups.length === 0) setLoading(true);
       try {
         const items = await fetchTamilMVTopReleases(forceRefresh);
         const filtered =
@@ -1895,15 +2078,34 @@ export function useTamilMVTopReleases(language?: Language) {
             : items;
         setGroups(filtered.length > 0 ? filtered : items);
       } catch {
-        setGroups([]);
+        // Keep existing on error
       } finally {
         setLoading(false);
       }
     },
-    [language]
+    [language, groups.length]
   );
 
   useEffect(() => {
+    if (groups.length === 0) {
+      AsyncStorage.getItem('tamilmv:homepage_data_v2').then((raw) => {
+        if (!raw) return;
+        try {
+          const entry = JSON.parse(raw);
+          if (entry?.data?.topReleases?.length) {
+            const items = entry.data.topReleases;
+            const filtered =
+              language && language !== 'tamil'
+                ? items.filter(
+                    (g: any) => (g.items[0]?.language || '').toLowerCase() === language.toLowerCase()
+                  )
+                : items;
+            setGroups(filtered.length > 0 ? filtered : items);
+            setLoading(false);
+          }
+        } catch {}
+      });
+    }
     load(false);
   }, [load]);
 
@@ -1911,12 +2113,22 @@ export function useTamilMVTopReleases(language?: Language) {
 }
 
 export function useTamilMVRecentlyAdded(language?: Language) {
-  const [groups, setGroups] = useState<GroupedItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [groups, setGroups] = useState<GroupedItem[]>(() => {
+    const cached = getCachedHomepageDataSync();
+    if (cached?.recentlyAdded?.length) {
+      return language && language !== 'tamil'
+        ? cached.recentlyAdded.filter(
+            (g) => (g.items[0]?.language || '').toLowerCase() === language.toLowerCase()
+          )
+        : cached.recentlyAdded;
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => groups.length === 0);
 
   const load = useCallback(
     async (forceRefresh = false) => {
-      setLoading(true);
+      if (groups.length === 0) setLoading(true);
       try {
         const items = await fetchTamilMVRecentlyAdded(forceRefresh);
         const filtered =
@@ -1927,15 +2139,34 @@ export function useTamilMVRecentlyAdded(language?: Language) {
             : items;
         setGroups(filtered.length > 0 ? filtered : items);
       } catch {
-        setGroups([]);
+        // Keep existing on error
       } finally {
         setLoading(false);
       }
     },
-    [language]
+    [language, groups.length]
   );
 
   useEffect(() => {
+    if (groups.length === 0) {
+      AsyncStorage.getItem('tamilmv:homepage_data_v2').then((raw) => {
+        if (!raw) return;
+        try {
+          const entry = JSON.parse(raw);
+          if (entry?.data?.recentlyAdded?.length) {
+            const items = entry.data.recentlyAdded;
+            const filtered =
+              language && language !== 'tamil'
+                ? items.filter(
+                    (g: any) => (g.items[0]?.language || '').toLowerCase() === language.toLowerCase()
+                  )
+                : items;
+            setGroups(filtered.length > 0 ? filtered : items);
+            setLoading(false);
+          }
+        } catch {}
+      });
+    }
     load(false);
   }, [load]);
 

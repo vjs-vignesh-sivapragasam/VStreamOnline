@@ -59,7 +59,7 @@ const LazySection = ({
   language: Language;
   onSeeAll: (category: Category, title: string, language: Language) => void;
 }) => {
-  const [shouldLoad, setShouldLoad] = useState(index < 2);
+  const [shouldLoad, setShouldLoad] = useState(index < 3);
 
   return (
     <View onLayout={() => { if (!shouldLoad) setShouldLoad(true); }}>
@@ -237,18 +237,18 @@ export default function HomeScreen() {
             />
           </View>
 
-          {/* Loading state */}
-          {loading && (
+          {/* Loading state: Only show blocking loader if NO movies are visible yet */}
+          {loading && sections.length === 0 && recentGroups.length === 0 && (
             <View style={styles.loadingContainer}>
               <ActivityIndicator color={theme.primary} size="large" />
               <Text style={styles.loadingText}>
-                Loading content…
+                Loading movies…
               </Text>
             </View>
           )}
 
           {/* Error state */}
-          {!loading && errors.length > 0 && sections.length === 0 && (
+          {!loading && errors.length > 0 && sections.length === 0 && recentGroups.length === 0 && (
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>Failed to load feed</Text>
               <TouchableOpacity style={styles.retryButton} onPress={refresh}>
