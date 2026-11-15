@@ -690,6 +690,16 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             type: streamType,
         };
     }, [videoUrl, title, isLocalFile, isTorrent]);
+        const nativeControlsStyles = useMemo(() => ({
+        seekIncrementMS: 10000,
+        hideNext: true,
+        hidePrevious: true,
+        hideSeekBar: false,
+        hidePlayPause: false,
+        hideForward: false,
+        hideRewind: false,
+    }), []);
+
     const renderControlsOverlay = (isInModal: boolean = false) => {
         const onBackPress = () => {
             if (isInModal) {
@@ -884,7 +894,8 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 progressUpdateInterval={250}
                 selectedAudioTrack={selectedAudioTrack >= 0 ? { type: 'index', value: selectedAudioTrack } as SelectedTrack : undefined}
                 selectedTextTrack={videoSelectedTextTrack}
-                controls={false}
+                controls={isFullscreen}
+                controlsStyles={nativeControlsStyles}
                 fullscreen={isFullscreen}
                 enterPictureInPictureOnLeave={true}
                 playInBackground={true}
@@ -910,27 +921,8 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 opacity={bufferOpacity}
                 bufferProgress={effectiveBufferPct}
             />
-            {/* In-app controls overlay (when not in native fullscreen modal) */}
+            {/* In-app controls overlay */}
             {!isFullscreen && renderControlsOverlay(false)}
-
-            {/* Transparent overlay Modal on top of Native Fullscreen Window */}
-            {Platform.OS === 'android' && isFullscreen && (
-                <Modal
-                    visible={isFullscreen}
-                    transparent={true}
-                    statusBarTranslucent={true}
-                    animationType="none"
-                    onRequestClose={() => {
-                        videoRef.current?.dismissFullscreenPlayer();
-                        setIsFullscreen(false);
-                        handleBack();
-                    }}
-                >
-                    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
-                        {renderControlsOverlay(true)}
-                    </View>
-                </Modal>
-            )}
         </View>
     );
 };
