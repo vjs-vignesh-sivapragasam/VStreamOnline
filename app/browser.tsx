@@ -1106,12 +1106,27 @@ export default function BrowserScreen() {
 
   const handleOpenMovieDetails = (topicUrl: string, title?: string) => {
     triggerHaptic();
+    const resolvedUrl = topicUrl || currentUrl;
+    const itemsFromWeb = detectedMagnets.length > 0 ? detectedMagnets.map((m, i) => ({
+      guid: `${resolvedUrl}-magnet-${i}-${m.infoHash}`,
+      groupid: resolvedUrl,
+      name: m.title,
+      title: m.title,
+      year: null,
+      language: 'tamil',
+      poster: pagePoster || '',
+      magnetUrl: m.magnetUrl,
+      infoHash: m.infoHash,
+      publishDate: new Date().toISOString(),
+    })) : undefined;
+
     router.push({
       pathname: '/torrent/details',
       params: {
         title: cleanTitle(title || pageTitle),
         poster: pagePoster || '',
-        topicUrl: topicUrl || currentUrl,
+        topicUrl: resolvedUrl,
+        allItems: itemsFromWeb ? JSON.stringify(itemsFromWeb) : undefined,
       },
     });
   };

@@ -91,11 +91,16 @@ const PosterItem = ({
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    const topicUrl =
+      item.groupid?.startsWith('http') ? item.groupid :
+      (item.allItems?.find((i) => i.groupid?.startsWith('http'))?.groupid || undefined);
+
     router.push({
       pathname: '/torrent/details',
       params: {
         guid: item.guid,
         groupid: item.groupid,
+        topicUrl,
         title: item.name,
         magnetUrl: item.magnetUrl,
         infoHash: item.infoHash,

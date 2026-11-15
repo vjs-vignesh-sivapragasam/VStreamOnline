@@ -133,11 +133,16 @@ export default function HomeScreen() {
   };
 
   const handleCarouselItemPress = (item: any) => {
+    const topicUrl =
+      item.groupid?.startsWith('http') ? item.groupid :
+      (item.allItems?.find((i: any) => i.groupid?.startsWith('http'))?.groupid || undefined);
+
     router.push({
       pathname: '/torrent/details',
       params: {
         guid:        item.guid,
         groupid:     item.groupid,
+        topicUrl,
         title:       item.title,
         magnetUrl:   item.magnetUrl,
         infoHash:    item.infoHash,

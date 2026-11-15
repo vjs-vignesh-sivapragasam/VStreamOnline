@@ -12,12 +12,16 @@ export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.io';
 
 export const KNOWN_TAMILMV_MIRRORS = [
   'https://www.1tamilmv.io',
+  'https://1tamilmv.io',
+  'https://1tamilmv.solar',
   'https://www.1tamilmv.solar',
+  'https://1tamilmv.fi',
   'https://www.1tamilmv.fi',
+  'https://1tamilmv.insure',
   'https://www.1tamilmv.insure',
-  'https://www.1tamilmv.style',
-  'https://www.1tamilmv.cards',
-  'https://www.1tamilmv.pizza',
+  'https://1tamilmv.style',
+  'https://1tamilmv.cards',
+  'https://1tamilmv.pizza',
 ];
 
 const STALE_OR_DEAD_DOMAINS = new Set([
@@ -965,7 +969,7 @@ function parseRSSFeed(xmlString: string, language: Language, category: Category)
         name,
         year,
         language,
-        groupid: guid,
+        groupid: link || guid,
         guid: `${guid}-magnet-${i}`,
         poster,
         title: displayName,
@@ -1321,13 +1325,18 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
     } catch {
       if (topicUrl.startsWith('/')) {
         finalTopicUrl = `${mirror}${topicUrl}`;
+      } else {
+        const numMatch = topicUrl.match(/\b(\d{4,8})\b/);
+        if (numMatch) {
+          finalTopicUrl = `${mirror}/index.php?/forums/topic/${numMatch[1]}-view/`;
+        }
       }
     }
 
     let res: Response | null = null;
     let html = '';
 
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
 
@@ -1337,7 +1346,6 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Connection': 'close',
           },
           signal: controller.signal,
         });
@@ -1354,8 +1362,8 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
       } catch (err) {
         clearTimeout(timeout);
         lastError = err;
-        if (attempt === 0) {
-          await new Promise((r) => setTimeout(r, 200));
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)));
         }
       }
     }

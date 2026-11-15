@@ -25,6 +25,7 @@ import {
   cleanTopicTitle,
   Language,
   getTamilMVBaseUrl,
+  normalizeTamilMvUrl,
 } from '@/hooks/useTamilMv';
 import { StreamingServerClient, TorrentFile, resolveStreamingServerClient } from '@/clients/stremio';
 import { StorageKeys, storageService } from '@/utils/StorageService';
@@ -284,6 +285,56 @@ const LANGUAGE_NAMES: Record<Language, string> = {
   kannada: 'Kannada',
 };
 
+function resolveTopicWebUrl(
+  topicUrl?: string,
+  groupid?: string,
+  paramGuid?: string,
+  items?: TorrentItem[]
+): string | null {
+  const currentBase = normalizeTamilMvUrl(getTamilMVBaseUrl());
+
+  const candidates: (string | undefined)[] = [
+    topicUrl,
+    groupid,
+    paramGuid,
+    items?.[0]?.groupid,
+    items?.[0]?.guid,
+  ];
+
+  // 1. Direct full HTTP URL with /forums/topic/
+  for (const cand of candidates) {
+    if (!cand) continue;
+    if (cand.startsWith('http') && cand.includes('/forums/topic/')) {
+      try {
+        const parsed = new URL(cand);
+        const baseParsed = new URL(currentBase);
+        return `${baseParsed.origin}${parsed.pathname}${parsed.search}`;
+      } catch {
+        return cand;
+      }
+    }
+  }
+
+  // 2. Relative topic path
+  for (const cand of candidates) {
+    if (!cand) continue;
+    if (cand.startsWith('/forums/topic/') || cand.startsWith('index.php?/forums/topic/')) {
+      return `${currentBase.replace(/\/$/, '')}/${cand.replace(/^\//, '')}`;
+    }
+  }
+
+  // 3. Topic ID embedded in string (e.g. "201024", "201024-magnet-0", "topic/201024")
+  for (const cand of candidates) {
+    if (!cand) continue;
+    const match = cand.match(/\b(\d{4,8})\b/);
+    if (match) {
+      return `${currentBase.replace(/\/$/, '')}/index.php?/forums/topic/${match[1]}-view/`;
+    }
+  }
+
+  return null;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const TorrentDetails = () => {
   const {
@@ -433,14 +484,10 @@ const TorrentDetails = () => {
       setItems(rawParsed);
     }
 
-    const targetUrl =
-      topicUrl ||
-      (groupid?.startsWith('http') ? groupid : null) ||
-      (rawParsed[0]?.groupid?.startsWith('http') ? rawParsed[0].groupid : null) ||
-      (rawParsed[0]?.guid?.startsWith('http') && rawParsed[0].guid.includes('/forums/topic/') ? rawParsed[0].guid : null);
+    const targetUrl = resolveTopicWebUrl(topicUrl, groupid, paramGuid, rawParsed);
 
     if (targetUrl) {
-      setIsLoadingVariants(rawParsed.length === 0);
+      setIsLoadingVariants(true);
       fetchTamilMVTopicMagnets(targetUrl)
         .then((res) => {
           if (isMounted && res.items.length > 0) {
@@ -471,7 +518,7 @@ const TorrentDetails = () => {
     // Auto-search TamilMV when opened with just a title (e.g. Recommended or Similar movies)
     const searchTitle = getMovieSearchTitle(title);
     if (searchTitle) {
-      setIsLoadingVariants(rawParsed.length === 0);
+      setIsLoadingVariants(true);
       searchTamilMV(searchTitle, 'all')
         .then(async (groups) => {
           if (!isMounted) return;
@@ -555,29 +602,13 @@ const TorrentDetails = () => {
   // Resolve the TamilMV web page URL for this movie
   const getMovieWebUrl = useCallback((): string => {
     const currentBase = getTamilMVBaseUrl();
-    const candidate =
-      topicUrl ||
-      (groupid?.startsWith('http') ? groupid : null) ||
-      allItems.find((i) => i.groupid && i.groupid.startsWith('http'))?.groupid ||
-      allItems.find((i) => i.guid && i.guid.startsWith('http') && i.guid.includes('/forums/topic/'))?.guid;
-
-    if (candidate) {
-      try {
-        const parsed = new URL(candidate);
-        const baseParsed = new URL(currentBase);
-        return `${baseParsed.origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
-      } catch {
-        if (candidate.startsWith('/')) {
-          return `${currentBase.replace(/\/$/, '')}${candidate}`;
-        }
-        return candidate;
-      }
-    }
+    const resolved = resolveTopicWebUrl(topicUrl, groupid, paramGuid, allItems);
+    if (resolved) return resolved;
 
     // Fallback: search TamilMV for this movie title
     const searchName = getMovieSearchTitle(tmdbData?.title || title);
     return `${currentBase.replace(/\/$/, '')}/index.php?/search/&q=${encodeURIComponent(searchName)}&quick=1`;
-  }, [topicUrl, groupid, allItems, tmdbData?.title, title]);
+  }, [topicUrl, groupid, paramGuid, allItems, tmdbData?.title, title]);
 
   const handleOpenWebPage = useCallback(async () => {
     if (await isHapticsSupported()) {
