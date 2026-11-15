@@ -114,6 +114,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const hasAutoPresentedFullscreenRef = useRef(false);
+    const hasHandledBackRef = useRef(false);
     const [hasRenderedVideo, setHasRenderedVideo] = useState(false);
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const [availableVideoTracks, setAvailableVideoTracks] = useState<any[]>([]);
@@ -213,7 +214,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     useEffect(() => {
         return () => {
             if (updateProgress) {
-                const progressValue = calculateProgress(lastKnownTimeRef.current, playerState.duration);
+        const progressValue = calculateProgress(lastKnownTimeRef.current || playerState.currentTime || 0, playerState.duration);
                 updateProgress({ progress: progressValue });
             }
             clearAllTimers();
@@ -327,6 +328,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, []);
 
     const handleProgress = useCallback((data: OnProgressData) => {
+        lastKnownTimeRef.current = data.currentTime;
         if (!playerState.isReady && data.currentTime > 0) {
             playerState.setIsReady(true);
             playerState.setIsBuffering(false);
@@ -572,7 +574,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     ), [playerState.isDragging, playerState.dragPosition, playerState.currentTime, playerState.duration]);
 
     const handleBack = useCallback(() => {
-        const progressValue = calculateProgress(lastKnownTimeRef.current, playerState.duration);
+        if (hasHandledBackRef.current) return;
+        hasHandledBackRef.current = true;
+        setIsPaused(true);
+        const progressValue = calculateProgress(lastKnownTimeRef.current || playerState.currentTime || 0, playerState.duration);
         onBack({ message: '', progress: progressValue, player: "native" });
     }, [playerState.duration, onBack]);
 
@@ -904,8 +909,14 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 allowsExternalPlayback={true}
                 onFullscreenPlayerWillPresent={() => setIsFullscreen(true)}
                 onFullscreenPlayerDidPresent={() => setIsFullscreen(true)}
-                onFullscreenPlayerWillDismiss={() => setIsFullscreen(false)}
-                onFullscreenPlayerDidDismiss={() => setIsFullscreen(false)}
+                onFullscreenPlayerWillDismiss={() => {
+                    setIsFullscreen(false);
+                    setIsPaused(true);
+                }}
+                onFullscreenPlayerDidDismiss={() => {
+                    setIsFullscreen(false);
+                    handleBack();
+                }}
             />
 
             <ArtworkBackground
