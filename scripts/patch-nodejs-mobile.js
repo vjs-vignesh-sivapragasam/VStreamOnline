@@ -389,11 +389,35 @@ const exoPlayerViewKtPath = path.join(
 
 if (fs.existsSync(exoPlayerViewKtPath)) {
   let content = fs.readFileSync(exoPlayerViewKtPath, 'utf8');
-  if (!content.includes('setZOrderMediaOverlay')) {
+  let changed = false;
+
+  if (!content.includes('(playerView.videoSurfaceView as? android.view.SurfaceView)?.setZOrderMediaOverlay(true)')) {
     content = content.replace(
       'addView(playerView, playerViewLayoutParams)',
       'addView(playerView, playerViewLayoutParams)\n        post {\n            (playerView.videoSurfaceView as? android.view.SurfaceView)?.setZOrderMediaOverlay(true)\n        }'
     );
+    changed = true;
+  }
+
+  // Also patch setPlayer to reinforce SurfaceView media overlay
+  if (content.includes('playerView.resizeMode = resizeMode\n            }') && !content.includes('// setPlayer z-order')) {
+    content = content.replace(
+      'playerView.resizeMode = resizeMode\n            }',
+      'playerView.resizeMode = resizeMode\n            }\n            // setPlayer z-order\n            post {\n                (playerView.videoSurfaceView as? android.view.SurfaceView)?.setZOrderMediaOverlay(true)\n            }'
+    );
+    changed = true;
+  }
+
+  // Also patch onEvents for video size changes
+  if (content.includes('requestLayout()\n            }') && !content.includes('// size changed z-order')) {
+    content = content.replace(
+      'requestLayout()\n            }',
+      'requestLayout()\n                // size changed z-order\n                post {\n                    (playerView.videoSurfaceView as? android.view.SurfaceView)?.setZOrderMediaOverlay(true)\n                }\n            }'
+    );
+    changed = true;
+  }
+
+  if (changed) {
     fs.writeFileSync(exoPlayerViewKtPath, content, 'utf8');
     console.log('✅ Patched react-native-video ExoPlayerView.kt for SurfaceView z-order');
   } else {

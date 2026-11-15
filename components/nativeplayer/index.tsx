@@ -113,7 +113,6 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [isFullscreen, setIsFullscreen] = useState(false);
-    const hasAutoPresentedFullscreenRef = useRef(false);
     const [hasRenderedVideo, setHasRenderedVideo] = useState(false);
     const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     const [availableVideoTracks, setAvailableVideoTracks] = useState<any[]>([]);
@@ -165,10 +164,6 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             height: h,
         };
     }, [containerDimensions, windowWidth, windowHeight]);
-
-    useEffect(() => {
-        hasAutoPresentedFullscreenRef.current = false;
-    }, [videoUrl]);
 
     // Restore progress
     useEffect(() => {
@@ -317,15 +312,6 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         }
     }, []);
 
-    const autoPresentFullscreen = useCallback(() => {
-        if (Platform.OS === 'android' && !hasAutoPresentedFullscreenRef.current) {
-            hasAutoPresentedFullscreenRef.current = true;
-            setTimeout(() => {
-                videoRef.current?.presentFullscreenPlayer();
-            }, 150);
-        }
-    }, []);
-
     const handleProgress = useCallback((data: OnProgressData) => {
         if (!playerState.isReady && data.currentTime > 0) {
             playerState.setIsReady(true);
@@ -342,17 +328,15 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             if (!playerState.isReady) {
                 playerState.setIsReady(true);
             }
-            autoPresentFullscreen();
         }
-    }, [bufferOpacity, playerState, autoPresentFullscreen]);
+    }, [bufferOpacity, playerState]);
 
         const handleReadyForDisplay = useCallback(() => {
         playerState.setIsReady(true);
         playerState.setIsBuffering(false);
         setHasRenderedVideo(true);
         Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
-        autoPresentFullscreen();
-    }, [bufferOpacity, playerState, autoPresentFullscreen]);
+        }, [bufferOpacity, playerState]);
 
     const handlePlaybackStateChanged = useCallback((e: { isPlaying: boolean; isSeeking: boolean }) => {
         if (e.isPlaying) {
@@ -581,7 +565,6 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         hasReportedErrorRef.current = false;
         setHasRenderedVideo(false);
         setVideoTrackChecked(false);
-        hasAutoPresentedFullscreenRef.current = false;
         playerState.setIsReady(false);
         playerState.setIsBuffering(true);
         if (videoRef.current) videoRef.current.seek(0);
@@ -725,7 +708,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 progressUpdateInterval={250}
                 selectedAudioTrack={selectedAudioTrack >= 0 ? { type: 'index', value: selectedAudioTrack } as SelectedTrack : undefined}
                 selectedTextTrack={videoSelectedTextTrack}
-                controls={isFullscreen}
+                controls={false}
                 fullscreen={isFullscreen}
                 enterPictureInPictureOnLeave={true}
                 playInBackground={true}
