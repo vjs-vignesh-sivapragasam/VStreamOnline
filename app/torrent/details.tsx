@@ -384,6 +384,8 @@ const TorrentDetails = () => {
   const [pickerMode, setPickerMode] = useState<'stream' | 'download'>('stream');
   const [qualityModalVisible, setQualityModalVisible] = useState(false);
   const [qualityModalMode, setQualityModalMode] = useState<'watch' | 'download'>('watch');
+  const [isLaunchingPlayer, setIsLaunchingPlayer] = useState(false);
+  const [launchingQuality, setLaunchingQuality] = useState<string>('');
 
   // Fetch TMDB data for Cast, Crew, Trailer, Recommendations, Information
   useEffect(() => {
@@ -821,58 +823,66 @@ const TorrentDetails = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
 
-    setLoadingItem(item.guid);
+    const clean = cleanTitle(item.title);
+    const meta = parseQualityMeta(clean);
+    const qualityLabel = meta.resolution || extractQualityTag(clean) || 'HD';
+
+    const itemKey = item.guid || item.infoHash;
+    setLoadingItem(itemKey);
+    setLaunchingQuality(qualityLabel);
+    setIsLaunchingPlayer(true);
+
     try {
       // Warm up embedded streaming server
       ensureEmbeddedServerRunning().catch(() => {});
 
+      if (!isSeries) {
+        // For movies on TamilMV, torrents contain 1 main video file (fileIdx = 0).
+        // Navigate to player immediately without blocking on network getTorrentFiles!
+        setQualityModalVisible(false);
+        navigateToPlayer(item, 0);
+        return;
+      }
+
+      // For TV series, check if multiple episodes exist
       const client = await resolveStreamingServerClient();
-      const files = await client.getTorrentFiles(item.infoHash, 4000, item.magnetUrl).catch(() => []);
+      const files = await Promise.race([
+        client.getTorrentFiles(item.infoHash, 2500, item.magnetUrl),
+        new Promise<TorrentFile[]>((r) => setTimeout(() => r([]), 2500)),
+      ]).catch(() => []);
 
       if (files && files.length > 1) {
-        // Filter out non-video files (txt, nfo, sample)
         const videoFiles = files.filter((f) => {
           const ext = f.name.split('.').pop()?.toLowerCase();
           return ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(ext || '');
         });
 
-        if (videoFiles.length === 1) {
-          // Exactly 1 main video file
+        if (videoFiles.length > 1) {
+          // Multiple episode files -> show episode picker
           setQualityModalVisible(false);
-          const safeIdx = typeof videoFiles[0].id === 'number' && videoFiles[0].id >= 0 ? videoFiles[0].id : 0;
-          const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl).catch(() => undefined);
-          navigateToPlayer(item, safeIdx, streamUrl);
-        } else if (videoFiles.length > 1) {
-          // Multiple video files (episodes or multi-part)
-          setQualityModalVisible(false);
+          setIsLaunchingPlayer(false);
           setPendingItem(item);
           setPickerFiles(videoFiles);
           setPickerMode('stream');
           setPickerVisible(true);
-        } else {
-          // Fallback to largest file
-          const sorted = [...files].sort((a, b) => b.length - a.length);
-          setQualityModalVisible(false);
-          const safeIdx = sorted[0]?.id !== undefined && sorted[0].id >= 0 ? sorted[0].id : 0;
-          const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl).catch(() => undefined);
-          navigateToPlayer(item, safeIdx, streamUrl);
+          return;
         }
-      } else if (files && files.length === 1) {
+
+        const chosenFile = videoFiles.length === 1 ? videoFiles[0] : [...files].sort((a, b) => b.length - a.length)[0];
+        const safeIdx = typeof chosenFile?.id === 'number' && chosenFile.id >= 0 ? chosenFile.id : 0;
         setQualityModalVisible(false);
-        const safeIdx = typeof files[0].id === 'number' && files[0].id >= 0 ? files[0].id : 0;
-        const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl).catch(() => undefined);
-        navigateToPlayer(item, safeIdx, streamUrl);
+        navigateToPlayer(item, safeIdx);
       } else {
         setQualityModalVisible(false);
-        const streamUrl = await client.getStreamingURL(item.infoHash, 0, item.magnetUrl).catch(() => undefined);
-        navigateToPlayer(item, 0, streamUrl);
+        navigateToPlayer(item, 0);
       }
     } catch (e) {
-      console.warn('[TorrentDetails] Could not fetch file list from streaming server:', e);
+      console.warn('[TorrentDetails] Error starting stream:', e);
       setQualityModalVisible(false);
       navigateToPlayer(item, 0);
     } finally {
       setLoadingItem(null);
+      setTimeout(() => setIsLaunchingPlayer(false), 2500);
     }
   };
 
@@ -907,35 +917,37 @@ const TorrentDetails = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
-    let clean = cleanTitle(item.title);
-    setDownloadingGuid(item.guid);
+    const clean = cleanTitle(item.title);
+    const itemKey = item.guid || item.infoHash;
+    setDownloadingGuid(itemKey);
     try {
-      const clean = cleanTitle(item.title);
       const client = await resolveStreamingServerClient();
-      const files = await client.getTorrentFiles(item.infoHash, 4000, item.magnetUrl).catch(() => []);
+      const files = await Promise.race([
+        client.getTorrentFiles(item.infoHash, 2500, item.magnetUrl),
+        new Promise<TorrentFile[]>((r) => setTimeout(() => r([]), 2500)),
+      ]).catch(() => []);
 
       if (files && files.length > 1) {
-        setPendingItem(item);
         const videoFiles = files.filter((f) => ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(f.name.split('.').pop()?.toLowerCase() || ''));
         if (videoFiles.length === 1) {
+          setQualityModalVisible(false);
           await executeDownload(item, videoFiles[0].id, videoFiles[0].name, videoFiles[0].length);
           return;
         }
+        setQualityModalVisible(false);
+        setPendingItem(item);
         setPickerFiles(videoFiles.length > 0 ? videoFiles : files);
         setPickerMode('download');
         setPickerVisible(true);
       } else {
-
-
-
-
         const fileIdx = files && files.length === 1 ? files[0].id : -1;
         const fileName = files && files.length === 1 ? files[0].name : `${clean}.mkv`;
-
         const fileLength = files && files.length === 1 ? files[0].length : undefined;
+        setQualityModalVisible(false);
         await executeDownload(item, fileIdx, fileName, fileLength);
       }
     } catch {
+      setQualityModalVisible(false);
       await executeDownload(item, -1, `${clean}.mkv`);
     } finally {
       setDownloadingGuid(null);
@@ -1417,8 +1429,9 @@ const TorrentDetails = () => {
                 const qualityTag = extractQualityTag(clean);
                 const meta = parseQualityMeta(clean);
                 const isLast = index === allItems.length - 1;
-                const isLoadingStream = loadingItem === item.guid;
-                const isStartingDownload = downloadingGuid === item.guid;
+                const itemKey = item.guid || item.infoHash;
+                const isLoadingStream = loadingItem === itemKey;
+                const isStartingDownload = downloadingGuid === itemKey;
                 const downloadInfo = activeDownloadsMap[item.infoHash];
                 const isItemCompleted = downloadInfo?.status === 'completed';
                 const isItemDownloading = downloadInfo?.status === 'downloading';
@@ -1435,8 +1448,8 @@ const TorrentDetails = () => {
                     ]}
                     onPress={() => {
                       if (isWatchMode) {
-                        setQualityModalVisible(false);
                         if (isItemCompleted && downloadInfo?.fileUri) {
+                          setQualityModalVisible(false);
                           externalPlayerService.promptPlayerSelection({
                             fileUri: downloadInfo.fileUri,
                             title: clean,
@@ -1481,7 +1494,6 @@ const TorrentDetails = () => {
                         } else if (isItemPaused) {
                           downloadService.resumeDownload(downloadInfo.id);
                         } else {
-                          setQualityModalVisible(false);
                           handleDownload(item);
                         }
                       }
@@ -1687,6 +1699,22 @@ const TorrentDetails = () => {
         </Pressable>
       </Modal>
 
+      {/* ── Stream Launching Spinner Overlay ── */}
+      {isLaunchingPlayer && (
+        <Modal transparent animationType="fade" visible={isLaunchingPlayer}>
+          <View style={styles.launchingPlayerOverlay}>
+            <View style={styles.launchingPlayerCard}>
+              <ActivityIndicator size="large" color={theme.primary} />
+              <Text style={styles.launchingPlayerTitle}>
+                {launchingQuality ? `Starting ${launchingQuality}...` : 'Starting Stream...'}
+              </Text>
+              <Text style={styles.launchingPlayerSubtitle}>
+                Connecting to stream and launching video player
+              </Text>
+            </View>
+          </View>
+        </Modal>
+      )}
 
     </>
   );
@@ -2506,6 +2534,42 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#000000',
+  },
+  launchingPlayerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  launchingPlayerCard: {
+    backgroundColor: '#18181c',
+    borderRadius: 20,
+    paddingHorizontal: 28,
+    paddingVertical: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    elevation: 12,
+    maxWidth: 320,
+    width: '100%',
+  },
+  launchingPlayerTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  launchingPlayerSubtitle: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 13,
+    marginTop: 6,
+    textAlign: 'center',
   },
 });
 
