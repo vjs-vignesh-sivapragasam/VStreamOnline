@@ -526,16 +526,47 @@ const MediaPlayerScreen: React.FC = () => {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   if (streamError) {
+    const activeMagnet =
+      streams[currentStreamIndex]?.magnet ||
+      streams[currentStreamIndex]?.magnetLink ||
+      parsedAllItems[0]?.magnetUrl;
+
+    const isServerOffline = streamError.toLowerCase().includes('server is offline');
+
     return (
       <GestureHandlerRootView style={styles.rootContainer}>
         <StatusBar hidden={true} style="light" />
         <View style={styles.loadingContainer}>
           {artwork ? <Image source={{ uri: artwork }} style={styles.backdropImage} /> : null}
           <View style={styles.loadingOverlay}>
-            <Ionicons name="alert-circle-outline" size={48} color="#ff453a" />
-            <Text style={[styles.loadingText, { color: '#ff453a', textAlign: 'center', marginHorizontal: 30 }]}>
-              {streamError}
+            <Ionicons name="alert-circle-outline" size={44} color="#ff453a" />
+            <Text style={[styles.loadingText, { color: '#ff453a', textAlign: 'center', marginHorizontal: 24, fontSize: 16, fontWeight: '700' }]}>
+              {isServerOffline ? 'Streaming Server Offline' : 'Playback Error'}
             </Text>
+            <Text style={[styles.loadingText, { color: '#ffffff', opacity: 0.85, fontSize: 13, textAlign: 'center', marginHorizontal: 28, marginTop: 4, marginBottom: 12 }]}>
+              {isServerOffline
+                ? 'Direct torrent playback requires a background engine (Stremio server) on port 11470 to convert P2P pieces into video. In development mode, run "npm run server" on your PC, or open the magnet in VLC / external player.'
+                : streamError}
+            </Text>
+
+            {activeMagnet ? (
+              <TouchableOpacity
+                style={[styles.retryBtn, { backgroundColor: '#FF9800', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }]}
+                onPress={async () => {
+                  try {
+                    await Linking.openURL(activeMagnet);
+                  } catch {
+                    showAlert('No Torrent App Found', 'Install VLC, Stremio, or LibreTorrent from Google Play Store to stream magnets directly.');
+                  }
+                }}
+              >
+                <Ionicons name="open-outline" size={18} color="#000000" style={{ marginRight: 6 }} />
+                <Text style={[styles.retryBtnText, { color: '#000000', fontWeight: 'bold' }]}>
+                  Open in VLC / External Player
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
             <TouchableOpacity
               style={styles.retryBtn}
               onPress={() => {
@@ -553,10 +584,14 @@ const MediaPlayerScreen: React.FC = () => {
                 }
               }}
             >
-              <Text style={styles.retryBtnText}>{videoUrl && (videoUrl.startsWith('file:') || (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))) ? 'Open with External Player' : 'Retry'}</Text>
+              <Text style={styles.retryBtnText}>
+                {videoUrl && (videoUrl.startsWith('file:') || (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')))
+                  ? 'Open with External Player'
+                  : 'Retry Stream'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.retryBtn, { backgroundColor: 'transparent', marginTop: 8 }]}
+              style={[styles.retryBtn, { backgroundColor: 'transparent', marginTop: 4 }]}
               onPress={() => router.back()}
             >
               <Text style={[styles.retryBtnText, { color: '#ffffff' }]}>Go Back</Text>
