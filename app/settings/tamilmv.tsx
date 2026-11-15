@@ -33,18 +33,18 @@ import {
   pingTamilMV,
   PingResult,
   Language,
+  normalizeTamilMvUrl,
 } from '@/hooks/useTamilMv';
 import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
 
 const PRESET_DOMAINS = [
+  'https://www.1tamilmv.io',
   'https://www.1tamilmv.solar',
+  'https://www.1tamilmv.fi',
+  'https://www.1tamilmv.insure',
+  'https://www.1tamilmv.style',
   'https://www.1tamilmv.cards',
   'https://www.1tamilmv.pizza',
-  'https://www.1tamilmv.fi',
-  'https://www.1tamilmv.live',
-  'https://www.1tamilmv.pm',
-  'https://www.1tamilmv.yt',
-  'https://www.1tamilmv.mx',
 ];
 
 const TamilMvSettingsScreen: React.FC = () => {
@@ -133,7 +133,11 @@ const TamilMvSettingsScreen: React.FC = () => {
       showAlert('Error', 'Please enter a valid URL to ping.');
       return;
     }
-    await runPing(candidate);
+    const normalized = normalizeTamilMvUrl(candidate);
+    if (normalized !== candidate) {
+      setUrlInput(normalized);
+    }
+    await runPing(normalized);
   };
 
   const handleAutoDetectDomain = async () => {
@@ -169,25 +173,20 @@ const TamilMvSettingsScreen: React.FC = () => {
 
   const handleSave = async () => {
     await triggerHaptic();
-    const candidate = urlInput.trim().replace(/\/+$/, '');
-
-    try {
-      const parsed = new URL(candidate);
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
-        showAlert('Invalid URL', 'The URL must start with http:// or https://');
-        return;
-      }
-    } catch {
+    const candidate = urlInput.trim();
+    if (!candidate) {
       showAlert('Invalid URL', 'Please enter a well-formed website URL.');
       return;
     }
+    const normalized = normalizeTamilMvUrl(candidate);
+    setUrlInput(normalized);
 
     setIsSaving(true);
     try {
-      await setTamilMVBaseUrl(candidate);
-      setActiveUrl(candidate);
-      showAlert('Success', 'Mirror domain updated.');
-      await runPing(candidate);
+      await setTamilMVBaseUrl(normalized);
+      setActiveUrl(normalized);
+      showAlert('Success', `Mirror domain updated to:\n${normalized}`);
+      await runPing(normalized);
     } catch (e: any) {
       showAlert('Error', `Failed to save URL: ${e?.message || 'Unknown error'}`);
     } finally {
@@ -206,12 +205,13 @@ const TamilMvSettingsScreen: React.FC = () => {
 
   const handleSelectPreset = async (preset: string) => {
     await triggerHaptic();
-    setUrlInput(preset);
-    setActiveUrl(preset);
+    const normalized = normalizeTamilMvUrl(preset);
+    setUrlInput(normalized);
+    setActiveUrl(normalized);
     try {
-      await setTamilMVBaseUrl(preset);
+      await setTamilMVBaseUrl(normalized);
     } catch {}
-    await runPing(preset);
+    await runPing(normalized);
   };
 
   const handleCopyUrl = async () => {
@@ -360,6 +360,15 @@ const TamilMvSettingsScreen: React.FC = () => {
         <View style={[styles.badge, styles.badgeSuccess]}>
           <View style={[styles.statusDot, { backgroundColor: '#30d158' }]} />
           <Text style={[styles.badgeText, { color: '#30d158' }]}>Online ({pingResult.latencyMs}ms)</Text>
+        </View>
+      );
+    }
+
+    if (pingResult.isIspBlocked) {
+      return (
+        <View style={[styles.badge, styles.badgeError, { backgroundColor: 'rgba(255, 69, 58, 0.2)' }]}>
+          <Ionicons name="shield-outline" size={13} color="#ff453a" style={{ marginRight: 4 }} />
+          <Text style={[styles.badgeText, { color: '#ff453a' }]}>ISP Blocked</Text>
         </View>
       );
     }
@@ -556,7 +565,7 @@ const TamilMvSettingsScreen: React.FC = () => {
                     style={styles.textInput}
                     value={urlInput}
                     onChangeText={setUrlInput}
-                    placeholder="https://www.1tamilmv.solar"
+                    placeholder="https://www.1tamilmv.io"
                     placeholderTextColor="#555555"
                     autoCapitalize="none"
                     autoCorrect={false}

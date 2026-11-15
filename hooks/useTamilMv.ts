@@ -8,43 +8,93 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Base URL & Constants ─────────────────────────────────────────────────────
 
-export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.style';
+export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.io';
 
 export const KNOWN_TAMILMV_MIRRORS = [
-  'https://www.1tamilmv.style',
-  'https://1tamilmv.style',
-  'https://www.1tamilmv.rocks',
-  'https://1tamilmv.capital',
+  'https://www.1tamilmv.io',
   'https://www.1tamilmv.solar',
+  'https://www.1tamilmv.fi',
+  'https://www.1tamilmv.insure',
+  'https://www.1tamilmv.style',
   'https://www.1tamilmv.cards',
+  'https://www.1tamilmv.pizza',
 ];
 
 const STALE_OR_DEAD_DOMAINS = new Set([
   'https://www.1tamilmv.com',
   'https://1tamilmv.com',
-  'https://www.1tamilmv.solar',
-  'https://1tamilmv.solar',
-  'https://www.1tamilmv.cards',
-  'https://1tamilmv.cards',
-  'https://www.1tamilmv.pizza',
-  'https://1tamilmv.pizza',
-  'https://www.1tamilmv.live',
-  'https://1tamilmv.live',
+  'https://www.1tamilmv.rocks',
+  'https://1tamilmv.rocks',
+  'https://www.1tamilmv.capital',
+  'https://1tamilmv.capital',
   'https://www.1tamilmv.pm',
   'https://1tamilmv.pm',
   'https://www.1tamilmv.yt',
   'https://1tamilmv.yt',
   'https://www.1tamilmv.mx',
   'https://1tamilmv.mx',
-  'https://www.1tamilmv.fi',
-  'https://1tamilmv.fi',
+  'https://www.1tamilmv.live',
+  'https://1tamilmv.live',
   'https://www.1tamilmv.tf',
   'https://1tamilmv.tf',
 ]);
 
+/**
+ * Normalizes user-input or scraped TamilMV URLs:
+ * 1. Automatically upgrades http:// to https:// (Indian ISPs intercept port 80 cleartext HTTP with High Court deny pages).
+ * 2. Adds https:// if protocol is missing.
+ * 3. Prepends www. for canonical 1tamilmv hostnames (e.g. 1tamilmv.io -> www.1tamilmv.io) to avoid SSL SNI issues.
+ * 4. Trims trailing slashes.
+ */
+export function normalizeTamilMvUrl(inputUrl?: string | null): string {
+  if (!inputUrl || !inputUrl.trim()) return DEFAULT_TAMILMV_BASE_URL;
+  let clean = inputUrl.trim().replace(/\/+$/, '');
+
+  // Add protocol if missing
+  if (!/^https?:\/\//i.test(clean)) {
+    clean = `https://${clean}`;
+  }
+
+  // Force upgrade http:// to https:// to bypass Indian ISP port 80 HTTP interception
+  if (clean.toLowerCase().startsWith('http://')) {
+    clean = 'https://' + clean.slice(7);
+  }
+
+  try {
+    const parsed = new URL(clean);
+    let host = parsed.hostname.toLowerCase();
+    if (host.includes('tamilmv') && !host.startsWith('www.')) {
+      host = `www.${host}`;
+    }
+    const path = parsed.pathname === '/' ? '' : parsed.pathname;
+    return `${parsed.protocol}//${host}${path}`;
+  } catch {
+    return clean;
+  }
+}
+
+/**
+ * Checks whether an HTML response is an Indian ISP interception / High Court block page.
+ */
+export function isIspCourtBlock(html: string): boolean {
+  if (!html || typeof html !== 'string') return false;
+  const lower = html.toLowerCase();
+  return (
+    lower.includes('court.html') ||
+    lower.includes('deny/court') ||
+    lower.includes('49.44.18.34') ||
+    lower.includes('department of telecom') ||
+    lower.includes('high court') ||
+    lower.includes('blocked as per instructions') ||
+    lower.includes('prohibited under the directions') ||
+    lower.includes('webadmin/deny') ||
+    (lower.includes('<iframe') && lower.includes('/deny/'))
+  );
+}
+
 function isUsableDomain(url?: string | null): boolean {
   if (!url || !url.trim()) return false;
-  const clean = url.trim().replace(/\/+$/, '').toLowerCase();
+  const clean = normalizeTamilMvUrl(url).toLowerCase();
   return !STALE_OR_DEAD_DOMAINS.has(clean);
 }
 
@@ -75,7 +125,7 @@ let cachedTamilMVBaseUrl: string = DEFAULT_TAMILMV_BASE_URL;
 try {
   const customUrl = storageService.getItem(StorageKeys.TAMILMV_BASE_URL_KEY);
   if (isUsableDomain(customUrl)) {
-    cachedTamilMVBaseUrl = customUrl!.trim().replace(/\/+$/, '');
+    cachedTamilMVBaseUrl = normalizeTamilMvUrl(customUrl);
   } else {
     cachedTamilMVBaseUrl = DEFAULT_TAMILMV_BASE_URL;
     try {
@@ -90,7 +140,7 @@ try {
 AsyncStorage.getItem(StorageKeys.TAMILMV_BASE_URL_KEY)
   .then(storedUrl => {
     if (isUsableDomain(storedUrl)) {
-      const sanitized = storedUrl!.trim().replace(/\/+$/, '');
+      const sanitized = normalizeTamilMvUrl(storedUrl);
       if (sanitized !== cachedTamilMVBaseUrl) {
         cachedTamilMVBaseUrl = sanitized;
         try {
@@ -113,12 +163,12 @@ AsyncStorage.getItem(StorageKeys.TAMILMV_BASE_URL_KEY)
 
 export function getTamilMVBaseUrl(): string {
   if (cachedTamilMVBaseUrl && cachedTamilMVBaseUrl !== DEFAULT_TAMILMV_BASE_URL) {
-    return cachedTamilMVBaseUrl;
+    return normalizeTamilMvUrl(cachedTamilMVBaseUrl);
   }
   try {
     const customUrl = storageService.getItem(StorageKeys.TAMILMV_BASE_URL_KEY);
     if (customUrl && customUrl.trim()) {
-      cachedTamilMVBaseUrl = customUrl.trim().replace(/\/+$/, '');
+      cachedTamilMVBaseUrl = normalizeTamilMvUrl(customUrl);
       return cachedTamilMVBaseUrl;
     }
   } catch (e) {
@@ -131,7 +181,7 @@ export async function getTamilMVBaseUrlAsync(): Promise<string> {
   try {
     const stored = await AsyncStorage.getItem(StorageKeys.TAMILMV_BASE_URL_KEY);
     if (stored && stored.trim()) {
-      const sanitized = stored.trim().replace(/\/+$/, '');
+      const sanitized = normalizeTamilMvUrl(stored);
       cachedTamilMVBaseUrl = sanitized;
       return sanitized;
     }
@@ -142,7 +192,7 @@ export async function getTamilMVBaseUrlAsync(): Promise<string> {
 }
 
 export async function setTamilMVBaseUrl(url: string): Promise<void> {
-  const sanitized = url.trim().replace(/\/+$/, '');
+  const sanitized = normalizeTamilMvUrl(url);
   cachedTamilMVBaseUrl = sanitized;
 
   try {
@@ -201,10 +251,12 @@ export interface PingResult {
   rssWorking: boolean;
   message: string;
   error?: string;
+  isIspBlocked?: boolean;
 }
 
 export async function pingTamilMV(targetUrl?: string): Promise<PingResult> {
-  const baseUrl = (targetUrl || getTamilMVBaseUrl()).trim().replace(/\/+$/, '');
+  const rawUrl = targetUrl || getTamilMVBaseUrl();
+  const baseUrl = normalizeTamilMvUrl(rawUrl);
 
   if (!baseUrl) {
     return {
@@ -236,113 +288,196 @@ export async function pingTamilMV(targetUrl?: string): Promise<PingResult> {
 
   const startTime = Date.now();
   const testFeedUrl = `${baseUrl}/index.php?/forums/forum/11-web-hd-itunes-hd-bluray/all.xml`;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 9000);
 
-  try {
-    const response = await fetch(testFeedUrl, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-        'Cache-Control': 'no-cache',
-      },
-      signal: controller.signal,
-    });
+  let feedRes: Response | null = null;
+  let feedText = '';
+  let lastErr: any = null;
 
-    clearTimeout(timeoutId);
-    const latencyMs = Date.now() - startTime;
+  // Try up to 2 attempts with backoff to handle transient ISP DPI TCP resets (ECONNRESET)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6500);
 
-    if (response.ok) {
-      const text = await response.text();
-      const hasRss = text.includes('<rss') || text.includes('<channel') || text.includes('<feed');
-      if (hasRss) {
-        return {
-          success: true,
-          latencyMs,
-          httpStatus: response.status,
-          rssWorking: true,
-          message: `Connected (${latencyMs}ms) • RSS feed verified`,
-        };
-      } else {
-        return {
-          success: true,
-          latencyMs,
-          httpStatus: response.status,
-          rssWorking: false,
-          message: `Domain reachable (${latencyMs}ms), but RSS content is invalid (possibly parked domain)`,
-        };
+    try {
+      feedRes = await fetch(testFeedUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+          'Cache-Control': 'no-cache',
+          'Range': 'bytes=0-8192', // Fast head/start check to avoid downloading entire 450KB feed
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (feedRes) {
+        feedText = await feedRes.text();
+        break;
+      }
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      lastErr = err;
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 250));
       }
     }
+  }
 
-    if (response.status === 403 || response.status === 503) {
+  const latencyMs = Date.now() - startTime;
+
+  if (feedRes && (feedRes.ok || feedRes.status === 206)) {
+    if (isIspCourtBlock(feedText)) {
       return {
         success: false,
         latencyMs,
-        httpStatus: response.status,
+        httpStatus: feedRes.status,
         rssWorking: false,
-        message: `HTTP ${response.status} • Cloudflare / bot protection active`,
+        isIspBlocked: true,
+        message: 'ISP Blocked: Access intercepted by ISP (DoT / High Court order). Please select an active mirror (.solar, .fi) below.',
       };
     }
 
-    return await pingFallbackRoot(baseUrl, latencyMs, response.status);
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    const latencyMs = Date.now() - startTime;
-    return await pingFallbackRoot(baseUrl, latencyMs, undefined, err);
+    const hasRss =
+      feedText.includes('<rss') || feedText.includes('<channel') || feedText.includes('<feed');
+    if (hasRss) {
+      return {
+        success: true,
+        latencyMs,
+        httpStatus: feedRes.status,
+        rssWorking: true,
+        message: `Connected (${latencyMs}ms) • RSS feed verified`,
+      };
+    }
   }
+
+  if (feedRes && (feedRes.status === 403 || feedRes.status === 503)) {
+    return {
+      success: false,
+      latencyMs,
+      httpStatus: feedRes.status,
+      rssWorking: false,
+      message: `HTTP ${feedRes.status} • Cloudflare / bot protection active`,
+    };
+  }
+
+  return await pingFallbackRoot(baseUrl, latencyMs, feedRes?.status, lastErr);
 }
 
-async function pingFallbackRoot(baseUrl: string, elapsedMs: number, feedStatus?: number, originalError?: any): Promise<PingResult> {
+async function pingFallbackRoot(
+  baseUrl: string,
+  elapsedMs: number,
+  feedStatus?: number,
+  originalError?: any
+): Promise<PingResult> {
   const rootStart = Date.now();
-  const rootController = new AbortController();
-  const rootTimeout = setTimeout(() => rootController.abort(), 4000);
+  let rootRes: Response | null = null;
+  let rootText = '';
+  let rootErr: any = null;
 
-  try {
-    const rootRes = await fetch(baseUrl, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-      signal: rootController.signal,
-    });
-    clearTimeout(rootTimeout);
-    const totalLatency = elapsedMs + (Date.now() - rootStart);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const rootController = new AbortController();
+    const rootTimeout = setTimeout(() => rootController.abort(), 5000);
 
-    if (rootRes.ok || (rootRes.status >= 200 && rootRes.status < 400)) {
+    try {
+      rootRes = await fetch(baseUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        signal: rootController.signal,
+      });
+
+      clearTimeout(rootTimeout);
+
+      if (rootRes) {
+        rootText = await rootRes.text();
+        break;
+      }
+    } catch (e: any) {
+      clearTimeout(rootTimeout);
+      rootErr = e;
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+  }
+
+  const totalLatency = elapsedMs + (Date.now() - rootStart);
+
+  if (rootRes && (rootRes.ok || (rootRes.status >= 200 && rootRes.status < 400))) {
+    if (isIspCourtBlock(rootText)) {
+      return {
+        success: false,
+        latencyMs: totalLatency,
+        httpStatus: rootRes.status,
+        rssWorking: false,
+        isIspBlocked: true,
+        message: 'ISP Blocked: Access intercepted by ISP (DoT / High Court order). Please select an active mirror (.solar, .fi) below.',
+      };
+    }
+
+    const isTamilMv =
+      (rootText.includes('TamilMV') || rootText.includes('1TamilMV')) &&
+      (rootText.includes('ipsLayout') ||
+        rootText.includes('forum') ||
+        rootText.includes('topic') ||
+        rootText.includes('RECENTLY ADDED'));
+
+    const isParked =
+      rootText.includes('/lander') ||
+      rootText.includes('domain is for sale') ||
+      rootText.includes('GoDaddy') ||
+      rootText.includes('parking');
+
+    if (isTamilMv && !isParked) {
       return {
         success: true,
         latencyMs: totalLatency,
         httpStatus: rootRes.status,
-        rssWorking: false,
-        message: `Base domain reachable (${totalLatency}ms), but RSS endpoint returned ${feedStatus ?? 'error'}`,
+        rssWorking: true,
+        message: `Connected (${totalLatency}ms) • Web portal active`,
       };
     }
 
     return {
-      success: false,
+      success: true,
       latencyMs: totalLatency,
       httpStatus: rootRes.status,
       rssWorking: false,
-      message: `HTTP error ${rootRes.status} from base domain`,
-    };
-  } catch (rootErr: any) {
-    clearTimeout(rootTimeout);
-    const totalLatency = elapsedMs + (Date.now() - rootStart);
-    const errObj = originalError || rootErr;
-    const isTimeout =
-      errObj?.name === 'AbortError' ||
-      errObj?.message?.toLowerCase().includes('timeout') ||
-      errObj?.message?.toLowerCase().includes('aborted');
-
-    return {
-      success: false,
-      latencyMs: totalLatency,
-      rssWorking: false,
-      message: isTimeout ? `Connection timed out (${totalLatency}ms)` : `Unreachable (${errObj?.message || 'Network error'})`,
-      error: errObj?.message,
+      message: `Domain reachable (${totalLatency}ms), but content is invalid or parked.`,
     };
   }
+
+  const errObj = originalError || rootErr;
+  const isReset =
+    errObj?.message?.includes('ECONNRESET') ||
+    errObj?.cause?.code === 'ECONNRESET' ||
+    errObj?.code === 'ECONNRESET';
+  const isTimeout =
+    errObj?.name === 'AbortError' ||
+    errObj?.message?.toLowerCase().includes('timeout') ||
+    errObj?.message?.toLowerCase().includes('aborted');
+
+  let errorMsg = `Unreachable (${errObj?.message || 'Network error'})`;
+  if (isReset) {
+    errorMsg = 'Connection reset by ISP (DPI middlebox). Please select an alternative mirror (.solar, .fi) below.';
+  } else if (isTimeout) {
+    errorMsg = `Connection timed out (${totalLatency}ms). ISP may be throttling or blocking this domain.`;
+  }
+
+  return {
+    success: false,
+    latencyMs: totalLatency,
+    rssWorking: false,
+    isIspBlocked: isReset,
+    message: errorMsg,
+    error: errObj?.message,
+  };
 }
 
 let isAutoDiscovering = false;
@@ -477,48 +612,57 @@ export async function probeRedirectTargets(): Promise<string[]> {
  * Verifies that a domain is live, reachable, and contains real TamilMV forum/RSS content (not parked).
  */
 export async function verifyTamilMVDomain(domainUrl: string): Promise<boolean> {
-  const normalized = domainUrl.trim().replace(/\/+$/, '');
+  const normalized = normalizeTamilMvUrl(domainUrl);
 
   // 1. Quick ping check
   try {
     const ping = await pingTamilMV(normalized);
-    if (ping.success && ping.rssWorking) {
+    if (ping.success && ping.rssWorking && !ping.isIspBlocked) {
       return true;
     }
   } catch {}
 
-  // 2. Direct forum page probe
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-    const testUrl = `${normalized}/index.php?/discover/`;
+  // 2. Direct forum page probe with retry
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const testUrl = `${normalized}/index.php?/discover/`;
 
-    const res = await fetch(testUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Connection': 'close',
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+      const res = await fetch(testUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Connection': 'close',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-    if (res.ok) {
-      const html = await res.text();
-      const isRealTamilMV =
-        (html.includes('TamilMV') || html.includes('1TamilMV')) &&
-        (html.includes('ipsLayout') || html.includes('forum') || html.includes('topic'));
-      const isParked =
-        html.includes('/lander') ||
-        html.includes('domain is for sale') ||
-        html.includes('GoDaddy') ||
-        html.includes('parking');
+      if (res.ok) {
+        const html = await res.text();
+        if (isIspCourtBlock(html)) return false;
 
-      if (isRealTamilMV && !isParked) {
-        return true;
+        const isRealTamilMV =
+          (html.includes('TamilMV') || html.includes('1TamilMV')) &&
+          (html.includes('ipsLayout') || html.includes('forum') || html.includes('topic'));
+        const isParked =
+          html.includes('/lander') ||
+          html.includes('domain is for sale') ||
+          html.includes('GoDaddy') ||
+          html.includes('parking');
+
+        if (isRealTamilMV && !isParked) {
+          return true;
+        }
+      }
+    } catch {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
-  } catch {}
+  }
 
   return false;
 }
@@ -898,64 +1042,90 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
   const forumId = FORUM_IDS[language]?.[category];
   if (!forumId) return [];
 
-  const currentBase = getTamilMVBaseUrl();
-  const mirrorsToTry = [currentBase, ...KNOWN_TAMILMV_MIRRORS.filter((m) => m !== currentBase)];
+  const currentBase = normalizeTamilMvUrl(getTamilMVBaseUrl());
+  const mirrorsToTry = [
+    currentBase,
+    ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
+  ];
 
   let lastError: any = null;
 
   for (const mirror of mirrorsToTry) {
     const rssUrl = `${mirror}/index.php?/forums/forum/${forumId}/all.xml`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    try {
-      const response = await fetch(rssUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-          'Cache-Control': 'no-cache',
-        },
-        signal: controller.signal,
-      });
+    let response: Response | null = null;
+    let xml = '';
 
-      clearTimeout(timeoutId);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8500);
 
-      if (response.ok) {
-        const xml = await response.text();
-        let groups = parseRSSFeed(xml, language, category);
+      try {
+        response = await fetch(rssUrl, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+            'Cache-Control': 'no-cache',
+          },
+          signal: controller.signal,
+        });
 
-        // If RSS returns 0 items, fallback to HTML parsing of forum page 1
-        if (groups.length === 0) {
-          const htmlUrl = `${mirror}/index.php?/forums/forum/${forumId}/`;
-          try {
-            const htmlRes = await fetch(htmlUrl, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-              },
-            });
-            if (htmlRes.ok) {
-              const html = await htmlRes.text();
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const text = await response.text();
+          if (isIspCourtBlock(text)) {
+            response = null;
+            break; // ISP intercepted port, skip to next mirror
+          }
+          xml = text;
+          break;
+        }
+      } catch (e: any) {
+        clearTimeout(timeoutId);
+        lastError = e;
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      }
+    }
+
+    if (response && response.ok && xml) {
+      let groups = parseRSSFeed(xml, language, category);
+
+      // If RSS returns 0 items, fallback to HTML parsing of forum page 1
+      if (groups.length === 0) {
+        const htmlUrl = `${mirror}/index.php?/forums/forum/${forumId}/`;
+        try {
+          const htmlRes = await fetch(htmlUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (htmlRes.ok) {
+            const html = await htmlRes.text();
+            if (!isIspCourtBlock(html)) {
               const parsed = parseCategoryPageHtml(html, mirror, language, category);
               if (parsed.items.length > 0) {
                 groups = parsed.items;
               }
             }
-          } catch {}
-        }
-
-        if (groups.length > 0) {
-          if (mirror !== currentBase) {
-            console.log(`[TamilMV] Active domain failed. Auto-switched to working mirror: ${mirror}`);
-            setTamilMVBaseUrl(mirror).catch(() => {});
           }
-          writeCache(cacheKey, groups);
-          return groups;
-        }
+        } catch {}
       }
-    } catch (e: any) {
-      clearTimeout(timeoutId);
-      lastError = e;
+
+      if (groups.length > 0) {
+        if (mirror !== currentBase) {
+          console.log(`[TamilMV] Active domain failed. Auto-switched to working mirror: ${mirror}`);
+          setTamilMVBaseUrl(mirror).catch(() => {});
+        }
+        writeCache(cacheKey, groups);
+        return groups;
+      }
     }
   }
 
@@ -966,7 +1136,8 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
       const retryUrl = `${discovered}/index.php?/forums/forum/${forumId}/all.xml`;
       const retryRes = await fetch(retryUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
           'Accept': 'application/rss+xml, application/xml, text/xml, */*',
           'Cache-Control': 'no-cache',
         },
@@ -974,10 +1145,12 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
       });
       if (retryRes.ok) {
         const xml = await retryRes.text();
-        const groups = parseRSSFeed(xml, language, category);
-        if (groups.length > 0) {
-          writeCache(cacheKey, groups);
-          return groups;
+        if (!isIspCourtBlock(xml)) {
+          const groups = parseRSSFeed(xml, language, category);
+          if (groups.length > 0) {
+            writeCache(cacheKey, groups);
+            return groups;
+          }
         }
       }
     }
@@ -1140,97 +1313,112 @@ export function cleanTopicTitle(title: string): { name: string; year: string | n
 }
 
 export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ poster: string | null; items: TorrentItem[] }> {
-  const currentBase = getTamilMVBaseUrl();
-  let urlToFetch = topicUrl;
-
-  try {
-    const parsed = new URL(topicUrl);
-    const activeParsed = new URL(currentBase);
-    if (parsed.host !== activeParsed.host) {
-      urlToFetch = `${activeParsed.origin}${parsed.pathname}${parsed.search}`;
-    }
-  } catch {}
-
-  const mirrorsToTry = [urlToFetch];
-  KNOWN_TAMILMV_MIRRORS.forEach(m => {
-    try {
-      const p = new URL(topicUrl);
-      mirrorsToTry.push(`${m}${p.pathname}${p.search}`);
-    } catch {}
-  });
+  const currentBase = normalizeTamilMvUrl(getTamilMVBaseUrl());
+  const mirrorsToTry = [
+    currentBase,
+    ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
+  ];
 
   let lastError: any = null;
 
-  for (const targetUrl of mirrorsToTry) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-
+  for (const mirror of mirrorsToTry) {
+    let finalTopicUrl = topicUrl;
     try {
-      const res = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Connection': 'close',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+      const parsedTopic = new URL(topicUrl);
+      const parsedMirror = new URL(mirror);
+      finalTopicUrl = `${parsedMirror.origin}${parsedTopic.pathname}${parsedTopic.search}`;
+    } catch {
+      if (topicUrl.startsWith('/')) {
+        finalTopicUrl = `${mirror}${topicUrl}`;
+      }
+    }
 
-      if (!res.ok) continue;
+    let res: Response | null = null;
+    let html = '';
 
-      const html = await res.text();
-      const rawMagnets = html.match(/magnet:\?[^\s"'<>]+/gi) || [];
-      const magnets = rawMagnets.map(m => m.replace(/&amp;/g, '&'));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
 
-      let poster: string | null = null;
-      const ipsImgs = [...html.matchAll(/<img[^>]*class=['"][^'"]*ipsImage[^'"]*['"][^>]*src=['"]([^'"]+)['"]/gi)];
-      if (ipsImgs.length > 0) {
-        poster = ipsImgs[0][1];
-      } else {
-        const allImgs = [...html.matchAll(/<img[^>]*src=['"]([^'"]+)['"]/gi)].map(m => m[1]);
-        const candidate = allImgs.find(s =>
-          !s.includes('avatar') &&
-          !s.includes('theme') &&
-          !s.includes('emoticons') &&
-          !s.includes('reactions') &&
-          !s.includes('svg')
-        );
-        if (candidate) poster = candidate;
+      try {
+        res = await fetch(finalTopicUrl, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Connection': 'close',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (res.ok) {
+          html = await res.text();
+          if (isIspCourtBlock(html)) {
+            res = null;
+            break;
+          }
+          break;
+        }
+      } catch (err) {
+        clearTimeout(timeout);
+        lastError = err;
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      }
+    }
+
+    if (!res || !res.ok || !html || isIspCourtBlock(html)) continue;
+
+    const rawMagnets = html.match(/magnet:\?[^\s"'<>]+/gi) || [];
+    const magnets = rawMagnets.map(m => m.replace(/&amp;/g, '&'));
+
+    let poster: string | null = null;
+    const ipsImgs = [...html.matchAll(/<img[^>]*class=['"][^'"]*ipsImage[^'"]*['"][^>]*src=['"]([^'"]+)['"]/gi)];
+    if (ipsImgs.length > 0) {
+      poster = ipsImgs[0][1];
+    } else {
+      const allImgs = [...html.matchAll(/<img[^>]*src=['"]([^'"]+)['"]/gi)].map(m => m[1]);
+      const candidate = allImgs.find(s =>
+        !s.includes('avatar') &&
+        !s.includes('theme') &&
+        !s.includes('emoticons') &&
+        !s.includes('reactions') &&
+        !s.includes('svg')
+      );
+      if (candidate) poster = candidate;
+    }
+
+    const items: TorrentItem[] = magnets.map((magnetUrl, i) => {
+      const dnMatch = magnetUrl.match(/dn=([^&]+)/);
+      let displayName = `Variant ${i + 1}`;
+      if (dnMatch) {
+        try {
+          displayName = decodeURIComponent(dnMatch[1].replace(/\+/g, ' '));
+        } catch {
+          displayName = dnMatch[1].replace(/\+/g, ' ');
+        }
       }
 
-      const items: TorrentItem[] = magnets.map((magnetUrl, i) => {
-        const dnMatch = magnetUrl.match(/dn=([^&]+)/);
-        let displayName = `Variant ${i + 1}`;
-        if (dnMatch) {
-          try {
-            displayName = decodeURIComponent(dnMatch[1].replace(/\+/g, ' '));
-          } catch {
-            displayName = dnMatch[1].replace(/\+/g, ' ');
-          }
-        }
+      const xtMatch = magnetUrl.match(/urn:btih:([a-zA-Z0-9]+)/i);
+      const infoHash = xtMatch ? xtMatch[1] : '';
 
-        const xtMatch = magnetUrl.match(/urn:btih:([a-zA-Z0-9]+)/i);
-        const infoHash = xtMatch ? xtMatch[1] : '';
+      return {
+        guid: `${topicUrl}-magnet-${i}-${infoHash}`,
+        groupid: topicUrl,
+        name: displayName,
+        title: displayName,
+        year: null,
+        language: 'tamil',
+        poster,
+        magnetUrl,
+        infoHash,
+        publishDate: new Date().toISOString(),
+      };
+    });
 
-        return {
-          guid: `${topicUrl}-magnet-${i}-${infoHash}`,
-          groupid: topicUrl,
-          name: displayName,
-          title: displayName,
-          year: null,
-          language: 'tamil',
-          poster,
-          magnetUrl,
-          infoHash,
-          publishDate: new Date().toISOString(),
-        };
-      });
-
-      return { poster, items };
-    } catch (err) {
-      clearTimeout(timeout);
-      lastError = err;
-    }
+    return { poster, items };
   }
 
   throw lastError || new Error('Failed to fetch topic magnets from all mirrors');
@@ -1238,34 +1426,54 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
 
 async function fetchSearchHtml(searchQuery: string, baseUrl: string): Promise<{ html: string; successfulBase: string }> {
   const searchPath = `/index.php?/search/&q=${encodeURIComponent(searchQuery)}&type=forums_topic&search_and_or=or&sortby=relevancy`;
-  const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter(m => m !== baseUrl)];
+  const currentBase = normalizeTamilMvUrl(baseUrl);
+  const mirrorsToTry = [
+    currentBase,
+    ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
+  ];
 
   for (const mirror of mirrorsToTry) {
     const targetUrl = `${mirror}${searchPath}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    let res: Response | null = null;
+    let text = '';
 
-    try {
-      const res = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Connection': 'close',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
 
-      if (res.ok) {
-        const text = await res.text();
-        return { html: text, successfulBase: mirror };
+      try {
+        res = await fetch(targetUrl, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Connection': 'close',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (res.ok) {
+          text = await res.text();
+          if (!isIspCourtBlock(text)) {
+            break;
+          }
+          res = null;
+        }
+      } catch {
+        clearTimeout(timeout);
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
       }
-    } catch {
-      clearTimeout(timeout);
+    }
+
+    if (res && res.ok && text && !isIspCourtBlock(text)) {
+      return { html: text, successfulBase: mirror };
     }
   }
 
-  return { html: '', successfulBase: baseUrl };
+  return { html: '', successfulBase: currentBase };
 }
 
 function parseTamilMVSearchHtml(html: string, successfulBase: string, language: Language | 'all'): GroupedItem[] {
@@ -1497,31 +1705,51 @@ export async function fetchTamilMVHomepageData(
     } catch {}
   }
 
-  const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter((m) => m !== baseUrl)];
+  const currentBase = normalizeTamilMvUrl(baseUrl);
+  const mirrorsToTry = [
+    currentBase,
+    ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
+  ];
   let html = '';
-  let successfulBase = baseUrl;
+  let successfulBase = currentBase;
 
   for (const mirror of mirrorsToTry) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-    try {
-      const res = await fetch(mirror, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Connection': 'close',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      if (res.ok) {
-        html = await res.text();
-        successfulBase = mirror;
-        break;
+    let res: Response | null = null;
+    let text = '';
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      try {
+        res = await fetch(mirror, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Connection': 'close',
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          text = await res.text();
+          if (!isIspCourtBlock(text)) {
+            break;
+          }
+          res = null;
+        }
+      } catch {
+        clearTimeout(timeout);
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
       }
-    } catch {
-      clearTimeout(timeout);
+    }
+
+    if (res && res.ok && text && !isIspCourtBlock(text)) {
+      html = text;
+      successfulBase = mirror;
+      break;
     }
   }
 
@@ -1887,7 +2115,11 @@ export async function fetchTamilMVCategoryPage(
     } catch {}
   }
 
-  const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter((m) => m !== baseUrl)];
+  const currentBase = normalizeTamilMvUrl(baseUrl);
+  const mirrorsToTry = [
+    currentBase,
+    ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
+  ];
 
   for (const mirror of mirrorsToTry) {
     try {
