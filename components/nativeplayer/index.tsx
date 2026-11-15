@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { TouchableOpacity, Animated, Platform, Dimensions, UIManager, useWindowDimensions } from "react-native";
+import { TouchableOpacity, Animated, Platform, Dimensions, UIManager, useWindowDimensions, AppState } from "react-native";
 import Video, { OnLoadData, OnProgressData, VideoRef, OnBufferData, ResizeMode, SelectedTrack } from "react-native-video";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { MenuComponentRef, MenuView } from '@react-native-menu/menu';
@@ -119,22 +119,53 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [availableVideoTracks, setAvailableVideoTracks] = useState<any[]>([]);
     const [videoTrackChecked, setVideoTrackChecked] = useState(false);
     const [dismissAudioAlert, setDismissAudioAlert] = useState(false);
-
-    const videoDimensions = useMemo(() => {
+    const [playerRemountKey, setPlayerRemountKey] = useState(0);
+    const [containerDimensions, setContainerDimensions] = useState<{ width: number; height: number }>(() => {
         const win = Dimensions.get('window');
         const screen = Dimensions.get('screen');
-        const maxDim = Math.max(windowWidth, windowHeight, win.width, win.height, screen.width, screen.height);
-        const minDim = Math.min(
-            windowWidth > 0 ? windowWidth : maxDim,
-            windowHeight > 0 ? windowHeight : maxDim,
-            win.width > 0 ? win.width : maxDim,
-            win.height > 0 ? win.height : maxDim
-        );
+        const w = Math.max(win.width, win.height, screen.width, screen.height);
+        const h = Math.min(win.width, win.height, screen.width, screen.height);
+        return { width: w, height: h };
+    });
+
+    const handleContainerLayout = useCallback((e: any) => {
+        const { width, height } = e.nativeEvent.layout;
+        if (width > 0 && height > 0) {
+            setContainerDimensions(prev => {
+                if (prev.width !== width || prev.height !== height) {
+                    return { width, height };
+                }
+                return prev;
+            });
+        }
+    }, []);
+
+    const handlePictureInPictureStatusChanged = useCallback((data: { isActive: boolean }) => {
+        if (!data.isActive) {
+            setPlayerRemountKey(k => k + 1);
+        }
+    }, []);
+
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (nextState) => {
+            if (nextState === 'active') {
+                setPlayerRemountKey(k => k + 1);
+            }
+        });
+        return () => sub.remove();
+    }, []);
+
+    const computedVideoStyle = useMemo(() => {
+        const w = containerDimensions.width > 0 ? containerDimensions.width : Math.max(windowWidth, windowHeight);
+        const h = containerDimensions.height > 0 ? containerDimensions.height : Math.min(windowWidth, windowHeight);
         return {
-            width: maxDim,
-            height: minDim,
+            position: 'absolute' as const,
+            top: 0,
+            left: 0,
+            width: w,
+            height: h,
         };
-    }, [windowWidth, windowHeight]);
+    }, [containerDimensions, windowWidth, windowHeight]);
 
     // Restore progress
     useEffect(() => {
@@ -305,11 +336,9 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const handleReadyForDisplay = useCallback(() => {
         playerState.setIsReady(true);
         playerState.setIsBuffering(false);
+        setHasRenderedVideo(true);
         Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
-        if (availableVideoTracks.length > 0) {
-            setHasRenderedVideo(true);
-        }
-    }, [bufferOpacity, playerState, availableVideoTracks.length]);
+    }, [bufferOpacity, playerState]);
 
     const handlePlaybackStateChanged = useCallback((e: { isPlaying: boolean; isSeeking: boolean }) => {
         if (e.isPlaying) {
@@ -667,11 +696,12 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     );
 
     return (
-        <View style={styles.container}>
+        <View style={styles.container} onLayout={handleContainerLayout}>
             <Video
+                key={`native-video-${playerRemountKey}`}
                 ref={videoRef}
                 source={videoSource}
-                style={styles.video}
+                style={computedVideoStyle}
                 paused={isPaused}
                 muted={settings.isMuted}
                 rate={settings.playbackSpeed}
@@ -681,6 +711,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 hideShutterView={true}
                 shutterColor="transparent"
                 onReadyForDisplay={handleReadyForDisplay}
+                onPictureInPictureStatusChanged={handlePictureInPictureStatusChanged}
                 onLoad={handleLoad}
                 onProgress={handleProgress}
                 onBuffer={handleBuffer}
