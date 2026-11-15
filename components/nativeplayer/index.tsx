@@ -114,6 +114,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [hasRenderedVideo, setHasRenderedVideo] = useState(false);
 
     // Restore progress
     useEffect(() => {
@@ -208,6 +209,9 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         playerState.setIsBuffering(false);
         setVideoError(null);
         hasReportedErrorRef.current = false;
+        if (data.naturalSize && data.naturalSize.width > 0 && data.naturalSize.height > 0) {
+            setHasRenderedVideo(true);
+        }
 
         Animated.timing(bufferOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
 
@@ -266,6 +270,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, [bufferOpacity, playerState]);
 
     const handleReadyForDisplay = useCallback(() => {
+        setHasRenderedVideo(true);
         playerState.setIsReady(true);
         playerState.setIsBuffering(false);
         Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
@@ -281,7 +286,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
 
     const handleBuffer = useCallback((data: OnBufferData) => {
         if (!isSeeking.current && !playerState.isDragging) {
-            if (isLocalFile && playerState.isReady && data.isBuffering) {
+            if ((isLocalFile || isTorrent || playerState.currentTime > 0) && playerState.isReady && data.isBuffering) {
                 return;
             }
             playerState.setIsBuffering(data.isBuffering);
@@ -291,7 +296,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 useNativeDriver: true
             }).start();
         }
-    }, [bufferOpacity, isLocalFile, playerState]);
+    }, [bufferOpacity, isLocalFile, isTorrent, playerState]);
 
     const handleError = useCallback((error: any) => {
         playerState.setIsBuffering(false);
@@ -496,6 +501,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const handleRetry = useCallback(() => {
         setVideoError(null);
         hasReportedErrorRef.current = false;
+        setHasRenderedVideo(false);
         playerState.setIsReady(false);
         playerState.setIsBuffering(true);
         if (videoRef.current) videoRef.current.seek(0);
@@ -598,15 +604,17 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 },
             };
         }
-        if (isLocalFile) {
-            const isMkv = videoUrl.toLowerCase().includes('.mkv');
-            return {
-                uri: videoUrl,
-                type: isMkv ? 'mkv' : undefined,
-            };
-        }
-        return { uri: videoUrl };
-    }, [videoUrl]);
+        const lowerUrl = videoUrl.toLowerCase();
+        const lowerTitle = (title || '').toLowerCase();
+        const isMp4 = lowerUrl.includes('.mp4') || lowerTitle.includes('.mp4');
+        const isMkv = lowerUrl.includes('.mkv') || lowerTitle.includes('.mkv') || isLocalFile || isTorrent;
+        const streamType = isMp4 ? 'mp4' : (isMkv ? 'mkv' : undefined);
+
+        return {
+            uri: videoUrl,
+            type: streamType,
+        };
+    }, [videoUrl, title, isLocalFile, isTorrent]);
 
     if (videoError) {
         return <ErrorDisplay error={videoError} onBack={handleBack} onRetry={handleRetry} />;
@@ -623,7 +631,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 rate={settings.playbackSpeed}
                 resizeMode={contentFit}
                 ignoreSilentSwitch="ignore"
-                useTextureView={Platform.OS === 'android'}
+                useTextureView={false}
                 hideShutterView={true}
                 shutterColor="transparent"
                 onReadyForDisplay={handleReadyForDisplay}
@@ -653,16 +661,35 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
             <ArtworkBackground
                 artwork={artwork}
                 isBuffering={playerState.isBuffering}
-                hasStartedPlaying={playerState.isReady}
+                hasStartedPlaying={playerState.isReady || playerState.currentTime > 0 || hasRenderedVideo}
                 bufferProgress={effectiveBufferPct}
             />
 
             <WaitingLobby
-                hasStartedPlaying={playerState.isReady}
-                isBuffering={playerState.isBuffering}
+                hasStartedPlaying={playerState.isReady || playerState.currentTime > 0 || hasRenderedVideo}
+                isBuffering={playerState.isBuffering && playerState.currentTime === 0}
                 opacity={bufferOpacity}
                 bufferProgress={effectiveBufferPct}
             />
+
+            {playerState.currentTime > 2.5 && !hasRenderedVideo && (
+                <View style={styles.audioOnlyAlertContainer} pointerEvents="box-none">
+                    <TouchableOpacity
+                        style={styles.audioOnlyAlertBtn}
+                        onPress={handleOpenExternal}
+                        activeOpacity={0.8}
+                    >
+                        <Ionicons name="play-circle-outline" size={26} color="#FF9800" style={{ marginRight: 10 }} />
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.audioOnlyAlertTitle}>Audio playing, but video not showing?</Text>
+                            <Text style={styles.audioOnlyAlertSub}>
+                                This video format (e.g. 10-bit HEVC) may exceed your device's hardware decoder. Tap here to play with full video in VLC.
+                            </Text>
+                        </View>
+                        <MaterialIcons name="chevron-right" size={24} color="#FF9800" />
+                    </TouchableOpacity>
+                </View>
+            )}
 
             <TouchableOpacity style={styles.touchArea} activeOpacity={1} onPress={handleOverlayPress} />
 

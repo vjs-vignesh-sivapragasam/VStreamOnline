@@ -497,4 +497,41 @@ export const styles = StyleSheet.create({
         fontSize: 12,
         marginTop: 2,
     },
+
+    // Audio-Only Alert Pill / Banner
+    audioOnlyAlertContainer: {
+        position: 'absolute',
+        bottom: 90,
+        left: 20,
+        right: 20,
+        alignItems: 'center',
+        zIndex: 50,
+    },
+    audioOnlyAlertBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(20, 20, 24, 0.94)',
+        borderColor: '#FF9800',
+        borderWidth: 1.5,
+        borderRadius: 14,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        maxWidth: 540,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.5,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    audioOnlyAlertTitle: {
+        color: '#FF9800',
+        fontWeight: '700',
+        fontSize: 14,
+        marginBottom: 2,
+    },
+    audioOnlyAlertSub: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        opacity: 0.9,
+    },
 });
