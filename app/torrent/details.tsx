@@ -210,18 +210,45 @@ function getItemLanguages(item: TorrentItem, topicTitle?: string): string[] {
   return result;
 }
 
+function getResolutionWeight(title: string): number {
+  if (/\b(4k|2160p|uhd)\b/i.test(title)) return 4000;
+  if (/\b(1080p|fhd)\b/i.test(title)) return 1080;
+  if (/\b(720p)\b/i.test(title)) return 720;
+  if (/\b(480p|sdtv|dvdrip|sd)\b/i.test(title)) return 480;
+  if (/\b(360p|240p)\b/i.test(title)) return 360;
+  return 500;
+}
+
+function parseFileSizeInBytes(title: string): number {
+  const match = title.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
+  if (!match) return 0;
+  const num = parseFloat(match[1]);
+  const unit = match[2].toUpperCase();
+  if (unit === 'GB') return num * 1024 * 1024 * 1024;
+  if (unit === 'MB') return num * 1024 * 1024;
+  return num;
+}
+
 function parseQualityMeta(title: string) {
   const is4K = /\b(4k|2160p|uhd)\b/i.test(title);
   const is1080p = /\b(1080p|fhd)\b/i.test(title);
-  const is720p = /\b(720p|hd)\b/i.test(title);
+  const is720p = /\b(720p)\b/i.test(title);
+  const is480p = /\b(480p|sdtv|dvdrip|sd)\b/i.test(title);
 
   let resolution = '';
   if (is4K) resolution = '4K UHD';
   else if (is1080p) resolution = '1080p';
   else if (is720p) resolution = '720p';
+  else if (is480p) resolution = '480p';
   else {
     const resMatch = title.match(/\b(\d{3,4}p)\b/i);
     if (resMatch) resolution = resMatch[1];
+    else if (/\b(dvd9)\b/i.test(title)) resolution = 'DVD9';
+    else if (/\b(dvd5)\b/i.test(title)) resolution = 'DVD5';
+    else if (/\b(hdrip)\b/i.test(title)) resolution = 'HDRip';
+    else if (/\b(web-?dl|webrip)\b/i.test(title)) resolution = 'WEB-DL';
+    else if (/\b(x264|hevc|x265|avc)\b/i.test(title)) resolution = 'HDRip';
+    else resolution = 'HD';
   }
 
   const sizeMatch = title.match(/(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
@@ -239,6 +266,7 @@ function parseQualityMeta(title: string) {
     is4K,
     is1080p,
     is720p,
+    is480p,
     resolution,
     fileSize,
     audio,
@@ -352,8 +380,7 @@ const TorrentDetails = () => {
   });
   const [isLoadingVariants, setIsLoadingVariants] = useState(false);
 
-  // When items have no valid magnet URLs (e.g. from TamilMV website search, or Recommended movies),
-  // fetch from topicUrl / groupid, OR auto-search TamilMV by title
+  // Always load full resolutions from the topic webpage, merging with any initial preloaded variants
   useEffect(() => {
     let isMounted = true;
 
@@ -361,29 +388,39 @@ const TorrentDetails = () => {
       try { return JSON.parse(allItemsRaw); } catch { return []; }
     })() : [];
 
-    const hasRealMagnets = rawParsed.length > 0 && rawParsed.some(i => i.magnetUrl && i.magnetUrl.startsWith('magnet:?'));
-    if (hasRealMagnets) {
+    // Immediately display preloaded items with zero waiting delay
+    if (rawParsed.length > 0) {
       setItems(rawParsed);
-      setIsLoadingVariants(false);
-      return;
     }
 
-    const targetUrl = topicUrl || (groupid?.startsWith('http') ? groupid : null) || (rawParsed[0]?.groupid?.startsWith('http') ? rawParsed[0].groupid : null);
+    const targetUrl =
+      topicUrl ||
+      (groupid?.startsWith('http') ? groupid : null) ||
+      (rawParsed[0]?.groupid?.startsWith('http') ? rawParsed[0].groupid : null) ||
+      (rawParsed[0]?.guid?.startsWith('http') && rawParsed[0].guid.includes('/forums/topic/') ? rawParsed[0].guid : null);
+
     if (targetUrl) {
-      setIsLoadingVariants(true);
+      setIsLoadingVariants(rawParsed.length === 0);
       fetchTamilMVTopicMagnets(targetUrl)
-        .then(res => {
-          if (isMounted) {
-            if (res.items.length > 0) {
-              setItems(res.items);
-            } else {
-              setItems(rawParsed);
-            }
+        .then((res) => {
+          if (isMounted && res.items.length > 0) {
+            // Merge all resolutions from the webpage and deduplicate by infoHash or magnetUrl
+            const map = new Map<string, TorrentItem>();
+            res.items.forEach((it) => {
+              const key = (it.infoHash || it.magnetUrl || it.title).toLowerCase();
+              map.set(key, it);
+            });
+            rawParsed.forEach((it) => {
+              const key = (it.infoHash || it.magnetUrl || it.title).toLowerCase();
+              if (!map.has(key)) {
+                map.set(key, it);
+              }
+            });
+            setItems(Array.from(map.values()));
           }
         })
-        .catch(err => {
-          console.warn('[TorrentDetails] Failed to fetch topic magnets:', err);
-          if (isMounted) setItems(rawParsed);
+        .catch((err) => {
+          console.warn('[TorrentDetails] Failed to fetch topic magnets from web view:', err);
         })
         .finally(() => {
           if (isMounted) setIsLoadingVariants(false);
@@ -394,20 +431,20 @@ const TorrentDetails = () => {
     // Auto-search TamilMV when opened with just a title (e.g. Recommended or Similar movies)
     const searchTitle = getMovieSearchTitle(title);
     if (searchTitle) {
-      setIsLoadingVariants(true);
+      setIsLoadingVariants(rawParsed.length === 0);
       searchTamilMV(searchTitle, 'all')
         .then(async (groups) => {
           if (!isMounted) return;
           if (groups && groups.length > 0) {
             const targetYear = publishDate ? new Date(publishDate).getFullYear().toString() : null;
             let candidateGroup = targetYear
-              ? groups.find(g => g.year === targetYear) || groups[0]
+              ? groups.find((g) => g.year === targetYear) || groups[0]
               : groups[0];
 
-            const candidateGroups = [candidateGroup, ...groups.filter(g => g !== candidateGroup)].slice(0, 3);
+            const candidateGroups = [candidateGroup, ...groups.filter((g) => g !== candidateGroup)].slice(0, 3);
 
             for (const grp of candidateGroups) {
-              const bestCandidate = grp.items.find(i => i.groupid?.startsWith('http')) || grp.items[0];
+              const bestCandidate = grp.items.find((i) => i.groupid?.startsWith('http')) || grp.items[0];
               const topic = bestCandidate?.groupid || bestCandidate?.guid;
               if (topic && topic.startsWith('http')) {
                 try {
@@ -422,13 +459,13 @@ const TorrentDetails = () => {
               }
             }
           }
-          if (isMounted) {
+          if (isMounted && rawParsed.length === 0) {
             setItems([]);
           }
         })
-        .catch(err => {
+        .catch((err) => {
           console.warn('[TorrentDetails] Auto-search failed for title:', searchTitle, err);
-          if (isMounted) setItems([]);
+          if (isMounted && rawParsed.length === 0) setItems([]);
         })
         .finally(() => {
           if (isMounted) setIsLoadingVariants(false);
@@ -583,10 +620,22 @@ const TorrentDetails = () => {
   }, [allItems, availableLanguages, title]);
 
   const filteredModalItems = useMemo(() => {
-    if (selectedModalLanguage === 'All') return allItems;
-    return allItems.filter((item) => {
-      const langs = getItemLanguages(item, title);
-      return langs.some((l) => l.toLowerCase() === selectedModalLanguage.toLowerCase());
+    let list = allItems;
+    if (selectedModalLanguage !== 'All') {
+      const filtered = allItems.filter((item) => {
+        const langs = getItemLanguages(item, title);
+        return langs.some((l) => l.toLowerCase() === selectedModalLanguage.toLowerCase());
+      });
+      list = filtered.length > 0 ? filtered : allItems;
+    }
+
+    return [...list].sort((a, b) => {
+      const wA = getResolutionWeight(a.title);
+      const wB = getResolutionWeight(b.title);
+      if (wA !== wB) return wB - wA; // Highest resolution first
+      const sA = parseFileSizeInBytes(a.title);
+      const sB = parseFileSizeInBytes(b.title);
+      return sB - sA; // Highest file size first
     });
   }, [allItems, selectedModalLanguage, title]);
 

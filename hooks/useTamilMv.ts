@@ -876,18 +876,9 @@ const LOW_QUALITY_REGEX = /(480p|720p|360p|240p)/i;
 const TITLE_YEAR_REGEX = /^([^(]+)\s*\((\d{4})\)/;
 
 function isValidQuality(displayName: string, category: Category): boolean {
-  if (category === 'predvd') {
-    // In PreDVD category: allow PreDVD, HQ Clean, 1080p, 720p, etc. Filter out blurry CAM / telesync / hdts
-    const INVALID = /\s(cam|unknown|telesync|hdts|camrip)\s/i;
-    const LOW_RES = /(360p|240p)/i;
-    return !INVALID.test(displayName) && !LOW_RES.test(displayName);
-  }
-  if (category === 'dvd' || category === 'hdtv') {
-    // In DVD and HDTV categories: allow DVD9, DVD5, Untouched, Remux, ISO, 480p/576p SDTV/HDTV
-    const INVALID = /\s(cam|unknown|telesync|hdts|camrip)\s/i;
-    return !INVALID.test(displayName);
-  }
-  return !INVALID_RELEASE_REGEX.test(displayName) && !LOW_QUALITY_REGEX.test(displayName);
+  if (!displayName || !displayName.trim()) return false;
+  // Allow all resolutions (4K, 1080p, 720p, 480p, HDTV, etc.) without discarding lower or variant qualities
+  return true;
 }
 
 function extractTitleYear(title: string): { name: string | null; year: string | null } {
@@ -1373,6 +1364,7 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
 
     const rawMagnets = html.match(/magnet:\?[^\s"'<>]+/gi) || [];
     const magnets = rawMagnets.map(m => m.replace(/&amp;/g, '&'));
+    const uniqueMagnets = Array.from(new Set(magnets));
 
     let poster: string | null = null;
     const ipsImgs = [...html.matchAll(/<img[^>]*class=['"][^'"]*ipsImage[^'"]*['"][^>]*src=['"]([^'"]+)['"]/gi)];
@@ -1390,15 +1382,33 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
       if (candidate) poster = candidate;
     }
 
-    const items: TorrentItem[] = magnets.map((magnetUrl, i) => {
+    const items: TorrentItem[] = uniqueMagnets.map((magnetUrl, i) => {
       const dnMatch = magnetUrl.match(/dn=([^&]+)/);
-      let displayName = `Variant ${i + 1}`;
+      let displayName = '';
       if (dnMatch) {
         try {
           displayName = decodeURIComponent(dnMatch[1].replace(/\+/g, ' '));
         } catch {
           displayName = dnMatch[1].replace(/\+/g, ' ');
         }
+      }
+
+      // If dn was not in magnet URL, search HTML for preceding attachment link or text
+      if (!displayName || displayName.startsWith('Variant')) {
+        const magIdx = html.indexOf(magnetUrl);
+        if (magIdx > 0) {
+          const prevChunk = html.slice(Math.max(0, magIdx - 400), magIdx);
+          const attachMatch = prevChunk.match(/attachment\.php[^>]*>([^<]+(?:mkv|mp4|avi|torrent))/i)
+            || prevChunk.match(/<strong[^>]*>([\s\S]*?)<\/strong>/i)
+            || prevChunk.match(/<b[^>]*>([\s\S]*?)<\/b>/i);
+          if (attachMatch) {
+            displayName = attachMatch[1].replace(/<[^>]+>/g, '').replace(/\.torrent$/i, '').trim();
+          }
+        }
+      }
+
+      if (!displayName) {
+        displayName = `Variant ${i + 1}`;
       }
 
       const xtMatch = magnetUrl.match(/urn:btih:([a-zA-Z0-9]+)/i);
