@@ -1,5 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, Pressable, View, ScrollView, Modal, TouchableOpacity, Platform } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  StyleSheet,
+  Pressable,
+  View,
+  ScrollView,
+  Modal,
+  TouchableOpacity,
+  Platform,
+} from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { StatusBar, Text } from '@/components/Themed';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -10,13 +18,16 @@ import BottomSpacing from '@/components/BottomSpacing';
 import Constants from 'expo-constants';
 import BlurGradientBackground from '@/components/BlurGradientBackground';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
 import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
-import { isScreenKeepAwakeEnabled, isBackgroundAudioKeepAliveEnabled } from '@/utils/StremioKeepAliveManager';
-
+import {
+  isScreenKeepAwakeEnabled,
+  isBackgroundAudioKeepAliveEnabled,
+} from '@/utils/StremioKeepAliveManager';
 
 const PopupSheet: React.FC<{ children: React.ReactNode; style: any }> = ({ children, style }) => {
   if (Platform.OS === 'ios') {
@@ -29,9 +40,82 @@ const PopupSheet: React.FC<{ children: React.ReactNode; style: any }> = ({ child
   return <View style={style}>{children}</View>;
 };
 
+interface SettingItemProps {
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  subtitle?: string;
+  badgeText?: string;
+  badgeColor?: string;
+  onPress: () => void;
+  isFirst?: boolean;
+  isLast?: boolean;
+}
+
+const SettingItem: React.FC<SettingItemProps> = ({
+  title,
+  icon,
+  subtitle,
+  badgeText,
+  badgeColor,
+  onPress,
+  isFirst = false,
+  isLast = false,
+}) => {
+  const { theme } = useTheme();
+  const [isPressed, setIsPressed] = useState(false);
+
+  return (
+    <Pressable
+      style={[
+        styles.settingItem,
+        {
+          backgroundColor: isPressed ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+          borderTopLeftRadius: isFirst ? 18 : 0,
+          borderTopRightRadius: isFirst ? 18 : 0,
+          borderBottomLeftRadius: isLast ? 18 : 0,
+          borderBottomRightRadius: isLast ? 18 : 0,
+        },
+      ]}
+      onPress={onPress}
+      onPressIn={() => setIsPressed(true)}
+      onPressOut={() => setIsPressed(false)}
+    >
+      <View style={styles.leftContent}>
+        <View style={[styles.iconContainer, { backgroundColor: theme.iconBg || 'rgba(255,255,255,0.08)' }]}>
+          <Ionicons name={icon} size={20} color={theme.primary} />
+        </View>
+        <View style={styles.textContainer}>
+          <Text style={styles.settingText}>{title}</Text>
+          {subtitle ? <Text style={styles.settingSubtitle}>{subtitle}</Text> : null}
+        </View>
+      </View>
+      <View style={styles.rightContent}>
+        {badgeText ? (
+          <View
+            style={[
+              styles.menuBadge,
+              {
+                backgroundColor: (badgeColor || theme.primary) + '18',
+                borderColor: (badgeColor || theme.primary) + '40',
+              },
+            ]}
+          >
+            <View style={[styles.menuBadgeDot, { backgroundColor: badgeColor || theme.primary }]} />
+            <Text style={[styles.menuBadgeText, { color: badgeColor || theme.primary }]}>
+              {badgeText}
+            </Text>
+          </View>
+        ) : null}
+        <MaterialIcons name="chevron-right" size={22} color="rgba(255, 255, 255, 0.3)" />
+      </View>
+      {!isLast && <View style={styles.separator} />}
+    </Pressable>
+  );
+};
+
 const SettingsScreen = () => {
   const router = useRouter();
-  const appVersion = Constants.expoConfig?.version;
+  const appVersion = Constants.expoConfig?.version || '1.0.0';
   const { theme } = useTheme();
 
   // Modals for Theme Selection & Storage Cleanup
@@ -42,9 +126,9 @@ const SettingsScreen = () => {
   const [screenKeepAwake, setScreenKeepAwake] = useState(true);
   const [bgAudioKeepAlive, setBgAudioKeepAlive] = useState(false);
 
-  const loadDataStats = useCallback(async () => {
+  const loadDataStats = useCallback(async (force = false) => {
     try {
-      const stats = await dataConsumptionService.getDataConsumptionStats();
+      const stats = await dataConsumptionService.getDataConsumptionStats(force);
       setDataStats(stats);
     } catch (err) {
       console.warn('[Settings] Failed to load data consumption stats:', err);
@@ -53,159 +137,118 @@ const SettingsScreen = () => {
 
   useFocusEffect(
     useCallback(() => {
+      // 1. Fast synchronous updates (immediate UI response)
       setNotifEnabled(tamilMVNotificationService.isNotificationsEnabled());
       setScreenKeepAwake(isScreenKeepAwakeEnabled());
       setBgAudioKeepAlive(isBackgroundAudioKeepAliveEnabled());
-      loadDataStats();
+
+      // 2. Defer heavy I/O calculation until after tab transition completes
+      const timer = setTimeout(() => {
+        loadDataStats();
+      }, 100);
+
+      return () => clearTimeout(timer);
     }, [loadDataStats])
   );
 
-  useEffect(() => {
-    loadDataStats();
-  }, [loadDataStats, storageModalVisible]);
-
-  const sourceList: {
-    title: string;
-    route: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    subtitle?: string;
-    badgeText?: string;
-    badgeColor?: string;
-  }[] = [
-    {
-      title: 'Connection & Movie Alerts',
-      route: '/settings/tamilmv',
-      icon: 'globe-outline',
-      subtitle: 'Mirror domain & push notification alerts',
-      badgeText: notifEnabled ? 'Alerts On' : undefined,
-      badgeColor: '#30d158',
-    },
-  ];
-
-  const integrationList: {
-    title: string;
-    route: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    subtitle?: string;
-    badgeText?: string;
-    badgeColor?: string;
-  }[] = [
-    {
-      title: 'Server',
-      route: '/settings/stremioserver',
-      icon: 'server-outline',
-      subtitle: screenKeepAwake
-        ? 'Streaming server & screen keep-awake active'
-        : 'Streaming server configuration',
-      badgeText: screenKeepAwake ? 'Keep Awake On' : undefined,
-      badgeColor: '#30d158',
-    },
-    { title: 'OpenSubtitles', route: '/settings/opensubtitles', icon: 'chatbox-ellipses-outline' },
-  ];
-
-  const generalList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'About Us', route: '/settings/about', icon: 'information-circle-outline' },
-  ];
-
-  const SettingItem = ({
-    title,
-    icon,
-    subtitle,
-    badgeText,
-    badgeColor,
-    onPress,
-    isFirst = false,
-    isLast = false,
-  }: {
-    title: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    subtitle?: string;
-    badgeText?: string;
-    badgeColor?: string;
-    onPress: () => void;
-    isFirst?: boolean;
-    isLast?: boolean;
-  }) => {
-    const [isPressed, setIsPressed] = useState(false);
-
-    return (
-      <Pressable
-        style={[
-          styles.settingItem,
-          {
-            backgroundColor: isPressed ? '#1a1a1a' : '#101010',
-            borderTopLeftRadius: isFirst ? 12 : 0,
-            borderTopRightRadius: isFirst ? 12 : 0,
-            borderBottomLeftRadius: isLast ? 12 : 0,
-            borderBottomRightRadius: isLast ? 12 : 0,
-          },
-        ]}
-        onPress={onPress}
-        onPressIn={() => setIsPressed(true)}
-        onPressOut={() => setIsPressed(false)}
-      >
-        <View style={styles.leftContent}>
-          <View style={[styles.iconContainer, { backgroundColor: theme.iconBg }]}>
-            <Ionicons name={icon} size={22} color={theme.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.settingText}>{title}</Text>
-            {subtitle ? <Text style={styles.settingSubtitle}>{subtitle}</Text> : null}
-          </View>
-        </View>
-        <View style={styles.rightContent}>
-          {badgeText ? (
-            <View
-              style={[
-                styles.menuBadge,
-                {
-                  backgroundColor: (badgeColor || theme.primary) + '1A',
-                  borderColor: (badgeColor || theme.primary) + '44',
-                },
-              ]}
-            >
-              <View style={[styles.menuBadgeDot, { backgroundColor: badgeColor || theme.primary }]} />
-              <Text style={[styles.menuBadgeText, { color: badgeColor || theme.primary }]}>
-                {badgeText}
-              </Text>
-            </View>
-          ) : null}
-          <MaterialIcons name="chevron-right" size={22} color="#6E6E73" />
-        </View>
-        {!isLast && <View style={styles.separator} />}
-      </Pressable>
-    );
-  };
-
-  const onSettingsItemPress = async (item: any) => {
+  const triggerHaptic = async () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    router.push({ pathname: item.route });
+  };
+
+  const onSettingsItemPress = async (route: string) => {
+    await triggerHaptic();
+    router.push({ pathname: route as any });
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar />
       <BlurGradientBackground />
-      <ScrollView contentContainerStyle={styles.scrollViewContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollViewContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Top Header */}
         <View style={styles.headerContainer}>
           <Text style={styles.headerTitle}>Settings</Text>
+          <Text style={styles.headerSubtitle}>Preferences, streaming engine & system</Text>
         </View>
 
-        {/* Appearance & Theme Section */}
+        {/* Hero Branding & Live Status Card */}
+        <View style={styles.heroCardWrapper}>
+          <LinearGradient
+            colors={['rgba(35, 35, 45, 0.75)', 'rgba(18, 18, 24, 0.95)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.heroCard}
+          >
+            <View style={styles.heroTopRow}>
+              <View
+                style={[
+                  styles.heroAppBadge,
+                  {
+                    backgroundColor: theme.primary + '18',
+                    borderColor: theme.primary + '40',
+                  },
+                ]}
+              >
+                <Ionicons name="film" size={24} color={theme.primary} />
+              </View>
+              <View style={styles.heroInfo}>
+                <View style={styles.heroTitleRow}>
+                  <Text style={styles.heroTitle}>VStream Online</Text>
+                  <View style={[styles.heroPill, { backgroundColor: theme.primary + '22' }]}>
+                    <Text style={[styles.heroPillText, { color: theme.primary }]}>PRO</Text>
+                  </View>
+                </View>
+                <Text style={styles.heroVersionText}>
+                  v{appVersion} • Hybrid Streaming Client
+                </Text>
+              </View>
+            </View>
+
+            {/* Quick Status Chips */}
+            <View style={styles.heroDivider} />
+            <View style={styles.heroChipsRow}>
+              <View style={styles.statusChip}>
+                <View style={[styles.statusDot, { backgroundColor: '#30d158' }]} />
+                <Text style={styles.statusChipText}>Engine Online</Text>
+              </View>
+              <View style={styles.statusChip}>
+                <View
+                  style={[
+                    styles.statusDot,
+                    { backgroundColor: notifEnabled ? '#30d158' : '#8E8E93' },
+                  ]}
+                />
+                <Text style={styles.statusChipText}>
+                  {notifEnabled ? 'Alerts On' : 'Alerts Off'}
+                </Text>
+              </View>
+              <View style={styles.statusChip}>
+                <View style={[styles.statusDot, { backgroundColor: theme.primary }]} />
+                <Text style={styles.statusChipText} numberOfLines={1}>
+                  {theme.displayName || theme.name}
+                </Text>
+              </View>
+            </View>
+          </LinearGradient>
+        </View>
+
+        {/* Section 1: Appearance & Theme */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>APPEARANCE</Text>
+          <Text style={styles.sectionHeader}>APPEARANCE & DISPLAY</Text>
           <View style={styles.settingsGroup}>
             <SettingItem
               title="Theme Selection"
               icon="color-palette-outline"
+              subtitle="Personalize accent colors & dark theme"
               badgeText={theme.displayName || theme.name}
               badgeColor={theme.primary}
               onPress={async () => {
-                if (await isHapticsSupported()) {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
+                await triggerHaptic();
                 setThemeModalVisible(true);
               }}
               isFirst={true}
@@ -214,24 +257,22 @@ const SettingsScreen = () => {
           </View>
         </View>
 
-        {/* Storage & Data Section */}
+        {/* Section 2: Storage & Data Saver */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>STORAGE & DATA</Text>
+          <Text style={styles.sectionHeader}>STORAGE & DATA SAVER</Text>
           <View style={styles.settingsGroup}>
             <SettingItem
-              title="Storage & Data"
+              title="Storage & Data Saver"
               icon="pie-chart-outline"
               subtitle={
                 dataStats
                   ? `${dataStats.todayFormatted} today • ${dataStats.overallFormatted} total`
-                  : 'Manage storage & clear cache'
+                  : 'Manage cache, offline media & disk usage'
               }
               badgeText={dataStats ? dataStats.todayFormatted : undefined}
               badgeColor="#30d158"
               onPress={async () => {
-                if (await isHapticsSupported()) {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
+                await triggerHaptic();
                 setStorageModalVisible(true);
               }}
               isFirst={true}
@@ -240,76 +281,88 @@ const SettingsScreen = () => {
           </View>
         </View>
 
-        {/* Content Sources Section */}
-        {sourceList.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionHeader}>CONNECTION</Text>
-            <View style={styles.settingsGroup}>
-              {sourceList.map((item, index) => (
-                <SettingItem
-                  key={index}
-                  title={item.title}
-                  icon={item.icon}
-                  subtitle={item.subtitle}
-                  badgeText={item.badgeText}
-                  badgeColor={item.badgeColor}
-                  onPress={() => onSettingsItemPress(item)}
-                  isFirst={index === 0}
-                  isLast={index === sourceList.length - 1}
-                />
-              ))}
-            </View>
+        {/* Section 3: Connection & Alerts */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>SERVICES & NOTIFICATIONS</Text>
+          <View style={styles.settingsGroup}>
+            <SettingItem
+              title="Connection & Movie Alerts"
+              icon="globe-outline"
+              subtitle="Mirror domain, background sync & push notifications"
+              badgeText={notifEnabled ? 'Alerts On' : undefined}
+              badgeColor="#30d158"
+              onPress={() => onSettingsItemPress('/settings/tamilmv')}
+              isFirst={true}
+              isLast={true}
+            />
           </View>
-        )}
-
-        {/* Integrations Section */}
-        {integrationList.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionHeader}>INTEGRATIONS</Text>
-            <View style={styles.settingsGroup}>
-              {integrationList.map((item, index) => (
-                <SettingItem
-                  key={index}
-                  title={item.title}
-                  icon={item.icon}
-                  subtitle={item.subtitle}
-                  badgeText={item.badgeText}
-                  badgeColor={item.badgeColor}
-                  onPress={() => onSettingsItemPress(item)}
-                  isFirst={index === 0}
-                  isLast={index === integrationList.length - 1}
-                />
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* General / About Section */}
-        {generalList.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionHeader}>ABOUT & INFO</Text>
-            <View style={styles.settingsGroup}>
-              {generalList.map((item, index) => (
-                <SettingItem
-                  key={index}
-                  title={item.title}
-                  icon={item.icon}
-                  onPress={() => onSettingsItemPress(item)}
-                  isFirst={index === 0}
-                  isLast={index === generalList.length - 1}
-                />
-              ))}
-            </View>
-          </View>
-        )}
-
-        <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>Version {appVersion}</Text>
         </View>
+
+        {/* Section 4: Streaming & Integrations */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>STREAMING ENGINE & INTEGRATIONS</Text>
+          <View style={styles.settingsGroup}>
+            <SettingItem
+              title="Streaming Server"
+              icon="server-outline"
+              subtitle={
+                screenKeepAwake
+                  ? 'Keep-awake active • Local streaming engine'
+                  : 'Streaming engine configuration'
+              }
+              badgeText={screenKeepAwake ? 'Keep Awake On' : undefined}
+              badgeColor="#30d158"
+              onPress={() => onSettingsItemPress('/settings/stremioserver')}
+              isFirst={true}
+              isLast={false}
+            />
+            <SettingItem
+              title="OpenSubtitles"
+              icon="chatbox-ellipses-outline"
+              subtitle="Multilingual subtitle credentials & auto-load"
+              onPress={() => onSettingsItemPress('/settings/opensubtitles')}
+              isFirst={false}
+              isLast={false}
+            />
+            <SettingItem
+              title="TMDB Metadata"
+              icon="film-outline"
+              subtitle="Movie posters, backdrops & metadata credentials"
+              onPress={() => onSettingsItemPress('/settings/tmdb')}
+              isFirst={false}
+              isLast={true}
+            />
+          </View>
+        </View>
+
+        {/* Section 5: About & System */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>SYSTEM & ABOUT</Text>
+          <View style={styles.settingsGroup}>
+            <SettingItem
+              title="About Us"
+              icon="information-circle-outline"
+              subtitle="Version, licenses & open source acknowledgments"
+              onPress={() => onSettingsItemPress('/settings/about')}
+              isFirst={true}
+              isLast={true}
+            />
+          </View>
+        </View>
+
+        {/* Footer info */}
+        <View style={styles.footerContainer}>
+          <View style={styles.footerBadge}>
+            <Ionicons name="sparkles" size={14} color={theme.primary} />
+            <Text style={styles.footerText}>VStream Online v{appVersion}</Text>
+          </View>
+          <Text style={styles.footerSubText}>Designed for high-performance streaming</Text>
+        </View>
+
         <BottomSpacing space={50} />
       </ScrollView>
 
-      {/* Theme Selection Popup Modal */}
+      {/* Theme Selection Modal (Lazy Mounted) */}
       <Modal
         visible={themeModalVisible}
         transparent={true}
@@ -321,18 +374,18 @@ const SettingsScreen = () => {
           <PopupSheet style={styles.popupSheet}>
             <View style={styles.modalDragHandle} />
             <View style={styles.popupHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={styles.popupHeaderTitleGroup}>
                 <View style={[styles.popupIconBox, { backgroundColor: theme.iconBg }]}>
-                  <Ionicons name="color-palette" size={20} color={theme.primary} />
+                  <Ionicons name="color-palette" size={18} color={theme.primary} />
                 </View>
                 <Text style={styles.popupTitle}>Theme Selection</Text>
               </View>
               <TouchableOpacity
                 onPress={() => setThemeModalVisible(false)}
                 style={styles.popupCloseButton}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Ionicons name="close" size={20} color="#ffffff" />
+                <Ionicons name="close" size={18} color="#ffffff" />
               </TouchableOpacity>
             </View>
             <ScrollView
@@ -340,13 +393,15 @@ const SettingsScreen = () => {
               contentContainerStyle={styles.popupScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              <ThemeSelector showPreviewBar={false} showNavigationLink={true} />
+              {themeModalVisible && (
+                <ThemeSelector showPreviewBar={false} showNavigationLink={true} />
+              )}
             </ScrollView>
           </PopupSheet>
         </View>
       </Modal>
 
-      {/* Storage & Data Cleanup Popup Modal */}
+      {/* Storage & Data Cleanup Modal (Lazy Mounted) */}
       <Modal
         visible={storageModalVisible}
         transparent={true}
@@ -358,18 +413,18 @@ const SettingsScreen = () => {
           <PopupSheet style={styles.popupSheet}>
             <View style={styles.modalDragHandle} />
             <View style={styles.popupHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={styles.popupHeaderTitleGroup}>
                 <View style={[styles.popupIconBox, { backgroundColor: theme.iconBg }]}>
-                  <Ionicons name="server-outline" size={20} color={theme.primary} />
+                  <Ionicons name="server-outline" size={18} color={theme.primary} />
                 </View>
                 <Text style={styles.popupTitle}>Storage & Data Cleanup</Text>
               </View>
               <TouchableOpacity
                 onPress={() => setStorageModalVisible(false)}
                 style={styles.popupCloseButton}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Ionicons name="close" size={20} color="#ffffff" />
+                <Ionicons name="close" size={18} color="#ffffff" />
               </TouchableOpacity>
             </View>
             <ScrollView
@@ -377,7 +432,9 @@ const SettingsScreen = () => {
               contentContainerStyle={styles.popupScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              <StorageCleanupCard onStatsChange={loadDataStats} />
+              {storageModalVisible && (
+                <StorageCleanupCard onStatsChange={() => loadDataStats(true)} />
+              )}
             </ScrollView>
           </PopupSheet>
         </View>
@@ -394,43 +451,142 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     maxWidth: 780,
     width: '100%',
+    alignSelf: 'center',
   },
   headerContainer: {
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 24,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
   headerTitle: {
-    fontSize: 34,
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: -0.5,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginTop: 2,
+    letterSpacing: -0.1,
+  },
+
+  /* Hero Card */
+  heroCardWrapper: {
+    marginHorizontal: 16,
+    marginBottom: 26,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  heroCard: {
+    padding: 16,
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroAppBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  heroInfo: {
+    flex: 1,
+  },
+  heroTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroTitle: {
+    fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
-    letterSpacing: 0.3,
+    letterSpacing: -0.3,
   },
+  heroPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  heroPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  heroVersionText: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 3,
+  },
+  heroDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginVertical: 14,
+  },
+  heroChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  statusChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    gap: 6,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusChipText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#A0A0A5',
+  },
+
+  /* Sections & Groups */
   section: {
-    marginBottom: 32,
+    marginBottom: 24,
   },
   sectionHeader: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '600',
     textTransform: 'uppercase',
     color: '#8E8E93',
-    marginBottom: 10,
+    marginBottom: 8,
     marginLeft: 20,
     marginRight: 20,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
   settingsGroup: {
     marginHorizontal: 16,
+    backgroundColor: '#13131A',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
     overflow: 'hidden',
-    borderRadius: 12,
   },
   settingItem: {
     flexDirection: 'row',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
     justifyContent: 'space-between',
     alignItems: 'center',
-    minHeight: 52,
+    minHeight: 56,
     position: 'relative',
   },
   leftContent: {
@@ -439,16 +595,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
+  textContainer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   settingText: {
-    fontSize: 17,
-    fontWeight: '400',
+    fontSize: 15.5,
+    fontWeight: '500',
     color: '#FFFFFF',
     letterSpacing: -0.2,
   },
@@ -462,13 +622,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginLeft: 10,
   },
   menuBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 9,
+    paddingVertical: 3.5,
     borderRadius: 12,
     borderWidth: 1,
   },
@@ -478,30 +639,47 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   menuBadgeText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '600',
     letterSpacing: -0.1,
   },
   separator: {
     position: 'absolute',
     bottom: 0,
-    left: 60,
-    right: 16,
+    left: 62,
+    right: 14,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
   },
-  versionContainer: {
-    paddingVertical: 20,
-    flexDirection: 'row',
-    justifyContent: 'center',
+
+  /* Footer */
+  footerContainer: {
+    paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'center',
+    gap: 6,
   },
-  versionText: {
-    fontSize: 13,
-    color: '#6E6E73',
-    fontWeight: '500',
-    letterSpacing: 0.2,
+  footerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  footerText: {
+    fontSize: 12.5,
+    color: '#8E8E93',
+    fontWeight: '600',
+    letterSpacing: 0.1,
+  },
+  footerSubText: {
+    fontSize: 11,
+    color: '#55555C',
+    fontWeight: '400',
   },
 
   /* Bottom sheet popup styles */
@@ -514,9 +692,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   popupSheet: {
-    backgroundColor: 'rgba(18, 18, 22, 0.96)',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: 'rgba(18, 18, 24, 0.96)',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.12)',
     paddingTop: 10,
@@ -526,7 +704,7 @@ const styles = StyleSheet.create({
   modalDragHandle: {
     width: 38,
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.28)',
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 12,
@@ -538,6 +716,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 14,
   },
+  popupHeaderTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   popupIconBox: {
     width: 32,
     height: 32,
@@ -547,15 +730,15 @@ const styles = StyleSheet.create({
   },
   popupTitle: {
     color: '#ffffff',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    letterSpacing: 0.2,
+    letterSpacing: -0.2,
   },
   popupCloseButton: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },

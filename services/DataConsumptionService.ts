@@ -42,6 +42,8 @@ class DataConsumptionService {
   private inMemoryOverallStreamSeconds = 0;
   private isLoaded = false;
   private persistTimer: NodeJS.Timeout | null = null;
+  private cachedCacheBytes = 0;
+  private lastCacheScanTime = 0;
 
   constructor() {
     this.hydrate();
@@ -172,7 +174,7 @@ class DataConsumptionService {
   }
 
   // Get full data consumption metrics
-  async getDataConsumptionStats(): Promise<DataConsumptionStats> {
+  async getDataConsumptionStats(forceRefresh = false): Promise<DataConsumptionStats> {
     if (!this.isLoaded) {
       await this.hydrate();
     }
@@ -194,13 +196,18 @@ class DataConsumptionService {
       }
     }
 
-    // 2. Calculate Cache Bytes
-    let cacheBytes = 0;
-    try {
-      const cacheDir = new Directory(Paths.cache);
-      cacheBytes = this.calculateDirectorySize(cacheDir);
-    } catch {
-      cacheBytes = 0;
+    // 2. Calculate Cache Bytes (cached for 15s to avoid freezing JS thread on navigation)
+    let cacheBytes = this.cachedCacheBytes;
+    const now = Date.now();
+    if (forceRefresh || now - this.lastCacheScanTime > 15000) {
+      try {
+        const cacheDir = new Directory(Paths.cache);
+        cacheBytes = this.calculateDirectorySize(cacheDir);
+        this.cachedCacheBytes = cacheBytes;
+        this.lastCacheScanTime = now;
+      } catch {
+        cacheBytes = this.cachedCacheBytes || 0;
+      }
     }
 
     // 3. Today's Totals
@@ -242,6 +249,8 @@ class DataConsumptionService {
     this.inMemoryTodayStreamSeconds = 0;
     this.inMemoryOverallStreamBytes = 0;
     this.inMemoryOverallStreamSeconds = 0;
+    this.cachedCacheBytes = 0;
+    this.lastCacheScanTime = 0;
     try {
       const todayKey = DAILY_KEY_PREFIX + this.getTodayDateKey();
       await Promise.all([
