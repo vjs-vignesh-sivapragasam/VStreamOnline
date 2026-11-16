@@ -23,6 +23,7 @@ import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
 import { useKeepAwake } from 'expo-keep-awake';
 import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksplayer/KSPlayerView';
+import VLCPlayerView, { isVLCPlayerAvailable, VLCPlayerRef } from '@/components/vlcplayer/VLCPlayerView';
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -1570,6 +1571,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     setSliderPos(0);
     setIsSliding(false);
     isSlidingRef.current = false;
+
+    // Safety timeout: dismiss loading poster shield after 3.5s so it never blocks video
+    const shieldTimer = setTimeout(() => {
+      setShowPosterShield(false);
+    }, 3500);
+    return () => clearTimeout(shieldTimer);
   }, [videoId]);
 
   const handleManualSkipAd = useCallback(async () => {
@@ -1632,12 +1639,14 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   // Seamless auto-fallback: if direct stream fails (e.g. 403 or engine starting), immediately play via web player
   
 
-  // When a valid direct stream URL is available, ensure native player is active
+  const isAndroidWithoutVLC = Platform.OS === 'android' && !isVLCPlayerAvailable();
+
+  // When a valid direct stream URL is available, ensure native player is active (if native player is functional)
   useEffect(() => {
-    if (streamUrl) {
+    if (streamUrl && !isAndroidWithoutVLC) {
       setUseWebFallback(false);
     }
-  }, [streamUrl]);
+  }, [streamUrl, isAndroidWithoutVLC]);
 
   // Only fallback to web player if stream extraction encounters a fatal error and streamUrl is unavailable
   useEffect(() => {
@@ -1688,7 +1697,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [webResizeMode, setWebResizeMode] = useState<ScreenFitMode>(screenFitMode || 'cover');
   const [modalSliderPos, setModalSliderPos] = useState<number | null>(null);
 
-  const isWebActive = (useWebFallback || (playbackError && !streamUrl)) && !!videoId;
+  const isWebActive = (useWebFallback || isAndroidWithoutVLC || (playbackError && !streamUrl)) && !!videoId;
 
   useEffect(() => {
     if (screenFitMode) {
@@ -1995,6 +2004,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const hideTimerRef = useRef<any>(null);
   const videoRef = useRef<VideoRef>(null);
   const ksRef = useRef<KSPlayerRef>(null);
+  const vlcRef = useRef<VLCPlayerRef>(null);
   const webViewRef = useRef<any>(null);
   const isPlayingRef = useRef(isPlaying);
   useEffect(() => {
@@ -2061,9 +2071,22 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   useEffect(() => {
     console.log('[YouTubeInlinePlayer] 🎬 streamUrl:', streamUrl ? streamUrl.substring(0, 85) + '...' : 'null');
-    console.log('[YouTubeInlinePlayer] 📱 Platform:', Platform.OS, '| Engine:', useKSPlayer ? 'KSPlayer (fallback)' : 'react-native-video (AVPlayer/ExoPlayer)');
+    console.log(
+      '[YouTubeInlinePlayer] 📱 Platform:',
+      Platform.OS,
+      '| Engine:',
+      isWebActive
+        ? 'YouTube Web Player'
+        : Platform.OS === 'android'
+        ? isVLCPlayerAvailable()
+          ? 'LibVLC (native)'
+          : 'react-native-video'
+        : useKSPlayer
+        ? 'KSPlayer'
+        : 'react-native-video (AVPlayer)'
+    );
     console.log('[YouTubeInlinePlayer] ⏯️ isPlaying:', isPlaying, '| isBuffering:', isBuffering, '| Error:', playbackError || 'none');
-  }, [streamUrl, isPlaying, isBuffering, useKSPlayer, playbackError]);
+  }, [streamUrl, isPlaying, isBuffering, useKSPlayer, playbackError, isWebActive]);
 
   // Reset auto-hide timer
   const scheduleControlsHide = useCallback(() => {
@@ -2218,18 +2241,22 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     };
   }, [effectiveIsPlaying, showControls, isSliding, scheduleControlsHide]);
 
-  // Handle seek target (native player)
+  // Handle seek target (native player and web player)
   useEffect(() => {
     if (seekTarget !== null) {
       console.log('[YouTubeInlinePlayer] ⏩ Seeking player to:', seekTarget);
-      if (useKSPlayer) {
+      if (isWebActive) {
+        handleSeekFromModal(seekTarget);
+      } else if (Platform.OS === 'android' && isVLCPlayerAvailable()) {
+        vlcRef.current?.seek(seekTarget);
+      } else if (useKSPlayer) {
         ksRef.current?.seek(seekTarget);
       } else {
         videoRef.current?.seek(seekTarget);
       }
       onClearSeekTarget();
     }
-  }, [seekTarget, useKSPlayer, onClearSeekTarget]);
+  }, [seekTarget, isWebActive, useKSPlayer, onClearSeekTarget, handleSeekFromModal]);
 
   // Seek forward / backward 10s
   const handleSkip = useCallback(
@@ -2462,7 +2489,61 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         <>
 
       {streamUrl ? (
-        useKSPlayer && isKSPlayerAvailable() ? (
+        Platform.OS === 'android' && isVLCPlayerAvailable() ? (
+          <VLCPlayerView
+            ref={vlcRef}
+            url={streamUrl}
+            headers={playerHeaders}
+            paused={!isPlaying}
+            rate={playbackSpeed}
+            resizeMode={videoResizeMode === 'contain' ? 'contain' : videoResizeMode === 'stretch' ? 'stretch' : 'cover'}
+            pictureInPictureEnabled={isPipEnabled}
+            style={StyleSheet.absoluteFill}
+            onReadyForDisplay={() => {
+              console.log('[YouTubeInlinePlayer] 🎬 VLCPlayer onReadyForDisplay!');
+              setShowPosterShield(false);
+              setIsBuffering(false);
+            }}
+            onProgress={(e) => {
+              if (e.currentTime > 0) {
+                setShowPosterShield(false);
+                setIsBuffering(false);
+              }
+              if (!isSlidingRef.current) {
+                checkSponsorSkip(e.currentTime);
+                onProgress(e.currentTime, e.duration || duration);
+              }
+            }}
+            onLoad={(e) => {
+              console.log('[YouTubeInlinePlayer] ✅ VLCPlayer onLoad fired! Duration:', e.duration, 'currentTime:', currentTime);
+              setShowPosterShield(false);
+              setIsBuffering(false);
+              if (seekTarget !== null && seekTarget > 0) {
+                vlcRef.current?.seek(seekTarget);
+              } else if (currentTime > 0) {
+                vlcRef.current?.seek(currentTime);
+              }
+              onProgress(currentTime > 0 ? currentTime : 0, e.duration || duration);
+            }}
+            onBuffer={(e) => {
+              console.log('[YouTubeInlinePlayer] ⏳ VLCPlayer onBuffer:', e.isBuffering);
+              setIsBuffering(e.isBuffering);
+            }}
+            onEnd={() => {
+              if (isLooping) {
+                vlcRef.current?.seek(0);
+              } else {
+                if (onPause) onPause(); else onTogglePlay();
+              }
+            }}
+            onError={(e) => {
+              console.error('[YouTubeInlinePlayer] ❌ VLCPlayer onError fired:', JSON.stringify(e));
+              setIsBuffering(false);
+              setUseWebFallback(true);
+              onPlaybackError?.(e?.error?.message || 'VLCPlayer playback error');
+            }}
+          />
+        ) : useKSPlayer && isKSPlayerAvailable() ? (
           <KSPlayerView
             ref={ksRef}
             url={streamUrl}
