@@ -275,13 +275,30 @@ export default function YouTubeDownloadsScreen() {
                         <View
                           style={[
                             styles.progressBarFill,
-                            { width: `${Math.min(100, Math.max(0, item.progress || 0))}%` },
+                            {
+                              width:
+                                item.totalBytes > 0
+                                  ? `${Math.max(1, Math.min(99, item.progress >= 100 ? 99 : Math.round(item.progress || 0)))}%`
+                                  : item.downloadedBytes > 0
+                                  ? '25%'
+                                  : '2%',
+                              backgroundColor: isPaused ? '#ffb300' : '#535aff',
+                            },
                           ]}
                         />
                       </View>
                       <View style={styles.speedRow}>
-                        <Text style={styles.progressPercentText}>
-                          {Math.round(item.progress || 0)}%
+                        <Text
+                          style={[
+                            styles.progressPercentText,
+                            isPaused && { color: '#ffb300' },
+                          ]}
+                        >
+                          {item.totalBytes > 0
+                            ? `${Math.min(99, Math.round(item.progress >= 100 ? 99 : item.progress || 0))}%`
+                            : item.downloadedBytes > 0
+                            ? downloadService.formatBytes(item.downloadedBytes)
+                            : '0%'}
                         </Text>
                         <Text style={styles.speedText}>
                           {isPaused

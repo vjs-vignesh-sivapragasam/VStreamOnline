@@ -1066,6 +1066,24 @@ class DownloadManager {
     const sanitizedFileName = (params.fileName || `${params.title}.mp4`).replace(/[^a-zA-Z0-9._-]/g, '_');
     const targetFile = new File(downloadsDir, `${id}_${sanitizedFileName}`);
 
+    // If starting a fresh download and an older partial/stale file exists on disk, clean it up
+    try {
+      if (targetFile.exists) {
+        targetFile.delete();
+      }
+    } catch {}
+
+    // Extract exact file length from stream URL clen param if not provided
+    let resolvedLength = params.fileLength || 0;
+    if (resolvedLength <= 0 && params.streamUrl) {
+      try {
+        const clenMatch = params.streamUrl.match(/[?&]clen=(\d+)/);
+        if (clenMatch) {
+          resolvedLength = parseInt(clenMatch[1], 10);
+        }
+      } catch {}
+    }
+
     if (!item) {
       item = {
         id,
@@ -1076,7 +1094,7 @@ class DownloadManager {
         fileName: params.fileName || `${params.title}.mp4`,
         fileUri: targetFile.uri,
         streamUrl: params.streamUrl,
-        totalBytes: params.fileLength || 0,
+        totalBytes: resolvedLength,
         downloadedBytes: 0,
         progress: 0,
         status: 'downloading',
@@ -1090,11 +1108,13 @@ class DownloadManager {
       this.inMemoryDownloads.unshift(item);
     } else {
       item.status = 'downloading';
-      item.statusDetail = 'Resuming download...';
+      item.statusDetail = 'Starting download...';
       item.streamUrl = params.streamUrl;
       item.fileUri = targetFile.uri;
+      item.progress = 0;
+      item.downloadedBytes = 0;
+      item.totalBytes = resolvedLength > 0 ? resolvedLength : item.totalBytes;
       if (params.poster && (!item.poster || item.poster.trim() === '')) item.poster = params.poster;
-      if (params.fileLength && params.fileLength > 0) item.totalBytes = params.fileLength;
       item.speedBps = 0;
       item.speedFormatted = '0 Mbps';
       item.errorMessage = undefined;
@@ -1182,8 +1202,10 @@ class DownloadManager {
         }
 
         if (item!.totalBytes > 0) {
-          const pct = Math.min(Math.round((item!.downloadedBytes / item!.totalBytes) * 100), 100);
-          if (pct > item!.progress) {
+          const rawPct = Math.round((item!.downloadedBytes / item!.totalBytes) * 100);
+          // While task is actively in-flight, cap at 99% so progress bar is never full until completed
+          const pct = Math.max(0, Math.min(99, rawPct));
+          if (pct >= item!.progress) {
             item!.progress = pct;
           }
         }
@@ -1259,7 +1281,8 @@ class DownloadManager {
                   if (downloaded > item!.downloadedBytes) item!.downloadedBytes = downloaded;
                   if (progressData.totalBytes > 0) item!.totalBytes = progressData.totalBytes;
                   if (item!.totalBytes > 0) {
-                    item!.progress = Math.min(Math.round((item!.downloadedBytes / item!.totalBytes) * 100), 100);
+                    const rawPct = Math.round((item!.downloadedBytes / item!.totalBytes) * 100);
+                    item!.progress = Math.max(0, Math.min(99, rawPct));
                   }
                   item!.statusDetail = `Downloading (${item!.progress}%)`;
                   const { speedBps, shouldUpdateUI } = retrySpeedTracker.update(downloaded);
@@ -1390,8 +1413,9 @@ class DownloadManager {
               }
 
               if (item.totalBytes > 0) {
-                const pct = Math.min(Math.round((item.downloadedBytes / item.totalBytes) * 100), 100);
-                if (pct > item.progress) {
+                const rawPct = Math.round((item.downloadedBytes / item.totalBytes) * 100);
+                const pct = Math.max(0, Math.min(99, rawPct));
+                if (pct >= item.progress) {
                   item.progress = pct;
                 }
               }

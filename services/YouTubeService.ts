@@ -636,8 +636,26 @@ class YouTubeService {
                 mimeType: f.mimeType || (isAudio ? 'audio/mp4' : 'video/mp4'),
                 url: directUrl,
                 proxyUrl,
-                contentLength: f.contentLength ? Number(f.contentLength) : undefined,
-                sizeFormatted: formatBytes(f.contentLength ? Number(f.contentLength) : undefined),
+                contentLength: (() => {
+                  let clen = f.contentLength ? Number(f.contentLength) : f.clen ? parseInt(f.clen, 10) : undefined;
+                  if (!clen && directUrl) {
+                    try {
+                      const m = directUrl.match(/[?&]clen=(\d+)/);
+                      if (m) clen = parseInt(m[1], 10);
+                    } catch {}
+                  }
+                  return clen;
+                })(),
+                sizeFormatted: (() => {
+                  let clen = f.contentLength ? Number(f.contentLength) : f.clen ? parseInt(f.clen, 10) : undefined;
+                  if (!clen && directUrl) {
+                    try {
+                      const m = directUrl.match(/[?&]clen=(\d+)/);
+                      if (m) clen = parseInt(m[1], 10);
+                    } catch {}
+                  }
+                  return formatBytes(clen);
+                })(),
                 hasAudio: !!f.hasAudio,
                 hasVideo: !!f.hasVideo,
                 type: isAudio ? 'audio' : (f.type || 'video'),
