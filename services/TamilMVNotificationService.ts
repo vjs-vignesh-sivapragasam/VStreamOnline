@@ -144,7 +144,7 @@ class TamilMVNotificationService {
           importance: Notifications.AndroidImportance?.HIGH ?? 4,
           vibrationPattern: [0, 250, 250, 250],
           lightColor: '#FFB800',
-          sound: 'default',
+          // use system default sound
           enableVibrate: true,
           showBadge: true,
         });
@@ -396,7 +396,7 @@ class TamilMVNotificationService {
               content: {
                 title: `🎬 New on TamilMV: ${movieName}${yearStr}`,
                 body: `${movieName}${yearStr}${langStr} is now available! Tap to stream or download.`,
-                sound: 'default',
+                // use system default sound
                 data: {
                   type: 'tamilmv_new_movie',
                   pathname: '/torrent/details',
@@ -467,7 +467,7 @@ class TamilMVNotificationService {
         content: {
           title: '🎬 TamilMV Movie Alerts Active',
           body: 'Push notifications are enabled! You will be alerted instantly when new movies or series are uploaded.',
-          sound: 'default',
+          // use system default sound
           data: {
             type: 'tamilmv_test_notification',
             timestamp: Date.now(),
