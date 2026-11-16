@@ -207,6 +207,7 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
             if (await isHapticsSupported()) {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             }
+            onClose();
           } catch (e: any) {
             Alert.alert('Logout Error', e?.message || 'Failed to sign out.');
           } finally {

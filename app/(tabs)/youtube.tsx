@@ -18,7 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import {
   youTubeService,
   YouTubeVideoItem,
@@ -386,7 +386,7 @@ export default function YouTubeScreen() {
   const [modalLoading, setModalLoading] = useState(false);
   const [targetVideoItem, setTargetVideoItem] = useState<YouTubeVideoItem | null>(null);
 
-  // Check Google / YouTube auth status on mount
+  // Check Google / YouTube auth status on mount and on tab focus
   useEffect(() => {
     let mounted = true;
     youTubeService.getAuthStatus().then((status) => {
@@ -399,6 +399,27 @@ export default function YouTubeScreen() {
     }).catch(() => {});
     return () => { mounted = false; };
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      youTubeService.getAuthStatus(1500).then((status) => {
+        if (!active) return;
+        setAuthStatus((prev) => {
+          if (prev.authenticated !== status.authenticated || prev.user?.email !== status.user?.email) {
+            if (status.authenticated && selectedCategory === 'All') {
+              setSelectedCategory('Home');
+            } else if (!status.authenticated && (selectedCategory === 'Home' || selectedCategory === 'Subscriptions' || selectedCategory === 'History')) {
+              setSelectedCategory('All');
+            }
+            return status;
+          }
+          return prev;
+        });
+      }).catch(() => {});
+      return () => { active = false; };
+    }, [selectedCategory])
+  );
 
   // Dynamic Category Chips reflecting Google Account feeds
   const dynamicCategoryChips = useMemo(() => {
