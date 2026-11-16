@@ -1,4 +1,31 @@
+import { Platform, UIManager } from "react-native";
 import { getOriginalPlatform } from "./platform";
+
+export const isVLCPlayerSupported = (): boolean => {
+    if (Platform.OS !== 'android') return false;
+    try {
+        if (!UIManager) return false;
+        return Boolean(
+            UIManager.getViewManagerConfig?.('VLCPlayerView') ||
+            (UIManager as any)?.hasViewManagerConfig?.('VLCPlayerView')
+        );
+    } catch {
+        return false;
+    }
+};
+
+export const isKSPlayerSupported = (): boolean => {
+    if (Platform.OS !== 'ios') return false;
+    try {
+        if (!UIManager) return false;
+        return Boolean(
+            UIManager.getViewManagerConfig?.('KSPlayerView') ||
+            (UIManager as any)?.hasViewManagerConfig?.('KSPlayerView')
+        );
+    } catch {
+        return false;
+    }
+};
 
 export enum Players {
     Default = 'Default',

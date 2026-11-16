@@ -64,6 +64,7 @@
     },
     "plugins": [
       "./plugins/withKSPlayer",
+      "./plugins/withVLCPlayer",
       [
         "expo-notifications",
         {

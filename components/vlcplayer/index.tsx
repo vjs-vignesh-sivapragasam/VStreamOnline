@@ -1,0 +1,725 @@
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { TouchableOpacity, Animated, Platform } from "react-native";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { MenuComponentRef, MenuView } from '@react-native-menu/menu';
+import { WebMenu } from "@/components/WebMenuView";
+import { styles } from "../coreplayer/styles";
+import {
+    usePlayerState,
+    useUIState,
+    useEnhancedPlayerSettings,
+    useTimers,
+    usePlayerAnimations,
+    hideControls,
+    CONSTANTS,
+    calculateProgress,
+    performSeek,
+    buildSettingsActions,
+    buildSubtitleActions,
+    buildAudioActions,
+    buildStreamActions,
+    calculateSliderValues,
+    ArtworkBackground,
+    WaitingLobby,
+    CenterControls,
+    ProgressBar,
+    ContentFitLabel,
+    SubtitleDisplay,
+    SubtitlePosition,
+    ErrorDisplay,
+    ExtendedMediaPlayerProps
+} from "../coreplayer";
+import { View, Text } from "../Themed";
+import { GlassView } from 'expo-glass-effect';
+import VLCPlayerView, { isVLCPlayerAvailable } from './VLCPlayerView';
+
+const RNResizeMode = { COVER: 'cover', CONTAIN: 'contain', STRETCH: 'stretch' };
+
+const MenuWrapper: React.FC<any> = (props) => {
+    if (Platform.OS === 'web') return <WebMenu {...props} />;
+    return <MenuView {...props} />;
+};
+
+export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
+    videoUrl,
+    isTorrent,
+    title,
+    back: onBack,
+    progress,
+    artwork,
+    updateProgress,
+    onPlaybackError,
+    streams = [],
+    currentStreamIndex = 0,
+    onStreamChange,
+    torrentBufferProgress,
+}) => {
+    if (!isVLCPlayerAvailable()) {
+        const { MediaPlayer: NativePlayer } = require('@/components/nativeplayer');
+        return (
+            <NativePlayer
+                videoUrl={videoUrl}
+                isTorrent={isTorrent}
+                title={title}
+                back={onBack}
+                progress={progress}
+                artwork={artwork}
+                updateProgress={updateProgress}
+                onPlaybackError={onPlaybackError}
+                streams={streams}
+                currentStreamIndex={currentStreamIndex}
+                onStreamChange={onStreamChange}
+                torrentBufferProgress={torrentBufferProgress}
+            />
+        );
+    }
+
+    const videoRef = useRef<any>(null);
+    const shouldAutoHideControls = useRef(true);
+    const isSeeking = useRef(false);
+    const isHideControlsScheduled = useRef(false);
+    const wasPlayingBeforeSeek = useRef(false);
+    const lastKnownTimeRef = useRef<number>(0);
+    const hasReportedErrorRef = useRef(false);
+    const seekTimeoutRef = useRef<any>(null);
+    const progressUpdateTimerRef = useRef<any>(null);
+
+    const playerState = usePlayerState();
+    const uiState = useUIState();
+    const settings = useEnhancedPlayerSettings();
+    const timers = useTimers();
+    const animations = usePlayerAnimations();
+
+    const setShowControls = uiState.setShowControls;
+    const controlsOpacity = animations.controlsOpacity;
+    const bufferOpacity = animations.bufferOpacity;
+    const contentFitLabelOpacity = animations.contentFitLabelOpacity;
+    const clearTimer = timers.clearTimer;
+    const setTimer = timers.setTimer;
+    const clearAllTimers = timers.clearAllTimers;
+
+    const audioMenuRef = useRef<MenuComponentRef>(null);
+    const subtitleMenuRef = useRef<MenuComponentRef>(null);
+    const settingsMenuRef = useRef<MenuComponentRef>(null);
+    const streamMenuRef = useRef<MenuComponentRef>(null);
+
+    const [contentFit, setContentFit] = useState<'contain' | 'stretch' | 'cover'>('cover');
+    const [showContentFitLabel, setShowContentFitLabel] = useState(false);
+    const [isPaused, setIsPaused] = useState(false);
+    const [videoError, setVideoError] = useState<string | null>(null);
+    const [availableAudioTracks, setAvailableAudioTracks] = useState<any[]>([]);
+    const [availableTextTracks, setAvailableTextTracks] = useState<any[]>([]);
+    const isLocalFile = videoUrl ? (
+        videoUrl.startsWith('file:') ||
+        videoUrl.startsWith('content:') ||
+        (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))
+    ) : false;
+    const effectiveBufferPct = isLocalFile ? undefined : (isTorrent ? torrentBufferProgress : undefined);
+    const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
+    const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
+    const [currentSubtitleText, setCurrentSubtitleText] = useState<string>('');
+
+    // Track position for smooth quality switches
+    useEffect(() => {
+        lastKnownTimeRef.current = playerState.currentTime;
+    }, [playerState.currentTime]);
+
+    // Cleanup
+    useEffect(() => {
+        return () => {
+            if (updateProgress) {
+                const progressValue = calculateProgress(lastKnownTimeRef.current, playerState.duration);
+                updateProgress({ progress: progressValue });
+            }
+            clearAllTimers();
+            if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+            if (progressUpdateTimerRef.current) clearInterval(progressUpdateTimerRef.current);
+        };
+    }, [clearAllTimers, updateProgress, playerState.duration]);
+
+    // Progress update interval
+    useEffect(() => {
+        if (!playerState.isReady || !updateProgress) return;
+
+        progressUpdateTimerRef.current = setInterval(() => {
+            if (playerState.currentTime !== undefined && playerState.duration > 0) {
+                const progressValue = calculateProgress(playerState.currentTime, playerState.duration);
+                updateProgress({ progress: progressValue });
+            }
+        }, 1 * 60 * 1000);
+
+        return () => {
+            if (progressUpdateTimerRef.current) clearInterval(progressUpdateTimerRef.current);
+        };
+    }, [playerState.isReady, playerState.duration, updateProgress]);
+
+    const showControlsTemporarily = useCallback(() => {
+        setShowControls(true);
+        Animated.timing(controlsOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+
+        clearTimer('hideControls');
+        isHideControlsScheduled.current = false;
+
+        if (shouldAutoHideControls.current) {
+            isHideControlsScheduled.current = true;
+            setTimer('hideControls', () => {
+                hideControls(setShowControls, controlsOpacity);
+                isHideControlsScheduled.current = false;
+            }, CONSTANTS.CONTROLS_AUTO_HIDE_DELAY);
+        }
+    }, [controlsOpacity, clearTimer, setTimer, setShowControls]);
+
+    // Auto-hide controls when playback starts
+    useEffect(() => {
+        if (!isPaused && uiState.showControls && shouldAutoHideControls.current && !isHideControlsScheduled.current) {
+            showControlsTemporarily();
+        }
+    }, [isPaused, uiState.showControls, showControlsTemporarily]);
+
+    const showContentFitLabelTemporarily = useCallback(() => {
+        setShowContentFitLabel(true);
+        Animated.timing(contentFitLabelOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+
+        clearTimer('contentFitLabel');
+        setTimer('contentFitLabel', () => {
+            Animated.timing(contentFitLabelOpacity, { toValue: 0, duration: 300, useNativeDriver: true })
+                .start(() => setShowContentFitLabel(false));
+        }, CONSTANTS.CONTENT_FIT_LABEL_DELAY);
+    }, [contentFitLabelOpacity, clearTimer, setTimer]);
+
+    // Event handlers
+    const handleLoad = useCallback((data: any) => {
+        playerState.setIsReady(true);
+        playerState.setDuration(data.duration);
+        playerState.setIsBuffering(false);
+        setVideoError(null);
+        hasReportedErrorRef.current = false;
+
+        Animated.timing(bufferOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+
+        if (lastKnownTimeRef.current > 1 && videoRef.current) {
+            videoRef.current.seek(lastKnownTimeRef.current);
+            playerState.setCurrentTime(lastKnownTimeRef.current);
+        }
+
+        if (data.audioTracks && Array.isArray(data.audioTracks) && data.audioTracks.length > 0) {
+            setAvailableAudioTracks(data.audioTracks);
+            if (selectedAudioTrack === -1) {
+                const sel = data.audioTracks.find((t: any) => t.selected);
+                const defaultIdx = sel ? sel.index : data.audioTracks[0].index;
+                setSelectedAudioTrack(defaultIdx);
+                settings.setSelectedAudioTrack(defaultIdx);
+            }
+        }
+
+        if (data.textTracks && Array.isArray(data.textTracks) && data.textTracks.length > 0) {
+            setAvailableTextTracks(data.textTracks);
+        }
+    }, [bufferOpacity, playerState, selectedAudioTrack, settings]);
+
+    const handleProgress = useCallback((data: any) => {
+        if (!playerState.isReady && data.currentTime > 0) {
+            playerState.setIsReady(true);
+            playerState.setIsBuffering(false);
+        }
+        if (!playerState.isDragging && !isSeeking.current) {
+            playerState.setCurrentTime(data.currentTime);
+        }
+        if (data.currentTime > 0 && playerState.isBuffering) {
+            playerState.setIsBuffering(false);
+            Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+        }
+    }, [bufferOpacity, playerState]);
+
+    const handleBuffer = useCallback((data: any) => {
+        if (!isSeeking.current && !playerState.isDragging) {
+            if ((isLocalFile || isTorrent || playerState.currentTime > 0) && playerState.isReady && data.isBuffering) {
+                return;
+            }
+            playerState.setIsBuffering(data.isBuffering);
+            Animated.timing(bufferOpacity, {
+                toValue: data.isBuffering ? 1 : 0,
+                duration: 200,
+                useNativeDriver: true
+            }).start();
+        }
+    }, [bufferOpacity, isLocalFile, isTorrent, playerState]);
+
+    const handleError = useCallback((error: any) => {
+        playerState.setIsBuffering(false);
+        playerState.setIsReady(false);
+
+        if (onPlaybackError && !hasReportedErrorRef.current) {
+            hasReportedErrorRef.current = true;
+            const errorMessage = error?.error?.message || error?.message || 'Unable to load video';
+            onPlaybackError({ error: errorMessage });
+            setIsPaused(true);
+        } else if (!onPlaybackError) {
+            const errorMessage = error?.error?.message || error?.message || 'Unable to load video. The file may be corrupted or in an unsupported format.';
+            setVideoError(errorMessage);
+            setIsPaused(true);
+        }
+    }, [onPlaybackError, playerState]);
+
+    const handleEnd = useCallback(() => {
+        setIsPaused(true);
+        playerState.setIsPlaying(false);
+    }, [playerState]);
+
+    const handleReadyForDisplay = useCallback(() => {
+        playerState.setIsReady(true);
+        playerState.setIsBuffering(false);
+        Animated.timing(bufferOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start();
+    }, [bufferOpacity, playerState]);
+
+    const handleAudioTracks = useCallback((data: { audioTracks: any[] }) => {
+        if (data.audioTracks && Array.isArray(data.audioTracks) && data.audioTracks.length > 0) {
+            setAvailableAudioTracks(data.audioTracks);
+        }
+    }, []);
+
+    const handleTextTracks = useCallback((data: { textTracks: any[] }) => {
+        if (data.textTracks && Array.isArray(data.textTracks) && data.textTracks.length > 0) {
+            setAvailableTextTracks(data.textTracks);
+        }
+    }, []);
+
+    const handleSubtitleText = useCallback((data: { text: string }) => {
+        setCurrentSubtitleText(data.text || '');
+    }, []);
+
+    // Control actions
+    const togglePlayPause = useCallback(() => {
+        if (!playerState.isReady) return;
+        const next = !isPaused;
+        setIsPaused(next);
+        playerState.setIsPlaying(!next);
+        if (videoRef.current) {
+            if (next) videoRef.current.pause();
+            else videoRef.current.play();
+        }
+        showControlsTemporarily();
+    }, [isPaused, playerState, showControlsTemporarily]);
+
+    const seekTo = useCallback((seconds: number) => {
+        if (!playerState.isReady || playerState.duration <= 0 || !videoRef.current) return;
+
+        if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+
+        const clampedTime = performSeek(seconds, playerState.duration);
+        wasPlayingBeforeSeek.current = !isPaused;
+
+        if (!isPaused) setIsPaused(true);
+
+        playerState.setIsBuffering(true);
+        Animated.timing(bufferOpacity, { toValue: 1, duration: 150, useNativeDriver: true }).start();
+        isSeeking.current = true;
+
+        videoRef.current.seek(clampedTime);
+        playerState.setCurrentTime(clampedTime);
+
+        seekTimeoutRef.current = setTimeout(() => {
+            isSeeking.current = false;
+            playerState.setIsBuffering(false);
+            Animated.timing(bufferOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+            if (wasPlayingBeforeSeek.current) {
+                setIsPaused(false);
+                videoRef.current?.play();
+            }
+        }, 300);
+
+        showControlsTemporarily();
+    }, [playerState, isPaused, showControlsTemporarily, bufferOpacity]);
+
+    const skipTime = useCallback((seconds: number) => {
+        if (!playerState.isReady) return;
+        seekTo(playerState.currentTime + seconds);
+    }, [playerState.currentTime, seekTo, playerState.isReady]);
+
+    const cycleContentFit = useCallback(() => {
+        const modes: Array<'contain' | 'cover' | 'stretch'> = ['contain', 'cover', 'stretch'];
+        const next = modes[(modes.indexOf(contentFit) + 1) % modes.length];
+        setContentFit(next);
+        showContentFitLabelTemporarily();
+        showControlsTemporarily();
+    }, [contentFit, showControlsTemporarily, showContentFitLabelTemporarily]);
+
+    const handleOverlayPress = useCallback(() => {
+        if (uiState.showControls) {
+            hideControls(setShowControls, controlsOpacity);
+        } else {
+            showControlsTemporarily();
+        }
+    }, [uiState.showControls, showControlsTemporarily, controlsOpacity, setShowControls]);
+
+    const handleSliderChange = useCallback((value: number) => {
+        if (!playerState.isReady || playerState.duration <= 0) return;
+        playerState.setIsDragging(true);
+        playerState.setDragPosition(value);
+    }, [playerState]);
+
+    const handleSliderComplete = useCallback((value: number) => {
+        if (playerState.isReady && playerState.duration > 0 && videoRef.current) {
+            if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
+
+            const newTime = value * playerState.duration;
+            wasPlayingBeforeSeek.current = !isPaused;
+            if (!isPaused) setIsPaused(true);
+
+            playerState.setIsBuffering(true);
+            Animated.timing(bufferOpacity, { toValue: 1, duration: 150, useNativeDriver: true }).start();
+            isSeeking.current = true;
+
+            videoRef.current.seek(newTime);
+            playerState.setCurrentTime(newTime);
+
+            seekTimeoutRef.current = setTimeout(() => {
+                isSeeking.current = false;
+                if (wasPlayingBeforeSeek.current) {
+                    setIsPaused(false);
+                    videoRef.current?.play();
+                } else {
+                    playerState.setIsBuffering(false);
+                    Animated.timing(bufferOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+                }
+            }, 150);
+        }
+        playerState.setIsDragging(false);
+    }, [playerState, isPaused, bufferOpacity]);
+
+    const handlePlaybackSpeedSelect = useCallback((speed: number) => {
+        settings.setPlaybackSpeed(speed);
+        showControlsTemporarily();
+    }, [showControlsTemporarily, settings]);
+
+    const handleTextTrackSelect = useCallback((index: number) => {
+        setSelectedTextTrack(index);
+        if (videoRef.current) {
+            if (index < 0) {
+                videoRef.current.disableTextTrack();
+            } else {
+                videoRef.current.selectTextTrack(index);
+            }
+        }
+    }, []);
+
+    const handleSubtitlePositionSelect = useCallback((position: SubtitlePosition) => {
+        settings.setSubtitlePosition(position);
+        showControlsTemporarily();
+    }, [settings, showControlsTemporarily]);
+
+    const handleSubtitleDelaySelect = useCallback((delayMs: number) => {
+        settings.setSubtitleDelay(delayMs);
+        showControlsTemporarily();
+    }, [settings, showControlsTemporarily]);
+
+    const handleAudioSelect = useCallback((index: number) => {
+        settings.setSelectedAudioTrack(index);
+        setSelectedAudioTrack(index);
+        if (videoRef.current) {
+            videoRef.current.selectAudioTrack(index);
+        }
+    }, [settings]);
+
+    const handleStreamSelect = useCallback((index: number) => {
+        if (onStreamChange) onStreamChange(index);
+        showControlsTemporarily();
+    }, [onStreamChange, showControlsTemporarily]);
+
+    const getContentFitIcon = useCallback((): "fit-screen" | "crop" | "fullscreen" => {
+        switch (contentFit) {
+            case 'contain': return 'fit-screen';
+            case 'cover': return 'crop';
+            case 'stretch': return 'fullscreen';
+            default: return 'crop';
+        }
+    }, [contentFit]);
+
+    const adaptTracks = useCallback((tracks: any[]): any[] => {
+        if (!tracks || !Array.isArray(tracks)) return [];
+        return tracks.map((track, index) => ({
+            id: track.index ?? index,
+            label: track.title || track.language || `Track ${index + 1}`,
+            language: track.language,
+            name: track.title || track.language || `Track ${index + 1}`
+        }));
+    }, []);
+
+    // Menu actions
+    const settingsActions = useMemo(() => buildSettingsActions(settings.playbackSpeed, streams, currentStreamIndex), [settings.playbackSpeed, streams, currentStreamIndex]);
+
+    const subtitleActions = useMemo(() => {
+        const adaptedTracks = adaptTracks(availableTextTracks);
+        return buildSubtitleActions(
+            [],
+            selectedTextTrack >= 0 ? selectedTextTrack : -1,
+            false,
+            adaptedTracks,
+            settings.subtitlePosition,
+            settings.subtitleDelay,
+            selectedTextTrack
+        );
+    }, [availableTextTracks, selectedTextTrack, settings.subtitlePosition, settings.subtitleDelay, adaptTracks]);
+
+    const audioActions = useMemo(() =>
+        buildAudioActions(adaptTracks(availableAudioTracks), selectedAudioTrack),
+        [availableAudioTracks, selectedAudioTrack, adaptTracks]
+    );
+
+    const streamActions = useMemo(() => buildStreamActions(streams, currentStreamIndex), [streams, currentStreamIndex]);
+
+    const { displayTime, sliderValue } = useMemo(() => calculateSliderValues(
+        playerState.isDragging,
+        playerState.dragPosition,
+        playerState.currentTime,
+        playerState.duration
+    ), [playerState.isDragging, playerState.dragPosition, playerState.currentTime, playerState.duration]);
+
+    const handleBack = useCallback(() => {
+        setIsPaused(true);
+        if (videoRef.current) videoRef.current.pause();
+        const progressValue = calculateProgress(lastKnownTimeRef.current, playerState.duration);
+        onBack({ message: '', progress: progressValue, player: "ksplayer" });
+    }, [playerState.duration, onBack]);
+
+    const handleRetry = useCallback(() => {
+        setVideoError(null);
+        hasReportedErrorRef.current = false;
+        playerState.setIsReady(false);
+        playerState.setIsBuffering(true);
+        if (videoRef.current) videoRef.current.seek(0);
+        setIsPaused(false);
+    }, [playerState]);
+
+    const handleMenuAction = useCallback((id: string) => {
+        if (id.startsWith('speed-')) {
+            const speed = parseFloat(id.split('-')[1]);
+            if (!isNaN(speed)) handlePlaybackSpeedSelect(speed);
+        } else if (id === 'subtitle-track-off') {
+            handleTextTrackSelect(-1);
+        } else if (id.startsWith('subtitle-track-')) {
+            const index = parseInt(id.split('subtitle-track-')[1]);
+            if (!isNaN(index)) handleTextTrackSelect(index);
+        } else if (id.startsWith('position-')) {
+            const position = parseInt(id.split('-')[1]);
+            if (!isNaN(position)) handleSubtitlePositionSelect(position);
+        } else if (id.startsWith('delay_')) {
+            const delayMs = parseInt(id.replace('delay_', ''));
+            if (!isNaN(delayMs)) handleSubtitleDelaySelect(delayMs);
+        } else if (id.startsWith('audio-')) {
+            const index = parseInt(id.split('-')[1]);
+            if (!isNaN(index)) handleAudioSelect(index);
+        } else if (id.startsWith('stream-')) {
+            const index = parseInt(id.split('-')[1]);
+            if (!isNaN(index)) handleStreamSelect(index);
+        }
+    }, [handlePlaybackSpeedSelect, handleTextTrackSelect, handleSubtitlePositionSelect, handleSubtitleDelaySelect, handleAudioSelect, handleStreamSelect]);
+
+    const handleWebAction = useCallback((id: string) => handleMenuAction(id), [handleMenuAction]);
+    const handleNativeAction = useCallback(({ nativeEvent }: any) => handleMenuAction(nativeEvent.event), [handleMenuAction]);
+
+    const handleMenuOpen = useCallback(() => {
+        shouldAutoHideControls.current = false;
+        clearTimer('hideControls');
+    }, [clearTimer]);
+
+    const handleMenuClose = useCallback(() => {
+        shouldAutoHideControls.current = true;
+        showControlsTemporarily();
+    }, [showControlsTemporarily]);
+
+    const handleMuteToggle = useCallback(() => {
+        settings.setIsMuted(!settings.isMuted);
+        showControlsTemporarily();
+    }, [settings, showControlsTemporarily]);
+
+    const handleSliderStart = useCallback(() => {
+        playerState.setIsDragging(true);
+        showControlsTemporarily();
+    }, [showControlsTemporarily, playerState]);
+
+    const handleSkipBackward = useCallback(() => skipTime(-10), [skipTime]);
+    const handleSkipForward = useCallback(() => skipTime(30), [skipTime]);
+
+    if (videoError) {
+        return <ErrorDisplay error={videoError} onBack={handleBack} onRetry={handleRetry} />;
+    }
+
+    return (
+        <View style={styles.container}>
+            <VLCPlayerView
+                ref={videoRef}
+                url={videoUrl}
+                style={styles.video}
+                paused={isPaused}
+                muted={settings.isMuted}
+                rate={settings.playbackSpeed}
+                resizeMode={contentFit}
+                onReadyForDisplay={handleReadyForDisplay}
+                onLoad={handleLoad}
+                onProgress={handleProgress}
+                onBuffer={handleBuffer}
+                onError={handleError}
+                onEnd={handleEnd}
+                onAudioTracks={handleAudioTracks}
+                onTextTracks={handleTextTracks}
+                onSubtitleText={handleSubtitleText}
+            />
+
+            <ArtworkBackground
+                artwork={artwork}
+                isBuffering={playerState.isBuffering}
+                hasStartedPlaying={playerState.isReady}
+                bufferProgress={effectiveBufferPct}
+            />
+
+            <WaitingLobby
+                hasStartedPlaying={playerState.isReady}
+                isBuffering={playerState.isBuffering && playerState.currentTime === 0}
+                opacity={bufferOpacity}
+                bufferProgress={effectiveBufferPct}
+            />
+
+            <TouchableOpacity style={styles.touchArea} activeOpacity={1} onPress={handleOverlayPress} />
+
+            {!!currentSubtitleText && (
+                <SubtitleDisplay
+                    subtitle={currentSubtitleText}
+                    position={settings.subtitlePosition}
+                />
+            )}
+
+            {uiState.showControls && (
+                <Animated.View style={[styles.controlsOverlay, { opacity: controlsOpacity }]} pointerEvents="box-none">
+                    <View style={styles.topControls}>
+                        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+                            <Ionicons name="chevron-back" size={28} color="white" />
+                        </TouchableOpacity>
+
+                        <View style={styles.titleContainer}>
+                            <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
+                        </View>
+
+                        <GlassView glassEffectStyle="clear" style={styles.topRightControls}>
+                            {streams.length > 1 && (
+                                <MenuWrapper
+                                    style={{ zIndex: 1000 }}
+                                    ref={streamMenuRef}
+                                    title="Select Stream"
+                                    onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
+                                    actions={streamActions}
+                                    shouldOpenOnLongPress={false}
+                                    themeVariant="dark"
+                                    onOpenMenu={handleMenuOpen}
+                                    onCloseMenu={handleMenuClose}
+                                >
+                                    <TouchableOpacity style={styles.controlButton} onPress={() => {
+                                        if (Platform.OS === 'android') streamMenuRef.current?.show();
+                                    }}>
+                                        <MaterialIcons name="ondemand-video" size={24} color="white" />
+                                    </TouchableOpacity>
+                                </MenuWrapper>
+                            )}
+
+                            <TouchableOpacity style={styles.controlButton} onPress={handleMuteToggle}>
+                                <Ionicons name={settings.isMuted ? "volume-mute" : "volume-high"} size={24} color="white" />
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.controlButton} onPress={cycleContentFit}>
+                                <MaterialIcons name={getContentFitIcon()} size={24} color="white" />
+                            </TouchableOpacity>
+
+                            {availableAudioTracks.length > 0 && (
+                                <MenuWrapper
+                                    style={{ zIndex: 1000 }}
+                                    title="Audio Track"
+                                    ref={audioMenuRef}
+                                    onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
+                                    actions={audioActions}
+                                    shouldOpenOnLongPress={false}
+                                    themeVariant="dark"
+                                    onOpenMenu={handleMenuOpen}
+                                    onCloseMenu={handleMenuClose}
+                                >
+                                    <TouchableOpacity style={styles.controlButton} onPress={() => {
+                                        if (Platform.OS === 'android') audioMenuRef.current?.show();
+                                    }}>
+                                        <MaterialIcons name="multitrack-audio" size={24} color="white" />
+                                    </TouchableOpacity>
+                                </MenuWrapper>
+                            )}
+
+                            {availableTextTracks.length > 0 && (
+                                <MenuWrapper
+                                    style={{ zIndex: 1000 }}
+                                    title="Subtitles"
+                                    ref={subtitleMenuRef}
+                                    onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
+                                    actions={subtitleActions}
+                                    shouldOpenOnLongPress={false}
+                                    themeVariant="dark"
+                                    onOpenMenu={handleMenuOpen}
+                                    onCloseMenu={handleMenuClose}
+                                >
+                                    <TouchableOpacity style={styles.controlButton} onPress={() => {
+                                        if (Platform.OS === 'android') subtitleMenuRef.current?.show();
+                                    }}>
+                                        <MaterialIcons name="closed-caption" size={24} color="white" />
+                                    </TouchableOpacity>
+                                </MenuWrapper>
+                            )}
+
+                            <MenuWrapper
+                                style={{ zIndex: 1000 }}
+                                title="Settings"
+                                ref={settingsMenuRef}
+                                onPressAction={Platform.OS === 'web' ? handleWebAction : handleNativeAction}
+                                actions={settingsActions}
+                                shouldOpenOnLongPress={false}
+                                themeVariant="dark"
+                                onOpenMenu={handleMenuOpen}
+                                onCloseMenu={handleMenuClose}
+                            >
+                                <TouchableOpacity style={styles.controlButton} onPress={() => {
+                                    if (Platform.OS === 'android') settingsMenuRef.current?.show();
+                                }}>
+                                    <MaterialIcons name="settings" size={24} color="white" />
+                                </TouchableOpacity>
+                            </MenuWrapper>
+                        </GlassView>
+                    </View>
+
+                    <CenterControls
+                        isPlaying={!isPaused}
+                        isReady={playerState.isReady}
+                        isBuffering={playerState.isBuffering}
+                        onPlayPause={togglePlayPause}
+                        onSkipBackward={handleSkipBackward}
+                        onSkipForward={handleSkipForward}
+                    />
+
+                    <View style={styles.bottomControls}>
+                        <ProgressBar
+                            currentTime={displayTime}
+                            duration={playerState.duration}
+                            sliderValue={sliderValue}
+                            isReady={playerState.isReady}
+                            onValueChange={handleSliderChange}
+                            onSlidingStart={handleSliderStart}
+                            onSlidingComplete={handleSliderComplete}
+                            showSpeed={settings.playbackSpeed !== 1.0}
+                            playbackSpeed={settings.playbackSpeed}
+                        />
+                    </View>
+                </Animated.View>
+            )}
+
+            <ContentFitLabel
+                show={showContentFitLabel}
+                contentFit={contentFit as any}
+                opacity={contentFitLabelOpacity}
+            />
+        </View>
+    );
+};
+
+export default MediaPlayer;

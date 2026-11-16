@@ -1,4 +1,4 @@
-import { getPlatformSpecificPlayers, Players } from "@/utils/MediaPlayer";
+import { getPlatformSpecificPlayers, Players, isVLCPlayerSupported } from "@/utils/MediaPlayer";
 import { showAlert } from "@/utils/platform";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState, useRef } from "react";
@@ -512,6 +512,14 @@ const MediaPlayerScreen: React.FC = () => {
   // Fallback: KSPlayer (FFmpeg-based, better format support)
 
   function getPlayer() {
+    if (Platform.OS === 'android' && isVLCPlayerSupported()) {
+      try {
+        const vlc = require("../../components/vlcplayer");
+        if (vlc && vlc.MediaPlayer) return vlc.MediaPlayer;
+      } catch (e) {
+        console.warn('[StreamPlayer] Failed to load VLCPlayer, falling back:', e);
+      }
+    }
     if (Platform.OS === "ios" && isKSPlayerAvailable()) {
       return require("../../components/ksplayer").MediaPlayer;
     }

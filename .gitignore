@@ -35,7 +35,7 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 yarn.lock
-android
+/android
 
 .vercel
 .env
