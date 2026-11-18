@@ -26,11 +26,13 @@ import {
     CenterControls,
     ProgressBar,
     ContentFitLabel,
+    MxPlayerGestures,
     SubtitlePosition,
     ErrorDisplay,
     ExtendedMediaPlayerProps
 } from "../coreplayer";
 import { View, Text } from "../Themed";
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { GlassView } from 'expo-glass-effect';
 
 // Menu wrapper component - uses WebMenu on web, MenuView on native
@@ -65,6 +67,9 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     currentStreamIndex = 0,
     onStreamChange,
     torrentBufferProgress,
+    torrentBufferText,
+    torrentPeers,
+    torrentSpeed,
 }) => {
     const videoRef = useRef<VideoRef>(null);
     const shouldAutoHideControls = useRef(true);
@@ -99,6 +104,8 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
 
     // Local state
     const [contentFit, setContentFit] = useState<ResizeMode>(ResizeMode.CONTAIN);
+    const [volume, setVolume] = useState<number>(1.0);
+    const [brightness, setBrightness] = useState<number>(1.0);
     const [showContentFitLabel, setShowContentFitLabel] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [videoError, setVideoError] = useState<string | null>(null);
@@ -110,6 +117,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))
     ) : false;
     const effectiveBufferPct = isLocalFile ? undefined : (isTorrent ? torrentBufferProgress : undefined);
+    const effectiveBufferText = isLocalFile ? undefined : (isTorrent ? torrentBufferText : undefined);
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -319,12 +327,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, []);
 
         const autoPresentFullscreen = useCallback(() => {
-        if (Platform.OS === 'android' && !hasAutoPresentedFullscreenRef.current) {
-            hasAutoPresentedFullscreenRef.current = true;
-            setTimeout(() => {
-                videoRef.current?.presentFullscreenPlayer();
-            }, 100);
-        }
+        // Disabled: Custom glass in-app player with MX Player gestures is used directly
     }, []);
 
     const handleProgress = useCallback((data: OnProgressData) => {
@@ -447,8 +450,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, [playerState.currentTime, seekTo, playerState.isReady]);
 
     const cycleContentFit = useCallback(() => {
-        const currentIndex = CONSTANTS.RN_VIDEO_CONTENT_FIT_OPTIONS.indexOf(contentFit);
-        setContentFit(CONSTANTS.RN_VIDEO_CONTENT_FIT_OPTIONS[(currentIndex + 1) % CONSTANTS.CONTENT_FIT_OPTIONS.length]);
+        const modes = [ResizeMode.CONTAIN, ResizeMode.COVER, ResizeMode.STRETCH];
+        const currentIndex = modes.indexOf(contentFit);
+        const nextMode = modes[(currentIndex + 1) % modes.length];
+        setContentFit(nextMode);
         showContentFitLabelTemporarily();
         showControlsTemporarily();
     }, [contentFit, showControlsTemporarily, showContentFitLabelTemporarily]);
@@ -574,8 +579,6 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     ), [playerState.isDragging, playerState.dragPosition, playerState.currentTime, playerState.duration]);
 
     const handleBack = useCallback(() => {
-        if (hasHandledBackRef.current) return;
-        hasHandledBackRef.current = true;
         setIsPaused(true);
         const progressValue = calculateProgress(lastKnownTimeRef.current || playerState.currentTime || 0, playerState.duration);
         onBack({ message: '', progress: progressValue, player: "native" });
@@ -632,9 +635,14 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     }, [showControlsTemporarily]);
 
     const handleMuteToggle = useCallback(() => {
-        settings.setIsMuted(!settings.isMuted);
+        if (settings.isMuted || volume === 0) {
+            settings.setIsMuted(false);
+            if (volume === 0) setVolume(0.8);
+        } else {
+            settings.setIsMuted(true);
+        }
         showControlsTemporarily();
-    }, [settings, showControlsTemporarily]);
+    }, [settings, volume, showControlsTemporarily]);
 
     const handleSliderStart = useCallback(() => {
         playerState.setIsDragging(true);
@@ -644,14 +652,28 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     const handleSkipBackward = useCallback(() => skipTime(-10), [skipTime]);
     const handleSkipForward = useCallback(() => skipTime(30), [skipTime]);
 
-    const toggleFullscreen = useCallback(() => {
-        if (isFullscreen) {
-            videoRef.current?.dismissFullscreenPlayer();
+    const toggleFullscreen = useCallback(async () => {
+        if (Platform.OS !== 'web') {
+            try {
+                const currentOrientation = await ScreenOrientation.getOrientationAsync();
+                const isLandscape =
+                    currentOrientation === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+                    currentOrientation === ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
+                if (isLandscape) {
+                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+                    setIsFullscreen(false);
+                } else {
+                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+                    setIsFullscreen(true);
+                }
+            } catch {
+                cycleContentFit();
+            }
         } else {
-            videoRef.current?.presentFullscreenPlayer();
+            cycleContentFit();
         }
         showControlsTemporarily();
-    }, [isFullscreen, showControlsTemporarily]);
+    }, [showControlsTemporarily, cycleContentFit]);
 
     // Prepare selectedTextTrack for Video component
     const videoSelectedTextTrack: SelectedTrack | undefined = useMemo(() => {
@@ -705,18 +727,25 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         hideRewind: false,
     }), []);
 
-    const renderControlsOverlay = (isInModal: boolean = false) => {
+    const renderControlsOverlay = () => {
         const onBackPress = () => {
-            if (isInModal) {
-                videoRef.current?.dismissFullscreenPlayer();
-                setIsFullscreen(false);
-            }
             handleBack();
         };
 
         return (
-            <>
-                <TouchableOpacity style={styles.touchArea} activeOpacity={1} onPress={handleOverlayPress} />
+            <MxPlayerGestures
+                brightness={brightness}
+                onBrightnessChange={setBrightness}
+                volume={volume}
+                onVolumeChange={setVolume}
+                isMuted={settings.isMuted}
+                onMuteChange={settings.setIsMuted}
+                containerWidth={containerDimensions.width}
+                containerHeight={containerDimensions.height}
+                onTap={handleOverlayPress}
+                onDoubleTapLeft={handleSkipBackward}
+                onDoubleTapRight={handleSkipForward}
+            >
 
                 {uiState.showControls && (
                     <Animated.View style={[styles.controlsOverlay, { opacity: controlsOpacity }]} pointerEvents="box-none">
@@ -751,7 +780,19 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                                 )}
 
                                 <TouchableOpacity style={styles.controlButton} onPress={handleMuteToggle}>
-                                    <Ionicons name={settings.isMuted ? "volume-mute" : "volume-high"} size={24} color="white" />
+                                    <Ionicons
+                                        name={
+                                            settings.isMuted || volume === 0
+                                                ? "volume-mute"
+                                                : volume < 0.4
+                                                ? "volume-low"
+                                                : volume < 0.8
+                                                ? "volume-medium"
+                                                : "volume-high"
+                                        }
+                                        size={24}
+                                        color={settings.isMuted || volume === 0 ? "#ff4444" : "white"}
+                                    />
                                 </TouchableOpacity>
                                 <TouchableOpacity style={styles.controlButton} onPress={cycleContentFit}>
                                     <MaterialIcons name={getContentFitIcon()} size={24} color="white" />
@@ -860,7 +901,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                     contentFit={contentFit}
                     opacity={contentFitLabelOpacity}
                 />
-            </>
+            </MxPlayerGestures>
         );
     };
 
@@ -877,6 +918,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 source={videoSource}
                 style={computedVideoStyle}
                 paused={isPaused}
+                volume={settings.isMuted ? 0 : volume}
                 muted={settings.isMuted}
                 rate={settings.playbackSpeed}
                 resizeMode={contentFit}
@@ -924,6 +966,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 isBuffering={playerState.isBuffering}
                 hasStartedPlaying={playerState.isReady || playerState.currentTime > 0 || hasRenderedVideo}
                 bufferProgress={effectiveBufferPct}
+                bufferText={effectiveBufferText}
             />
 
             <WaitingLobby
@@ -931,9 +974,10 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 isBuffering={playerState.isBuffering && playerState.currentTime === 0}
                 opacity={bufferOpacity}
                 bufferProgress={effectiveBufferPct}
+                bufferText={effectiveBufferText}
             />
             {/* In-app controls overlay */}
-            {!isFullscreen && renderControlsOverlay(false)}
+            {renderControlsOverlay()}
         </View>
     );
 };

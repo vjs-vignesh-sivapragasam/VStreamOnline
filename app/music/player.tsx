@@ -285,7 +285,7 @@ function MusicPlayerScreenInner() {
   const { theme } = useTheme();
 
   // Keep screen awake while enjoying music
-  useKeepAwake('VPLEX_MUSIC_PLAYER');
+  useKeepAwake('VPLEX_MUSIC_PLAYER', { suppressDeactivateWarnings: true });
 
   const params = useLocalSearchParams<{
     id?: string;

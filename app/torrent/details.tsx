@@ -882,7 +882,7 @@ const TorrentDetails = () => {
       navigateToPlayer(item, 0);
     } finally {
       setLoadingItem(null);
-      setTimeout(() => setIsLaunchingPlayer(false), 2500);
+      setTimeout(() => setIsLaunchingPlayer(false), 400);
     }
   };
 
@@ -1709,7 +1709,7 @@ const TorrentDetails = () => {
                 {launchingQuality ? `Starting ${launchingQuality}...` : 'Starting Stream...'}
               </Text>
               <Text style={styles.launchingPlayerSubtitle}>
-                Connecting to stream and launching video player
+                Launching video player...
               </Text>
             </View>
           </View>

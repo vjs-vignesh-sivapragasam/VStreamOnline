@@ -27,12 +27,12 @@ export {
 
 export const unstable_settings = {
   // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)',
+  anchor: '(tabs)',
   tabs: {
-    initialRouteName: 'index',
+    anchor: 'index',
   },
   '(tabs)': {
-    initialRouteName: 'index',
+    anchor: 'index',
   },
 };
 
@@ -349,6 +349,14 @@ function RootLayoutNav() {
               />
               <Stack.Screen
                 name="settings/about"
+                options={{
+                  headerShown: false,
+                  headerTransparent: true,
+                  headerBackground: InvisibleHeaderBackground,
+                }}
+              />
+              <Stack.Screen
+                name="settings/coffee"
                 options={{
                   headerShown: false,
                   headerTransparent: true,

@@ -16043,9 +16043,19 @@
             var isNew = !engines[infoHash], e = engines[infoHash] = engines[infoHash] || EngineFS.engine(torrent, options);
             if (e.swarm.resume(), e.options = options, isNew && options.peerSearch) {
                 var peerSources = [];
-                peerSources = ((torrent || {}).announce || []).length ? peerSources.concat(torrent.announce).map((function(src) {
-                    return "tracker:" + src;
-                })).concat("dht:" + infoHash) : options.peerSearch.sources, new PeerSearch(peerSources, e.swarm, options.peerSearch);
+                if (((torrent || {}).announce || []).length) {
+                    peerSources = peerSources.concat(torrent.announce).map((function(src) {
+                        return (src.indexOf("tracker:") === 0 || src.indexOf("dht:") === 0) ? src : "tracker:" + src;
+                    })).concat("dht:" + infoHash);
+                } else if (options.peerSearch && options.peerSearch.sources) {
+                    peerSources = options.peerSearch.sources.map((function(src) {
+                        return (src.indexOf("tracker:") === 0 || src.indexOf("dht:") === 0) ? src : "tracker:" + src;
+                    }));
+                    if (peerSources.indexOf("dht:" + infoHash) === -1) {
+                        peerSources.push("dht:" + infoHash);
+                    }
+                }
+                new PeerSearch(peerSources, e.swarm, options.peerSearch);
             }
             if (isNew && options.swarmCap) {
                 var updater = updateSwarmCap.bind(null, e, options.swarmCap);
@@ -16112,8 +16122,9 @@
     };
     var router = Router(), externalRouter = Router();
     function prewarmStream(hash, idx) {
-        engines[hash] && engines[hash].ready((function() {
-            engines[hash].files[idx].select();
+        var ih = (hash || "").toLowerCase();
+        engines[ih] && engines[ih].ready((function() {
+            engines[ih].files[idx].select();
         }));
     }
     var jsonHead = {
@@ -16137,10 +16148,22 @@
                 var infoHash = parts[0].toLowerCase(), i = Number(parts[1] || -1), opts = {};
                 if (trackers) {
                     const defaults = EngineFS.getDefaults(infoHash);
+                    var formatted = trackers.map((function(t) {
+                        return (t.indexOf("tracker:") === 0 || t.indexOf("dht:") === 0) ? t : "tracker:" + t;
+                    }));
+                    var dhtSource = "dht:" + infoHash;
+                    if (formatted.indexOf(dhtSource) === -1) {
+                        formatted.push(dhtSource);
+                    }
+                    var merged = (defaults.peerSearch && defaults.peerSearch.sources ? defaults.peerSearch.sources : []).concat(formatted);
+                    var uniqSources = [];
+                    for (var sIdx = 0; sIdx < merged.length; sIdx++) {
+                        if (uniqSources.indexOf(merged[sIdx]) === -1) uniqSources.push(merged[sIdx]);
+                    }
                     opts.peerSearch = {
                         min: defaults.peerSearch.min,
                         max: defaults.peerSearch.max,
-                        sources: trackers
+                        sources: uniqSources
                     };
                 }
                 createEngine(infoHash, opts, (function(err, engine) {
@@ -16251,8 +16274,10 @@
             var stats = {};
             stats.streamLen = file.length, stats.streamName = file.name;
             for (var startPiece = file.offset / e.torrent.pieceLength | 0, endPiece = (file.offset + file.length - 1) / e.torrent.pieceLength | 0, availablePieces = 0, i = startPiece; i <= endPiece; i++) e.bitfield.get(i) && availablePieces++;
-            var filePieces = Math.ceil(file.length / e.torrent.pieceLength);
-            return stats.streamProgress = availablePieces / filePieces, stats;
+            var filePieces = Math.ceil(file.length / e.torrent.pieceLength), headPieces = Math.min(filePieces, 3), headAvailable = 0;
+            for (var h = startPiece; h < startPiece + headPieces; h++) { e.bitfield && e.bitfield.get(h) && headAvailable++; }
+            stats.headProgress = headPieces > 0 ? headAvailable / headPieces : 0, stats.availablePieces = availablePieces, stats.filePieces = filePieces, stats.streamProgress = availablePieces / filePieces;
+            return stats;
         })(e, e.torrent.files[idx])), s;
     }
     function Emit(args) {
@@ -16261,9 +16286,11 @@
     router.use(sendCORSHeaders), router.get("/favicon.ico", (function(req, res) {
         res.writeHead(404, jsonHead), res.end();
     })), router.get("/:infoHash/stats.json", (function(req, res) {
-        res.writeHead(200, jsonHead), res.end(JSON.stringify(getStatistics(engines[req.params.infoHash])));
+        var ih = (req.params.infoHash || "").toLowerCase();
+        res.writeHead(200, jsonHead), res.end(JSON.stringify(getStatistics(engines[ih])));
     })), router.get("/:infoHash/:idx/stats.json", (function(req, res) {
-        res.writeHead(200, jsonHead), res.end(JSON.stringify(getStatistics(engines[req.params.infoHash], req.params.idx)));
+        var ih = (req.params.infoHash || "").toLowerCase();
+        res.writeHead(200, jsonHead), res.end(JSON.stringify(getStatistics(engines[ih], req.params.idx)));
     })), router.get("/stats.json", (function(req, res) {
         res.writeHead(200, jsonHead);
         var stats = {};
@@ -16330,7 +16357,7 @@
             res.writeHead(200, jsonHead), res.end(JSON.stringify(getStatistics(result)));
         }
     })), router.get("/:infoHash/remove", (function(req, res) {
-        removeEngine(req.params.infoHash, (function() {
+        removeEngine((req.params.infoHash || "").toLowerCase(), (function() {
             res.writeHead(200, jsonHead), res.end(JSON.stringify({}));
         }));
     })), router.get("/removeAll", (function(req, res) {
@@ -16392,14 +16419,15 @@
     EngineFS.create = createEngine, EngineFS.exists = existsEngine, EngineFS.getFilename = function(infoHash, fileIdx) {
         return !!existsEngine(infoHash) && (getEngine(infoHash).files[fileIdx] || {}).name;
     }, EngineFS.remove = removeEngine, EngineFS.settings = function(infoHash, settings) {
-        var e = engines[infoHash];
+        var e = engines[(infoHash || "").toLowerCase()];
         e && (settings.hasOwnProperty("writeQueue") && e.store.writequeue && e.ready((function() {
             "PAUSE" == settings.writeQueue ? (e.store.writequeue.pause(), setTimeout((function() {
                 e.store.writequeue.resume();
             }), 5e4)) : e.store.writequeue.resume();
         })), "PAUSE" == settings.swarm && e.swarm.pause(), "RESUME" == settings.swarm && e.swarm.resume());
     }, EngineFS.stats = function(infoHash, idx) {
-        return engines[infoHash] ? getStatistics(engines[infoHash], idx) : null;
+        var ih = (infoHash || "").toLowerCase();
+        return engines[ih] ? getStatistics(engines[ih], idx) : null;
     }, EngineFS.list = listEngines, EngineFS.getSelections = getSelections, EngineFS.keepConcurrency = function(hash, concurrency) {
         const enginesCount = listEngines().length + 1;
         if (!concurrency || enginesCount <= concurrency) return Promise.resolve();
@@ -43996,7 +44024,7 @@
             }
             return err && mkdirp.sync(cacheDir = os.tmpdir()), path.join(cacheDir, ih);
         }, enginefs.getDefaults = function(ih) {
-            var MAX_CONNECTIONS = isPositiveInteger(settings.btMaxConnections) ? settings.btMaxConnections : 35, HANDSHAKE_TIMEOUT = isPositiveInteger(settings.btHandshakeTimeout) ? settings.btHandshakeTimeout : 2e4, REQUEST_TIMEOUT = isPositiveInteger(settings.btRequestTimeout) ? settings.btRequestTimeout : 4e3, DOWNLOAD_SPEED_LIMIT = isPositiveInteger(settings.btDownloadSpeedSoftLimit) ? settings.btDownloadSpeedSoftLimit : 1677721.6, DOWNLOAD_SPEED_HARD_LIMIT = isPositiveInteger(settings.btDownloadSpeedHardLimit) ? settings.btDownloadSpeedHardLimit : 2621440, MIN_PEERS_FOR_STABLE = isPositiveInteger(settings.btMinPeersForStable) ? settings.btMinPeersForStable : 5, defaults = {
+            var MAX_CONNECTIONS = isPositiveInteger(settings.btMaxConnections) ? settings.btMaxConnections : 55, HANDSHAKE_TIMEOUT = isPositiveInteger(settings.btHandshakeTimeout) ? settings.btHandshakeTimeout : 1e4, REQUEST_TIMEOUT = isPositiveInteger(settings.btRequestTimeout) ? settings.btRequestTimeout : 4e3, DOWNLOAD_SPEED_LIMIT = isPositiveInteger(settings.btDownloadSpeedSoftLimit) ? settings.btDownloadSpeedSoftLimit : 1677721.6, DOWNLOAD_SPEED_HARD_LIMIT = isPositiveInteger(settings.btDownloadSpeedHardLimit) ? settings.btDownloadSpeedHardLimit : 2621440, MIN_PEERS_FOR_STABLE = isPositiveInteger(settings.btMinPeersForStable) ? settings.btMinPeersForStable : 3, defaults = {
                 peerSearch: {
                     min: 40,
                     max: 150,

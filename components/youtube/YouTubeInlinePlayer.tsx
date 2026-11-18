@@ -1542,7 +1542,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   topInset,
   isFullScreen = false,
 }) => {
-  useKeepAwake('YOUTUBE_PLAYER_PLAYBACK');
+  useKeepAwake('YOUTUBE_PLAYER_PLAYBACK', { suppressDeactivateWarnings: true });
   const effectiveTopInset = Math.max(topInset || 0, Platform.OS === 'ios' ? 44 : 24);
 
   const [showControls, setShowControls] = useState(false);

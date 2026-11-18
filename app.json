@@ -38,7 +38,10 @@
           "vlc-x-callback",
           "infuse",
           "outplayer",
-          "open-vidhub"
+          "open-vidhub",
+          "tez",
+          "phonepe",
+          "upi"
         ]
       }
     },

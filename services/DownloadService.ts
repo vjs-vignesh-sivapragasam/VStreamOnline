@@ -21,7 +21,7 @@ async function setKeepAwakeState(active: boolean): Promise<void> {
       }
     } else if (!active && isKeepAwakeActive) {
       if (typeof KeepAwake.deactivateKeepAwake === 'function') {
-        KeepAwake.deactivateKeepAwake('VSTREAM_ACTIVE_DOWNLOAD');
+        KeepAwake.deactivateKeepAwake('VSTREAM_ACTIVE_DOWNLOAD')?.catch?.(() => {});
         isKeepAwakeActive = false;
       }
     }

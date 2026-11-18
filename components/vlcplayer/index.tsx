@@ -53,6 +53,9 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     currentStreamIndex = 0,
     onStreamChange,
     torrentBufferProgress,
+    torrentBufferText,
+    torrentPeers,
+    torrentSpeed,
 }) => {
     if (!isVLCPlayerAvailable()) {
         const { MediaPlayer: NativePlayer } = require('@/components/nativeplayer');
@@ -115,6 +118,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))
     ) : false;
     const effectiveBufferPct = isLocalFile ? undefined : (isTorrent ? torrentBufferProgress : undefined);
+    const effectiveBufferText = isLocalFile ? undefined : (isTorrent ? torrentBufferText : undefined);
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     const [currentSubtitleText, setCurrentSubtitleText] = useState<string>('');
@@ -571,6 +575,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 isBuffering={playerState.isBuffering}
                 hasStartedPlaying={playerState.isReady}
                 bufferProgress={effectiveBufferPct}
+                bufferText={effectiveBufferText}
             />
 
             <WaitingLobby
@@ -578,6 +583,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 isBuffering={playerState.isBuffering && playerState.currentTime === 0}
                 opacity={bufferOpacity}
                 bufferProgress={effectiveBufferPct}
+                bufferText={effectiveBufferText}
             />
 
             <TouchableOpacity style={styles.touchArea} activeOpacity={1} onPress={handleOverlayPress} />

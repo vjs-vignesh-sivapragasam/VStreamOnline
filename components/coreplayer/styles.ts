@@ -199,12 +199,23 @@ export const styles = StyleSheet.create({
 
     // Content Fit Label
     contentFitLabelContainer: {
+        position: 'absolute',
+        top: '40%',
+        alignSelf: 'center',
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        backgroundColor: 'rgba(15, 15, 20, 0.92)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
         paddingHorizontal: 20,
         paddingVertical: 12,
         borderRadius: 25,
+        zIndex: 200,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.5,
+        shadowRadius: 8,
+        elevation: 8,
     },
 
     contentFitLabelText: {

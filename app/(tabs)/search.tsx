@@ -54,6 +54,215 @@ export const CATEGORY_CONFIG: {
   { key: 'mollywood', label: 'Mollywood', icon: 'film-outline' },
 ];
 
+// ─── OTT Platforms Configuration ─────────────────────────────────────────────
+
+const NETFLIX_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#000000"/>
+  <path fill="#B1060F" d="M17 11h6.5v32H17z"/>
+  <path fill="#E50914" d="M30.5 11h6.5v32h-6.5z"/>
+  <path fill="#E50914" d="M17 11h6.5l13.5 32H30.5z"/>
+</svg>`;
+
+const YOUTUBE_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#1F1F1F"/>
+  <rect x="10" y="16" width="34" height="22" rx="7" fill="#FF0000"/>
+  <polygon points="23,21 33,27 23,33" fill="#FFFFFF"/>
+</svg>`;
+
+const PRIME_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#00A8E1"/>
+  <text x="27" y="23" font-family="-apple-system, Roboto, sans-serif" font-size="11.5" font-weight="900" fill="#ffffff" text-anchor="middle">prime</text>
+  <text x="27" y="33" font-family="-apple-system, Roboto, sans-serif" font-size="8.5" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">video</text>
+  <path d="M15 38c7 3.5 17 3.5 24 0" stroke="#FF9900" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+</svg>`;
+
+const DISNEY_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <defs>
+    <linearGradient id="disneyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E1B40"/>
+      <stop offset="100%" stop-color="#040714"/>
+    </linearGradient>
+  </defs>
+  <rect width="54" height="54" rx="15" fill="url(#disneyGrad)"/>
+  <path d="M10 26c9-13 24-13 34 0" stroke="#00A8FF" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <text x="23" y="30" font-family="Georgia, serif" font-size="14" font-style="italic" font-weight="bold" fill="#ffffff" text-anchor="middle">Disn<tspan font-style="normal">ey</tspan></text>
+  <text x="39" y="28" font-family="-apple-system, sans-serif" font-size="15" font-weight="900" fill="#00B5FF" text-anchor="middle">+</text>
+</svg>`;
+
+const ZEE5_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#1B0733"/>
+  <circle cx="27" cy="27" r="17" fill="none" stroke="#A855F7" stroke-width="2.5"/>
+  <circle cx="27" cy="27" r="17" fill="none" stroke="#EC4899" stroke-width="2.5" stroke-dasharray="28 85"/>
+  <text x="27" y="31.5" font-family="-apple-system, Roboto, sans-serif" font-size="12" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">ZEE5</text>
+</svg>`;
+
+const SONYLIV_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#141416"/>
+  <circle cx="18" cy="18" r="3.5" fill="#00A3FF"/>
+  <circle cx="27" cy="18" r="3.5" fill="#FF007A"/>
+  <circle cx="36" cy="18" r="3.5" fill="#FFA800"/>
+  <text x="27" y="36" font-family="-apple-system, Roboto, sans-serif" font-size="13" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">LIV</text>
+</svg>`;
+
+const AHA_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#FF3E1D"/>
+  <text x="27" y="34" font-family="-apple-system, Roboto, sans-serif" font-size="17" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="-0.5">aha</text>
+</svg>`;
+
+const JIOCINEMA_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#0E0E12"/>
+  <rect x="9" y="13" width="36" height="28" rx="10" fill="#E11D48"/>
+  <text x="27" y="32" font-family="-apple-system, Roboto, sans-serif" font-size="13" font-weight="900" fill="#ffffff" text-anchor="middle">Jio</text>
+</svg>`;
+
+const SUNNXT_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#111111"/>
+  <circle cx="27" cy="19" r="7" fill="#FBBF24"/>
+  <text x="27" y="36" font-family="-apple-system, Roboto, sans-serif" font-size="8.5" font-weight="900" fill="#FBBF24" text-anchor="middle" letter-spacing="0.5">SUN NXT</text>
+</svg>`;
+
+const APPLETV_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
+  <rect width="54" height="54" rx="15" fill="#000000"/>
+  <path fill="#ffffff" d="M21 27.5c-.8.9-2 1.5-3 1.5-1.1 0-2.1-.6-2.9-1.5-1.6-1.8-2.6-5.1-1.2-7.5.7-1.2 2-2 3.4-2 1 0 1.9.7 2.6.7.7 0 1.8-.7 3-.7 1.2 0 2.3.6 3 1.6-2.7 1.6-2.2 5.2.1 6.2-.6 1.4-1.3 2.7-2.4 3.7-.7.6-1.4 1.2-2.3 1.2-.9 0-1.5-.6-2.3-1.2zM20.2 16.5c.5-.6.8-1.4.7-2.3-.8.1-1.7.5-2.2 1.2-.5.5-.8 1.4-.7 2.2.9 0 1.7-.5 2.2-1.1z"/>
+  <text x="33" y="27" font-family="-apple-system, sans-serif" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">tv+</text>
+</svg>`;
+
+export interface OttPlatform {
+  id: string;
+  name: string;
+  short: string;
+  searchQuery: string;
+  brandColor: string;
+  tag: string;
+  svgXml?: string;
+  glyphType?: 'icon' | 'text';
+  iconName?: keyof typeof Ionicons.glyphMap;
+  glyphText?: string;
+  regex: RegExp;
+}
+
+export const OTT_PLATFORMS: OttPlatform[] = [
+  {
+    id: 'netflix',
+    name: 'Netflix',
+    short: 'Netflix',
+    searchQuery: 'netflix',
+    brandColor: '#E50914',
+    tag: 'NF',
+    svgXml: NETFLIX_SVG,
+    regex: /\b(netflix|nflx)\b|\[\s*nf\s*[-–\]]|\[\s*netflix\s*[-–\]]|\bnf\s*[-_:]/i,
+  },
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    short: 'YouTube',
+    searchQuery: 'youtube',
+    brandColor: '#FF0000',
+    tag: 'YOUTUBE',
+    svgXml: YOUTUBE_SVG,
+    regex: /\b(youtube|yt)\b|\[\s*yt\s*[-–\]]|\[\s*youtube\s*[-–\]]/i,
+  },
+  {
+    id: 'prime',
+    name: 'Prime Video',
+    short: 'Prime',
+    searchQuery: 'prime',
+    brandColor: '#00A8E1',
+    tag: 'PRIME',
+    svgXml: PRIME_SVG,
+    regex: /\b(prime\s*video|amazon\s*prime|amzn|prime)\b|\[\s*amzn\s*|\[\s*prime\s*/i,
+  },
+  {
+    id: 'hotstar',
+    name: 'Disney+ Hotstar',
+    short: 'Disney+',
+    searchQuery: 'hotstar',
+    brandColor: '#1455FF',
+    tag: 'HOTSTAR',
+    svgXml: DISNEY_SVG,
+    regex: /\b(hotstar|jiohotstar|disney\+?|dsnp)\b|\[\s*hotstar\s*|\[\s*dsnp\s*/i,
+  },
+  {
+    id: 'zee5',
+    name: 'Zee5',
+    short: 'Zee5',
+    searchQuery: 'zee5',
+    brandColor: '#A855F7',
+    tag: 'ZEE5',
+    svgXml: ZEE5_SVG,
+    regex: /\b(zee5|zee\s*5)\b|\[\s*zee5\s*/i,
+  },
+  {
+    id: 'sonyliv',
+    name: 'SonyLIV',
+    short: 'SonyLIV',
+    searchQuery: 'sonyliv',
+    brandColor: '#FF6900',
+    tag: 'SONY LIV',
+    svgXml: SONYLIV_SVG,
+    regex: /\b(sonyliv|sony\s*liv)\b|\[\s*sonyliv\s*|\[\s*sony\s*/i,
+  },
+  {
+    id: 'aha',
+    name: 'Aha Video',
+    short: 'Aha',
+    searchQuery: 'aha',
+    brandColor: '#FF3E1D',
+    tag: 'AHA',
+    svgXml: AHA_SVG,
+    regex: /\b(aha|ahavideo)\b|\[\s*aha\s*/i,
+  },
+  {
+    id: 'jiocinema',
+    name: 'JioCinema',
+    short: 'JioCinema',
+    searchQuery: 'jiocinema',
+    brandColor: '#E11D48',
+    tag: 'JIOCINEMA',
+    svgXml: JIOCINEMA_SVG,
+    regex: /\b(jiocinema|jio\s*cinema)\b|\[\s*jiocinema\s*|\[\s*jio\s*/i,
+  },
+  {
+    id: 'sunnxt',
+    name: 'Sun NXT',
+    short: 'Sun NXT',
+    searchQuery: 'sunnxt',
+    brandColor: '#EF4444',
+    tag: 'SUN NXT',
+    svgXml: SUNNXT_SVG,
+    regex: /\b(sunnxt|sun\s*nxt)\b|\[\s*sunnxt\s*/i,
+  },
+  {
+    id: 'appletv',
+    name: 'Apple TV+',
+    short: 'Apple TV',
+    searchQuery: 'apple tv',
+    brandColor: '#A1A1AA',
+    tag: 'APPLE TV',
+    svgXml: APPLETV_SVG,
+    regex: /\b(apple\s*tv\+?|atvp)\b|\[\s*atvp\s*/i,
+  },
+];
+
+const ottCache = new WeakMap<GroupedItem, OttPlatform | null>();
+
+export function getGroupOtt(group: GroupedItem): OttPlatform | null {
+  if (ottCache.has(group)) {
+    return ottCache.get(group)!;
+  }
+  for (const item of group.items) {
+    const raw = `${item.title || ''} ${group.name || ''} ${item.guid || ''} ${item.groupid || ''}`;
+    for (const ott of OTT_PLATFORMS) {
+      if (ott.regex.test(raw)) {
+        ottCache.set(group, ott);
+        return ott;
+      }
+    }
+  }
+  ottCache.set(group, null);
+  return null;
+}
+
 // Caches for maximum performance & zero re-computation
 const categoryCache = new WeakMap<GroupedItem, MovieCategoryKey>();
 const titleCache = new Map<string, string>();
@@ -169,6 +378,7 @@ const SearchMovieCard = React.memo(({
   const best: TorrentItem = group.items.find((i) => i.poster) ?? group.items[0];
   const type = (group as any).type || 'movie';
   const releasesCount = group.items.length;
+  const ottInfo = useMemo(() => getGroupOtt(group), [group]);
 
   const titleKey = useMemo(() => {
     return `${(group.name || best?.title || '').toLowerCase().trim()}_${group.year || ''}_${type}`;
@@ -244,6 +454,11 @@ const SearchMovieCard = React.memo(({
             <SvgXml xml={DefaultPosterImgXml} width={cardWidth * 0.5} height={posterHeight * 0.4} />
           </View>
         )}
+        {ottInfo && (
+          <View style={[styles.cardOttBadge, { backgroundColor: ottInfo.brandColor }]}>
+            <Text style={styles.cardOttBadgeText}>{ottInfo.short}</Text>
+          </View>
+        )}
       </View>
 
       <Text style={[styles.cardTitle, { width: cardWidth }]} numberOfLines={2}>
@@ -263,8 +478,19 @@ const SearchMovieCard = React.memo(({
 
 const SearchScreen = () => {
   const { theme } = useTheme();
-  const params = useLocalSearchParams<{ query?: string }>();
-  const [query, setQuery]                         = useState(params.query || '');
+  const params = useLocalSearchParams<{ query?: string; ott?: string }>();
+  const initialOtt = useMemo(() => {
+    return (
+      OTT_PLATFORMS.find(
+        (p) =>
+          p.id === params.ott ||
+          (params.query && p.searchQuery.toLowerCase() === params.query.trim().toLowerCase())
+      ) || null
+    );
+  }, [params.ott, params.query]);
+
+  const [query, setQuery]                         = useState(params.query || initialOtt?.searchQuery || '');
+  const [selectedOttId, setSelectedOttId]         = useState<string | null>(initialOtt?.id || null);
   const [showRecentlyAdded, setShowRecentlyAdded] = useState(false);
   const [recentlyAddedMovies, setRecentlyAddedMovies] = useState<GroupedItem[]>(() => {
     try {
@@ -292,11 +518,50 @@ const SearchScreen = () => {
   const cardWidth = (width - totalHorizontalPadding - (numColumns - 1) * cardSpacing) / numColumns;
   const posterHeight = cardWidth * 1.5;
 
+  const selectedOtt = useMemo(
+    () => OTT_PLATFORMS.find((p) => p.id === selectedOttId) || null,
+    [selectedOttId]
+  );
+
+  const handleOttPress = useCallback(
+    async (ott: OttPlatform) => {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      if (selectedOttId === ott.id) {
+        setSelectedOttId(null);
+        setSelectedCategory('all');
+      } else {
+        setSelectedOttId(ott.id);
+        setSelectedCategory('all');
+
+        // If no search query typed, load and filter Recently Added
+        if (!query.trim()) {
+          setShowRecentlyAdded(true);
+          if (recentlyAddedMovies.length === 0) {
+            setIsLoadingRecent(true);
+            try {
+              const items = await fetchTamilMVRecentlyAdded(false);
+              setRecentlyAddedMovies(items || []);
+            } catch (e) {
+              console.warn('[Search] Failed to fetch recently added for OTT:', e);
+            } finally {
+              setIsLoadingRecent(false);
+            }
+          }
+        }
+      }
+    },
+    [selectedOttId, query, recentlyAddedMovies.length]
+  );
+
   const handleRecentlyAddedPress = useCallback(async () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setShowRecentlyAdded(true);
+    setSelectedOttId(null);
+    setQuery('');
     setSelectedCategory('all');
     if (recentlyAddedMovies.length === 0) {
       setIsLoadingRecent(true);
@@ -342,6 +607,12 @@ const SearchScreen = () => {
   useEffect(() => {
     if (params.query && params.query !== query) {
       setQuery(params.query);
+      const match = OTT_PLATFORMS.find(
+        (p) => p.searchQuery.toLowerCase() === params.query!.trim().toLowerCase()
+      );
+      if (match) {
+        setSelectedOttId(match.id);
+      }
     }
   }, [params.query]);
 
@@ -382,9 +653,23 @@ const SearchScreen = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setQuery('');
+    setSelectedOttId(null);
     setLiveSearchResults([]);
     setSelectedCategory('all');
   }, []);
+
+  const handleSearchTextChange = useCallback(
+    (text: string) => {
+      setQuery(text);
+      if (selectedOttId) {
+        const active = OTT_PLATFORMS.find((p) => p.id === selectedOttId);
+        if (active && text.trim().toLowerCase() !== active.searchQuery.toLowerCase()) {
+          setSelectedOttId(null);
+        }
+      }
+    },
+    [selectedOttId]
+  );
 
   const handleOpenWebView = useCallback(async () => {
     if (await isHapticsSupported()) {
@@ -424,13 +709,26 @@ const SearchScreen = () => {
     if (!q) return [];
     if (liveSearchResults.length === 0) return [];
 
+    const activeOtt = OTT_PLATFORMS.find((p) => p.id === selectedOttId);
+
     const movieMap = new Map<string, GroupedItem>();
     for (const g of liveSearchResults) {
+      if (activeOtt) {
+        const ott = getGroupOtt(g);
+        const matchesOtt =
+          ott?.id === selectedOttId ||
+          g.items.some((i) =>
+            activeOtt.regex.test(`${i.title || ''} ${g.name || ''} ${i.guid || ''} ${i.groupid || ''}`)
+          );
+        if (!matchesOtt) continue;
+      }
+
       const nameMatch = g.name?.toLowerCase().includes(q);
       const yearMatch = g.year ? g.year.toString().includes(q) : false;
       const titleMatch = g.items.some((i) => i.title.toLowerCase().includes(q));
       const langMatch = g.items.some((i) => i.language?.toLowerCase().includes(q));
-      if (nameMatch || yearMatch || titleMatch || langMatch) {
+
+      if (nameMatch || yearMatch || titleMatch || langMatch || activeOtt) {
         const key = `${(g.name || '').toLowerCase()}|||${g.year || ''}`;
         if (!movieMap.has(key)) {
           movieMap.set(key, g);
@@ -439,12 +737,27 @@ const SearchScreen = () => {
     }
 
     return Array.from(movieMap.values());
-  }, [query, liveSearchResults]);
+  }, [query, liveSearchResults, selectedOttId]);
+
+  // If an OTT shortcut is selected, filter Recently Added by that OTT platform
+  const ottFilteredRecentMovies = useMemo(() => {
+    if (!selectedOttId) return recentlyAddedMovies;
+    const activeOtt = OTT_PLATFORMS.find((p) => p.id === selectedOttId);
+    if (!activeOtt) return recentlyAddedMovies;
+
+    return recentlyAddedMovies.filter((g) => {
+      const ott = getGroupOtt(g);
+      if (ott?.id === selectedOttId) return true;
+      return g.items.some((i) =>
+        activeOtt.regex.test(`${i.title || ''} ${g.name || ''} ${i.guid || ''} ${i.groupid || ''}`)
+      );
+    });
+  }, [recentlyAddedMovies, selectedOttId]);
 
   // Category statistics & grouped sections for Recently Added (single-pass O(N))
   const { recentCategoryCounts, recentGroupedByCategory } = useMemo(() => {
     const counts: Record<MovieCategoryKey, number> = {
-      all: recentlyAddedMovies.length,
+      all: ottFilteredRecentMovies.length,
       kollywood: 0,
       hollywood: 0,
       series: 0,
@@ -454,7 +767,7 @@ const SearchScreen = () => {
     };
     const map = new Map<MovieCategoryKey, GroupedItem[]>();
 
-    for (const g of recentlyAddedMovies) {
+    for (const g of ottFilteredRecentMovies) {
       const cat = getGroupCategory(g);
       counts[cat] = (counts[cat] || 0) + 1;
       let list = map.get(cat);
@@ -479,12 +792,12 @@ const SearchScreen = () => {
     }
 
     return { recentCategoryCounts: counts, recentGroupedByCategory: sections };
-  }, [recentlyAddedMovies]);
+  }, [ottFilteredRecentMovies]);
 
   const displayedRecentMovies = useMemo(() => {
-    if (selectedCategory === 'all') return recentlyAddedMovies;
-    return recentlyAddedMovies.filter((g) => getGroupCategory(g) === selectedCategory);
-  }, [recentlyAddedMovies, selectedCategory]);
+    if (selectedCategory === 'all') return ottFilteredRecentMovies;
+    return ottFilteredRecentMovies.filter((g) => getGroupCategory(g) === selectedCategory);
+  }, [ottFilteredRecentMovies, selectedCategory]);
 
   const recentCategoryFilterOptions = useMemo(() => {
     return CATEGORY_CONFIG.filter((cfg) => {
@@ -604,7 +917,7 @@ const SearchScreen = () => {
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>Search</Text>
+          <Text style={styles.headerTitle}>Explore</Text>
         </View>
       </View>
 
@@ -616,10 +929,14 @@ const SearchScreen = () => {
           </View>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search movie title..."
+            placeholder={
+              selectedOtt
+                ? `Filter ${selectedOtt.name} or type search…`
+                : "Search movie title..."
+            }
             placeholderTextColor="#6E6E73"
             value={query}
-            onChangeText={setQuery}
+            onChangeText={handleSearchTextChange}
             returnKeyType="search"
             submitBehavior="blurAndSubmit"
             autoCorrect={false}
@@ -633,6 +950,73 @@ const SearchScreen = () => {
               <Ionicons name="close-circle" size={20} color="#ff453a" />
             </Pressable>
           )}
+        </View>
+
+        {/* OTT Platform Shortcuts Bar (TV Remote Style App Buttons) */}
+        <View style={styles.ottBarContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.ottBarScroll}
+            keyboardShouldPersistTaps="handled"
+          >
+            {OTT_PLATFORMS.map((ott) => {
+              const isSelected = selectedOttId === ott.id;
+              return (
+                <TouchableOpacity
+                  key={`ott-remote-btn-${ott.id}`}
+                  style={styles.ottShortcutItem}
+                  onPress={() => handleOttPress(ott)}
+                  activeOpacity={0.78}
+                  accessibilityRole="button"
+                  accessibilityLabel={ott.name}
+                >
+                  <View
+                    style={[
+                      styles.ottTileButton,
+                      isSelected && [
+                        styles.ottTileButtonActive,
+                        {
+                          borderColor: ott.brandColor,
+                          shadowColor: ott.brandColor,
+                        },
+                      ],
+                    ]}
+                  >
+                    {ott.svgXml ? (
+                      <SvgXml xml={ott.svgXml} width={50} height={50} />
+                    ) : ott.glyphType === 'icon' ? (
+                      <Ionicons
+                        name={ott.iconName!}
+                        size={22}
+                        color={isSelected ? '#ffffff' : ott.brandColor}
+                      />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.ottGlyphText,
+                          {
+                            color: isSelected ? '#ffffff' : ott.brandColor,
+                          },
+                        ]}
+                      >
+                        {ott.glyphText}
+                      </Text>
+                    )}
+                  </View>
+                  <Text
+                    style={[
+                      styles.ottTileLabel,
+                      isSelected && [styles.ottTileLabelActive, { color: ott.brandColor }],
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {ott.short}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
       </View>
 
@@ -648,11 +1032,29 @@ const SearchScreen = () => {
           {filteredMovies.length > 0 && (
             <View style={styles.resultsGridSection}>
               <View style={styles.resultsHeaderRow}>
-                <Text style={styles.resultsCountText}>
-                  {selectedCategory === 'all'
-                    ? `${filteredMovies.length} ${filteredMovies.length === 1 ? 'Movie' : 'Movies'} found`
-                    : `${searchCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedSearchMovies.length} ${displayedSearchMovies.length === 1 ? 'Match' : 'Matches'})`}
-                </Text>
+                {selectedOtt ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
+                    <View
+                      style={[
+                        styles.ottHeaderBadge,
+                        { backgroundColor: selectedOtt.brandColor },
+                      ]}
+                    >
+                      <Text style={styles.ottHeaderBadgeText}>{selectedOtt.name}</Text>
+                    </View>
+                    <Text style={styles.resultsCountText} numberOfLines={1}>
+                      {selectedCategory === 'all'
+                        ? ` • ${filteredMovies.length} ${filteredMovies.length === 1 ? 'Title' : 'Titles'}`
+                        : ` • ${displayedSearchMovies.length} ${searchCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || ''}`}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.resultsCountText}>
+                    {selectedCategory === 'all'
+                      ? `${filteredMovies.length} ${filteredMovies.length === 1 ? 'Movie' : 'Movies'} found`
+                      : `${searchCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedSearchMovies.length} ${displayedSearchMovies.length === 1 ? 'Match' : 'Matches'})`}
+                  </Text>
+                )}
                 <TouchableOpacity
                   style={styles.clearIconButton}
                   onPress={handleClearQuery}
@@ -801,14 +1203,32 @@ const SearchScreen = () => {
           ) : recentlyAddedMovies.length > 0 ? (
             <View style={styles.resultsGridSection}>
               <View style={styles.resultsHeaderRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name="time-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
-                  <Text style={styles.resultsCountText}>
-                    {selectedCategory === 'all'
-                      ? `Recently Added (${recentlyAddedMovies.length} ${recentlyAddedMovies.length === 1 ? 'Movie' : 'Movies'})`
-                      : `${recentCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedRecentMovies.length} ${displayedRecentMovies.length === 1 ? 'Title' : 'Titles'})`}
-                  </Text>
-                </View>
+                {selectedOtt ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
+                    <View
+                      style={[
+                        styles.ottHeaderBadge,
+                        { backgroundColor: selectedOtt.brandColor },
+                      ]}
+                    >
+                      <Text style={styles.ottHeaderBadgeText}>{selectedOtt.name}</Text>
+                    </View>
+                    <Text style={styles.resultsCountText} numberOfLines={1}>
+                      {selectedCategory === 'all'
+                        ? `in Recently Added (${displayedRecentMovies.length} ${displayedRecentMovies.length === 1 ? 'Title' : 'Titles'})`
+                        : `(${displayedRecentMovies.length} ${recentCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || ''})`}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="time-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
+                    <Text style={styles.resultsCountText}>
+                      {selectedCategory === 'all'
+                        ? `Recently Added (${recentlyAddedMovies.length} ${recentlyAddedMovies.length === 1 ? 'Movie' : 'Movies'})`
+                        : `${recentCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedRecentMovies.length} ${displayedRecentMovies.length === 1 ? 'Title' : 'Titles'})`}
+                    </Text>
+                  </View>
+                )}
                 <TouchableOpacity
                   style={styles.clearIconButton}
                   onPress={handleClearRecentlyAdded}
@@ -824,37 +1244,73 @@ const SearchScreen = () => {
               {renderCategoryFilterChips(recentCategoryFilterOptions)}
 
               {selectedCategory === 'all' ? (
-                /* Grouped by Category Sections (like index.tsx) */
-                recentGroupedByCategory.map((sec) => (
-                  <View key={`recent-sec-${sec.key}`} style={styles.categorySection}>
-                    <View style={styles.categorySectionHeader}>
-                      <Text style={styles.categorySectionTitle}>
-                        {sec.label}
-                      </Text>
+                recentGroupedByCategory.length > 0 ? (
+                  /* Grouped by Category Sections (like index.tsx) */
+                  recentGroupedByCategory.map((sec) => (
+                    <View key={`recent-sec-${sec.key}`} style={styles.categorySection}>
+                      <View style={styles.categorySectionHeader}>
+                        <Text style={styles.categorySectionTitle}>
+                          {sec.label}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.seeAllButton}
+                          onPress={() => handleCategorySelect(sec.key)}
+                          activeOpacity={0.7}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Text style={styles.seeAllText}>See all ({sec.items.length})</Text>
+                          <Ionicons name="chevron-forward" size={15} color="#8E8E93" style={styles.chevronIcon} />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.gridWrap}>
+                        {sec.items.map((group, index) => (
+                          <SearchMovieCard
+                            key={`recent-${sec.key}-${group.name}-${group.year || ''}-${index}`}
+                            group={group}
+                            cardWidth={cardWidth}
+                            posterHeight={posterHeight}
+                            onPress={handleCardPress}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.emptyCategoryWrap}>
+                    <Ionicons name="film-outline" size={36} color="#6E6E73" />
+                    <Text style={styles.emptyCategoryText}>
+                      {selectedOtt
+                        ? `No ${selectedOtt.name} releases found in this Recently Added batch.`
+                        : 'No releases found in this batch.'}
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                      {selectedOtt && (
+                        <TouchableOpacity
+                          style={[
+                            styles.retryButton,
+                            { backgroundColor: selectedOtt.brandColor, borderColor: selectedOtt.brandColor },
+                          ]}
+                          onPress={() => {
+                            setQuery(selectedOtt.searchQuery);
+                            setShowRecentlyAdded(false);
+                          }}
+                        >
+                          <Text style={styles.retryButtonText}>Search all {selectedOtt.name}</Text>
+                        </TouchableOpacity>
+                      )}
                       <TouchableOpacity
-                        style={styles.seeAllButton}
-                        onPress={() => handleCategorySelect(sec.key)}
-                        activeOpacity={0.7}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.retryButton}
+                        onPress={() => {
+                          setSelectedOttId(null);
+                          setSelectedCategory('all');
+                        }}
                       >
-                        <Text style={styles.seeAllText}>See all ({sec.items.length})</Text>
-                        <Ionicons name="chevron-forward" size={15} color="#8E8E93" style={styles.chevronIcon} />
+                        <Text style={styles.retryButtonText}>Show All Releases</Text>
                       </TouchableOpacity>
                     </View>
-
-                    <View style={styles.gridWrap}>
-                      {sec.items.map((group, index) => (
-                        <SearchMovieCard
-                          key={`recent-${sec.key}-${group.name}-${group.year || ''}-${index}`}
-                          group={group}
-                          cardWidth={cardWidth}
-                          posterHeight={posterHeight}
-                          onPress={handleCardPress}
-                        />
-                      ))}
-                    </View>
                   </View>
-                ))
+                )
               ) : (
                 /* Single Filtered Category Grid */
                 displayedRecentMovies.length > 0 ? (
@@ -1017,6 +1473,63 @@ const styles = StyleSheet.create({
   clearButton: {
     marginLeft: 8,
     padding: 2,
+  },
+
+  // OTT Shortcuts Bar (TV Remote Style App Buttons)
+  ottBarContainer: {
+    marginTop: 10,
+    marginHorizontal: -16,
+    paddingBottom: 2,
+  },
+  ottBarScroll: {
+    paddingHorizontal: 16,
+    gap: 14,
+    alignItems: 'flex-start',
+  },
+  ottShortcutItem: {
+    alignItems: 'center',
+    width: 62,
+  },
+  ottTileButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 15,
+    backgroundColor: '#161619',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  ottTileButtonActive: {
+    borderWidth: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.75,
+    shadowRadius: 10,
+    elevation: 6,
+    transform: [{ scale: 1.04 }],
+  },
+  ottTileLabel: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.65)',
+    marginTop: 5,
+    textAlign: 'center',
+    letterSpacing: -0.1,
+  },
+  ottTileLabelActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  ottGlyphText: {
+    fontWeight: '900',
+    textAlign: 'center',
+    letterSpacing: -0.4,
   },
 
   catalogLoadingContainer: {
@@ -1345,6 +1858,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
+  },
+
+  // Active OTT Header Badge
+  ottHeaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginRight: 6,
+  },
+  ottHeaderBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: 0.2,
+  },
+
+  // Card Poster OTT Badge
+  cardOttBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.6,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  cardOttBadgeText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
 });
 

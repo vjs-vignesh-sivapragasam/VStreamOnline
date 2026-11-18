@@ -85,12 +85,12 @@ export async function applyScreenKeepAwake(active: boolean): Promise<void> {
     const KeepAwake = require('expo-keep-awake');
     if (active && !isKeepAwakeActive) {
       if (typeof KeepAwake.activateKeepAwakeAsync === 'function') {
-        await KeepAwake.activateKeepAwakeAsync(KEEP_AWAKE_TAG);
+        await KeepAwake.activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
         isKeepAwakeActive = true;
       }
     } else if (!active && isKeepAwakeActive) {
       if (typeof KeepAwake.deactivateKeepAwake === 'function') {
-        await KeepAwake.deactivateKeepAwake(KEEP_AWAKE_TAG);
+        await KeepAwake.deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
         isKeepAwakeActive = false;
       }
     }

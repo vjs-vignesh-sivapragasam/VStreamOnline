@@ -14,6 +14,7 @@ import {
   Platform,
   Modal,
   ToastAndroid,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +31,7 @@ import {
   formatPublishedTime,
 } from '@/services/YouTubeService';
 import { youTubeListService, SavedYouTubeItem } from '@/services/YouTubeListService';
+import { youTubeHistoryService, YouTubeHistoryItem } from '@/services/YouTubeHistoryService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
 import { YouTubeAuthModal } from '@/components/youtube/YouTubeAuthModal';
@@ -117,20 +119,22 @@ interface VideoCardProps {
   onPauseDownload?: (item: YouTubeVideoItem) => void;
   onToggleSave: (item: YouTubeVideoItem) => void;
   onCopyLink: (item: YouTubeVideoItem) => void;
+  onRemoveFromHistory?: (item: YouTubeVideoItem) => void;
 }
 
-const VideoCard = memo<VideoCardProps>(({
-  item,
-  isLoading,
-  isSaved,
-  downloadItem,
-  onPress,
-  onDownload,
-  onResumeDownload,
-  onPauseDownload,
-  onToggleSave,
-  onCopyLink,
-}) => {
+const VideoCard = memo((props: VideoCardProps) => {
+  const {
+    item,
+    isLoading,
+    isSaved,
+    downloadItem,
+    onPress,
+    onDownload,
+    onResumeDownload,
+    onPauseDownload,
+    onToggleSave,
+    onCopyLink,
+  } = props;
   const { theme } = useTheme();
   return (
     <TouchableOpacity
@@ -175,6 +179,16 @@ const VideoCard = memo<VideoCardProps>(({
 
         {/* Action Buttons: Copy Link, Save & Download */}
         <View style={styles.cardActionsGroup}>
+          {props.onRemoveFromHistory ? (
+            <TouchableOpacity
+              style={styles.cardRemoveHistoryButton}
+              onPress={() => props.onRemoveFromHistory?.(item)}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="trash-outline" size={17} color="#ff4444" />
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={styles.cardCopyButton}
             onPress={() => onCopyLink(item)}
@@ -258,7 +272,8 @@ const VideoCard = memo<VideoCardProps>(({
     prev.isLoading === next.isLoading &&
     prev.isSaved === next.isSaved &&
     prev.downloadItem?.status === next.downloadItem?.status &&
-    prev.downloadItem?.progress === next.downloadItem?.progress
+    prev.downloadItem?.progress === next.downloadItem?.progress &&
+    (prev.onRemoveFromHistory === undefined) === (next.onRemoveFromHistory === undefined)
   );
 });
 
@@ -286,6 +301,9 @@ export default function YouTubeScreen() {
   }, []);
 
 
+  const [searchHistory, setSearchHistory] = useState<string[]>(() =>
+    youTubeHistoryService.getSearchHistory()
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchInputRef = useRef<any>(null);
@@ -409,7 +427,7 @@ export default function YouTubeScreen() {
           if (prev.authenticated !== status.authenticated || prev.user?.email !== status.user?.email) {
             if (status.authenticated && selectedCategory === 'All') {
               setSelectedCategory('Home');
-            } else if (!status.authenticated && (selectedCategory === 'Home' || selectedCategory === 'Subscriptions' || selectedCategory === 'History')) {
+            } else if (!status.authenticated && (selectedCategory === 'Home' || selectedCategory === 'Subscriptions')) {
               setSelectedCategory('All');
             }
             return status;
@@ -420,6 +438,24 @@ export default function YouTubeScreen() {
       return () => { active = false; };
     }, [selectedCategory])
   );
+
+  // Real-time synchronization of watch history & search history
+  useEffect(() => {
+    const unsubHistory = youTubeHistoryService.subscribeHistory((items) => {
+      if (activeQueryRef.current === 'History') {
+        setVideos(items);
+      }
+    });
+
+    const unsubSearch = youTubeHistoryService.subscribeSearchHistory((searches) => {
+      setSearchHistory(searches);
+    });
+
+    return () => {
+      unsubHistory();
+      unsubSearch();
+    };
+  }, []);
 
   // Dynamic Category Chips reflecting Google Account feeds
   const dynamicCategoryChips = useMemo(() => {
@@ -449,7 +485,14 @@ export default function YouTubeScreen() {
       } else if (target === 'Subscriptions') {
         result = await youTubeService.getSubscriptionsFeed();
       } else if (target === 'History') {
-        result = await youTubeService.getHistoryFeed();
+        if (authStatus.authenticated) {
+          result = await youTubeService.getHistoryFeed();
+          if (!result.videos || result.videos.length === 0) {
+            result = { videos: youTubeHistoryService.getHistory() };
+          }
+        } else {
+          result = { videos: youTubeHistoryService.getHistory() };
+        }
       } else {
         let resolvedQuery = target;
         let sp: string | undefined = undefined;
@@ -609,6 +652,35 @@ export default function YouTubeScreen() {
     [playInYouTubeWatch]
   );
 
+  const handleClearHistory = useCallback(() => {
+    Alert.alert(
+      'Clear Watch History',
+      'Are you sure you want to clear your YouTube watch history?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            await youTubeHistoryService.clearHistory();
+            setVideos([]);
+            if (await isHapticsSupported()) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            }
+          },
+        },
+      ]
+    );
+  }, []);
+
+  const handleRemoveFromHistory = useCallback(async (item: YouTubeVideoItem) => {
+    await youTubeHistoryService.removeFromHistory(item.id);
+    setVideos((prev) => prev.filter((v) => v.id !== item.id));
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, []);
+
   const handleSearchSubmit = () => {
     const q = searchQuery.trim();
     if (!q) return;
@@ -625,6 +697,7 @@ export default function YouTubeScreen() {
       return;
     }
 
+    youTubeHistoryService.addSearchQuery(q).catch(() => {});
     fetchVideos(q);
   };
 
@@ -827,10 +900,23 @@ export default function YouTubeScreen() {
           onPauseDownload={handlePauseDownload}
           onToggleSave={handleToggleSave}
           onCopyLink={handleCopyLink}
+          onRemoveFromHistory={selectedCategory === 'History' ? handleRemoveFromHistory : undefined}
         />
       );
     },
-    [loadingVideoId, savedIds, downloadsMap, handlePlayVideo, handleOpenDownloadModal, handleResumeDownload, handlePauseDownload, handleToggleSave, handleCopyLink]
+    [
+      loadingVideoId,
+      savedIds,
+      downloadsMap,
+      handlePlayVideo,
+      handleOpenDownloadModal,
+      handleResumeDownload,
+      handlePauseDownload,
+      handleToggleSave,
+      handleCopyLink,
+      selectedCategory,
+      handleRemoveFromHistory,
+    ]
   );
 
   const keyExtractor = useCallback((item: YouTubeVideoItem) => item.id, []);
@@ -1011,7 +1097,8 @@ export default function YouTubeScreen() {
 
         {/* Expandable Search Input Box with Real YouTube Link Paste */}
         {isSearchOpen && (
-          <View style={styles.searchBox}>
+          <>
+            <View style={styles.searchBox}>
             <Ionicons name="search" size={18} color="#888888" style={styles.searchIcon} />
             <TextInput
               ref={searchInputRef}
@@ -1039,6 +1126,56 @@ export default function YouTubeScreen() {
               </TouchableOpacity>
             )}
           </View>
+
+          {/* Recent Searches Row when search box is empty */}
+          {searchHistory.length > 0 && !searchQuery.trim() && (
+            <View style={styles.recentSearchesContainer}>
+              <View style={styles.recentSearchesHeader}>
+                <Text style={styles.recentSearchesTitle}>Recent Searches</Text>
+                <TouchableOpacity
+                  onPress={() => youTubeHistoryService.clearSearchHistory()}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.recentClearAllText}>Clear</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.recentSearchesScroll}
+                keyboardShouldPersistTaps="handled"
+              >
+                {searchHistory.map((item) => (
+                  <TouchableOpacity
+                    key={item}
+                    style={styles.recentSearchChip}
+                    onPress={() => {
+                      setSearchQuery(item);
+                      fetchVideos(item);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="time-outline" size={13} color="#8E8E93" style={{ marginRight: 5 }} />
+                    <Text style={styles.recentSearchChipText} numberOfLines={1}>
+                      {item}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        youTubeHistoryService.removeSearchQuery(item);
+                      }}
+                      style={{ marginLeft: 6 }}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <Ionicons name="close" size={13} color="#666666" />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+          </>
         )}
       </View>
 
@@ -1188,6 +1325,24 @@ export default function YouTubeScreen() {
           updateCellsBatchingPeriod={50}
           onEndReached={() => handleLoadMore(false)}
           onEndReachedThreshold={0.5}
+          ListHeaderComponent={
+            selectedCategory === 'History' && !searchQuery.trim() && videos.length > 0 ? (
+              <View style={styles.historyToolbar}>
+                <View style={styles.historyToolbarLeft}>
+                  <Ionicons name="time-outline" size={17} color="#ff3333" />
+                  <Text style={styles.historyToolbarTitle}>Watch History ({videos.length})</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.clearHistoryButton}
+                  onPress={handleClearHistory}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={14} color="#ff4444" style={{ marginRight: 4 }} />
+                  <Text style={styles.clearHistoryButtonText}>Clear All</Text>
+                </TouchableOpacity>
+              </View>
+            ) : undefined
+          }
           ListFooterComponent={renderListFooter}
           refreshControl={
             <RefreshControl
@@ -1295,7 +1450,7 @@ export default function YouTubeScreen() {
                         <View style={styles.myListDurationBadge}>
                           <Text style={styles.myListDurationText}>{item.duration}</Text>
                         </View>
-                      ) : null}
+                      ) : undefined}
                     </View>
 
                     {/* Metadata */}
@@ -1778,6 +1933,92 @@ const styles = StyleSheet.create({
   },
   cardBookmarkButtonActive: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  cardRemoveHistoryButton: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 68, 68, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  historyToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    marginBottom: 8,
+  },
+  historyToolbarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  historyToolbarTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.2,
+  },
+  clearHistoryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4.5,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 68, 68, 0.14)',
+  },
+  clearHistoryButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ff4444',
+  },
+  recentSearchesContainer: {
+    paddingTop: 8,
+    paddingBottom: 4,
+    paddingHorizontal: 12,
+  },
+  recentSearchesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  recentSearchesTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8E8E93',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  recentClearAllText: {
+    fontSize: 11.5,
+    color: '#ff4444',
+    fontWeight: '600',
+  },
+  recentSearchesScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 10,
+  },
+  recentSearchChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1C1C24',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  recentSearchChipText: {
+    fontSize: 12,
+    color: '#DDDDDD',
+    maxWidth: 160,
   },
   cardDownloadButton: {
     padding: 6,

@@ -12,16 +12,12 @@ export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.io';
 
 export const KNOWN_TAMILMV_MIRRORS = [
   'https://www.1tamilmv.io',
-  'https://1tamilmv.io',
-  'https://1tamilmv.solar',
   'https://www.1tamilmv.solar',
-  'https://1tamilmv.fi',
-  'https://www.1tamilmv.fi',
-  'https://1tamilmv.insure',
   'https://www.1tamilmv.insure',
-  'https://1tamilmv.style',
-  'https://1tamilmv.cards',
-  'https://1tamilmv.pizza',
+  'https://www.1tamilmv.click',
+  'https://www.1tamilmv.cloud',
+  'https://www.1tamilmv.run',
+  'https://www.1tamilmv.to',
 ];
 
 const STALE_OR_DEAD_DOMAINS = new Set([
@@ -41,6 +37,14 @@ const STALE_OR_DEAD_DOMAINS = new Set([
   'https://1tamilmv.live',
   'https://www.1tamilmv.tf',
   'https://1tamilmv.tf',
+  'https://www.1tamilmv.style',
+  'https://1tamilmv.style',
+  'https://www.1tamilmv.cards',
+  'https://1tamilmv.cards',
+  'https://www.1tamilmv.pizza',
+  'https://1tamilmv.pizza',
+  'https://www.1tamilmv.fi',
+  'https://1tamilmv.fi',
 ]);
 
 /**
@@ -195,7 +199,11 @@ export async function getTamilMVBaseUrlAsync(): Promise<string> {
   return getTamilMVBaseUrl();
 }
 
-export async function setTamilMVBaseUrl(url: string): Promise<void> {
+export async function setTamilMVBaseUrl(
+  url: string,
+  clearCache: boolean = false,
+  notify: boolean = true
+): Promise<void> {
   const sanitized = normalizeTamilMvUrl(url);
   cachedTamilMVBaseUrl = sanitized;
 
@@ -211,8 +219,12 @@ export async function setTamilMVBaseUrl(url: string): Promise<void> {
     console.warn('Failed to save TamilMV base URL to AsyncStorage', e);
   }
 
-  clearAllRssCache();
-  notifyBaseUrlChanged(sanitized);
+  if (clearCache) {
+    clearAllRssCache();
+  }
+  if (notify) {
+    notifyBaseUrlChanged(sanitized);
+  }
 }
 
 export async function resetTamilMVBaseUrl(): Promise<void> {
@@ -885,18 +897,29 @@ function isValidQuality(displayName: string, category: Category): boolean {
   return true;
 }
 
-function extractTitleYear(title: string): { name: string | null; year: string | null } {
+function extractTitleYear(title: string): { name: string; year: string | null } {
+  if (!title || !title.trim()) {
+    return { name: 'Unknown Title', year: null };
+  }
   // Strip domain prefix e.g. "www.1TamilMV.solar - " or "1TamilMV.capital - "
   const cleaned = title
     .replace(/^(?:https?:\/\/)?(?:www\.)?[^\s-]+\.[a-z]{2,10}\s*[-_:]\s*/i, '')
-    .replace(/^www\.[^-]+-\s*/i, '');
+    .replace(/^www\.[^-]+-\s*/i, '')
+    .trim();
+
   const match = cleaned.match(TITLE_YEAR_REGEX);
   if (match) {
     return { name: match[1].trim(), year: match[2] };
   }
-  const fallbackCleaned = title.replace(/^[^-]+-\s*/, '');
-  const fallbackMatch = fallbackCleaned.match(TITLE_YEAR_REGEX);
-  return fallbackMatch ? { name: fallbackMatch[1].trim(), year: fallbackMatch[2] } : { name: null, year: null };
+  const squareMatch = cleaned.match(/^([^[]+?)\s*\[(\d{4})\]/);
+  if (squareMatch) {
+    return { name: squareMatch[1].trim(), year: squareMatch[2] };
+  }
+  const fallback = cleanTopicTitle(cleaned);
+  return {
+    name: fallback.name || cleaned.split(/\s*[-–]\s*/)[0].trim() || cleaned,
+    year: fallback.year || null,
+  };
 }
 
 function parseRSSFeed(xmlString: string, language: Language, category: Category): GroupedItem[] {
@@ -1000,28 +1023,28 @@ function getCacheKey(language: Language, category: Category): string {
   return `rss:${language}:${category}`;
 }
 
-function readCache(key: string): GroupedItem[] | null {
+function readCache(key: string, allowStale: boolean = true): GroupedItem[] | null {
   try {
     const raw = storageService.getItem(key);
     if (!raw) return null;
     const entry: CacheEntry = JSON.parse(raw);
-    if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
     if (!entry.data || entry.data.length === 0) return null;
+    if (!allowStale && Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
     return entry.data;
   } catch {
     return null;
   }
 }
 
-async function readCacheAsync(key: string): Promise<GroupedItem[] | null> {
-  const sync = readCache(key);
+async function readCacheAsync(key: string, allowStale: boolean = true): Promise<GroupedItem[] | null> {
+  const sync = readCache(key, allowStale);
   if (sync) return sync;
   try {
     const raw = await AsyncStorage.getItem(key);
     if (!raw) return null;
     const entry: CacheEntry = JSON.parse(raw);
-    if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
     if (!entry.data || entry.data.length === 0) return null;
+    if (!allowStale && Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
     try { storageService.setItem(key, raw); } catch {}
     return entry.data;
   } catch {
@@ -1063,10 +1086,11 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
     if (!forumId) return [];
 
     const currentBase = normalizeTamilMvUrl(getTamilMVBaseUrl());
-    const mirrorsToTry = [
+    const rawMirrors = [
       currentBase,
-      ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
+      ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl),
     ];
+    const mirrorsToTry = Array.from(new Set(rawMirrors));
 
     let lastError: any = null;
 
@@ -1077,7 +1101,7 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
       let xml = '';
 
       for (let attempt = 0; attempt < 2; attempt++) {
-        const timeoutMs = attempt === 0 ? 5000 : 6000;
+        const timeoutMs = attempt === 0 ? 4000 : 5000;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -1142,7 +1166,7 @@ async function fetchAndParse(language: Language, category: Category): Promise<Gr
         if (groups.length > 0) {
           if (mirror !== currentBase) {
             console.log(`[TamilMV] Active domain failed. Auto-switched to working mirror: ${mirror}`);
-            setTamilMVBaseUrl(mirror).catch(() => {});
+            setTamilMVBaseUrl(mirror, false, false).catch(() => {});
           }
           writeCache(cacheKey, groups);
           return groups;
@@ -1321,7 +1345,7 @@ export function useTamilMVCatalog(language: Language): UseTamilMVCatalogResult {
           if (!raw) continue;
           try {
             const entry: CacheEntry = JSON.parse(raw);
-            if (entry?.data && entry.data.length > 0 && Date.now() - entry.timestamp < CACHE_TTL_MS) {
+            if (entry?.data && entry.data.length > 0) {
               const cat = key.split(':')[2] as Category;
               try { storageService.setItem(key, raw); } catch {}
               asyncSections.push({
@@ -1843,13 +1867,15 @@ export interface TamilMVHomepageData {
 
 let inFlightHomepageData: Promise<TamilMVHomepageData> | null = null;
 
-function getCachedHomepageDataSync(): TamilMVHomepageData | null {
+function getCachedHomepageDataSync(allowStale: boolean = true): TamilMVHomepageData | null {
   try {
     const raw = storageService.getItem('tamilmv:homepage_data_v2');
     if (raw) {
       const entry: { data: TamilMVHomepageData; timestamp: number } = JSON.parse(raw);
-      if (Date.now() - entry.timestamp < 15 * 60 * 1000) {
-        return entry.data;
+      if (entry?.data && (entry.data.recentlyAdded?.length || entry.data.topReleases?.length)) {
+        if (allowStale || Date.now() - entry.timestamp < 15 * 60 * 1000) {
+          return entry.data;
+        }
       }
     }
   } catch {}
@@ -1885,10 +1911,10 @@ export async function fetchTamilMVHomepageData(
 
   const promise = (async () => {
     const currentBase = normalizeTamilMvUrl(baseUrl);
-    const mirrorsToTry = [
+    const mirrorsToTry = Array.from(new Set([
       currentBase,
-      ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl).filter((m) => m !== currentBase),
-    ];
+      ...KNOWN_TAMILMV_MIRRORS.map(normalizeTamilMvUrl),
+    ]));
     let html = '';
     let successfulBase = currentBase;
 
@@ -1898,7 +1924,7 @@ export async function fetchTamilMVHomepageData(
 
       for (let attempt = 0; attempt < 2; attempt++) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6000);
+        const timeout = setTimeout(() => controller.abort(), 4000);
         try {
           res = await fetch(mirror, {
             headers: {
@@ -1935,6 +1961,10 @@ export async function fetchTamilMVHomepageData(
     if (!html) {
       try {
         const raw = storageService.getItem(cacheKey);
+        if (raw) return JSON.parse(raw).data;
+      } catch {}
+      try {
+        const raw = await AsyncStorage.getItem(cacheKey);
         if (raw) return JSON.parse(raw).data;
       } catch {}
       return { topReleases: [], recentlyAdded: [] };
@@ -2053,13 +2083,15 @@ export async function fetchTamilMVRecentlyAdded(
 
 export function useTamilMVTopReleases(language?: Language) {
   const [groups, setGroups] = useState<GroupedItem[]>(() => {
-    const cached = getCachedHomepageDataSync();
+    const cached = getCachedHomepageDataSync(true);
     if (cached?.topReleases?.length) {
-      return language && language !== 'tamil'
-        ? cached.topReleases.filter(
-            (g) => (g.items[0]?.language || '').toLowerCase() === language.toLowerCase()
-          )
-        : cached.topReleases;
+      if (language && language !== 'tamil') {
+        const filtered = cached.topReleases.filter(
+          (g) => (g.items[0]?.language || detectLanguageFromTitle(g.name || '')).toLowerCase() === language.toLowerCase()
+        );
+        return filtered.length > 0 ? filtered : cached.topReleases;
+      }
+      return cached.topReleases;
     }
     return [];
   });
@@ -2114,13 +2146,15 @@ export function useTamilMVTopReleases(language?: Language) {
 
 export function useTamilMVRecentlyAdded(language?: Language) {
   const [groups, setGroups] = useState<GroupedItem[]>(() => {
-    const cached = getCachedHomepageDataSync();
+    const cached = getCachedHomepageDataSync(true);
     if (cached?.recentlyAdded?.length) {
-      return language && language !== 'tamil'
-        ? cached.recentlyAdded.filter(
-            (g) => (g.items[0]?.language || '').toLowerCase() === language.toLowerCase()
-          )
-        : cached.recentlyAdded;
+      if (language && language !== 'tamil') {
+        const filtered = cached.recentlyAdded.filter(
+          (g) => (g.items[0]?.language || detectLanguageFromTitle(g.name || '')).toLowerCase() === language.toLowerCase()
+        );
+        return filtered.length > 0 ? filtered : cached.recentlyAdded;
+      }
+      return cached.recentlyAdded;
     }
     return [];
   });

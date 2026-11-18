@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { youTubeService, YouTubeVideoDetails, YouTubeVideoItem } from '@/services/YouTubeService';
 import { dataConsumptionService } from '@/services/DataConsumptionService';
+import { youTubeHistoryService } from '@/services/YouTubeHistoryService';
 
 export interface ActiveYouTubeVideo {
   id: string;
@@ -79,6 +80,7 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
   const playVideo = useCallback(async (video: ActiveYouTubeVideo) => {
     console.log(`[YouTubePlayer] ▶️ playVideo requested for ID: "${video.id}", Title: "${video.title}"`);
     activeVideoIdRef.current = video.id;
+    youTubeHistoryService.addToHistory(video).catch(() => {});
     fallbackCountRef.current = 0;
     lastTrackTimeRef.current = 0;
     setCurrentVideo(video);
@@ -104,6 +106,16 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
 
       console.log(`[YouTubePlayer] ✅ Received videoDetails for: ${video.id}`);
       setVideoDetails(details);
+      if (details.title && details.title !== 'YouTube Video') {
+        youTubeHistoryService.addToHistory({
+          id: video.id,
+          title: details.title,
+          channel: details.channel || video.channel,
+          thumbnail: details.thumbnail || video.thumbnail,
+          duration: details.duration ? `${Math.floor(details.duration / 60)}:${(details.duration % 60).toString().padStart(2, '0')}` : video.duration,
+          views: details.views ? details.views.toLocaleString() : video.views,
+        }).catch(() => {});
+      }
       if (details.duration) {
         setDuration(details.duration);
       }

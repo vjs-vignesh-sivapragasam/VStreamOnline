@@ -3,7 +3,7 @@ import { Tabs } from 'expo-router';
 import CinemaBottomBar from '@/components/CinemaBottomBar';
 
 export const unstable_settings = {
-  initialRouteName: 'index',
+  anchor: 'index',
 };
 
 export default function TabLayout() {
@@ -23,7 +23,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="search"
         options={{
-          title: 'Search',
+          title: 'Explore',
         }}
       />
       <Tabs.Screen

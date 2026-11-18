@@ -424,3 +424,112 @@ if (fs.existsSync(exoPlayerViewKtPath)) {
     console.log('ℹ️ react-native-video ExoPlayerView.kt already patched');
   }
 }
+
+
+// ── 9. Patch expo-keep-awake to prevent "The current activity is no longer available" crash ──
+const keepAwakeBuildPath = path.join(rootDir, 'node_modules', 'expo-keep-awake', 'build', 'index.js');
+if (fs.existsSync(keepAwakeBuildPath)) {
+  let content = fs.readFileSync(keepAwakeBuildPath, 'utf8');
+  let changed = false;
+
+  if (content.includes('await ExpoKeepAwake.deactivate?.(tag);') && !content.includes('// Patched: safe deactivate')) {
+    content = content.replace(
+      'await ExpoKeepAwake.deactivate?.(tag);',
+      '// Patched: safe deactivate\n    try { await ExpoKeepAwake.deactivate?.(tag); } catch (_err) {}'
+    );
+    changed = true;
+  }
+
+  if (content.includes('deactivateKeepAwake(tagOrDefault);')) {
+    content = content.replace(
+      'deactivateKeepAwake(tagOrDefault);',
+      'deactivateKeepAwake(tagOrDefault).catch(() => {});'
+    );
+    changed = true;
+  }
+
+  if (changed) {
+    fs.writeFileSync(keepAwakeBuildPath, content, 'utf8');
+    console.log('✅ Patched expo-keep-awake build/index.js for safe unmount/deactivation');
+  } else {
+    console.log('ℹ️ expo-keep-awake build/index.js already patched');
+  }
+}
+
+const keepAwakeSrcPath = path.join(rootDir, 'node_modules', 'expo-keep-awake', 'src', 'index.ts');
+if (fs.existsSync(keepAwakeSrcPath)) {
+  let content = fs.readFileSync(keepAwakeSrcPath, 'utf8');
+  let changed = false;
+
+  if (content.includes('await ExpoKeepAwake.deactivate?.(tag);') && !content.includes('// Patched: safe deactivate')) {
+    content = content.replace(
+      'await ExpoKeepAwake.deactivate?.(tag);',
+      '// Patched: safe deactivate\n  try { await ExpoKeepAwake.deactivate?.(tag); } catch (_err) {}'
+    );
+    changed = true;
+  }
+
+  if (content.includes('deactivateKeepAwake(tagOrDefault);')) {
+    content = content.replace(
+      'deactivateKeepAwake(tagOrDefault);',
+      'deactivateKeepAwake(tagOrDefault).catch(() => {});'
+    );
+    changed = true;
+  }
+
+  if (changed) {
+    fs.writeFileSync(keepAwakeSrcPath, content, 'utf8');
+    console.log('✅ Patched expo-keep-awake src/index.ts for safe unmount/deactivation');
+  }
+}
+
+const keepAwakeManagerKtPath = path.join(
+  rootDir,
+  'node_modules',
+  'expo-keep-awake',
+  'android',
+  'src',
+  'main',
+  'java',
+  'expo',
+  'modules',
+  'keepawake',
+  'ExpoKeepAwakeManager.kt'
+);
+if (fs.existsSync(keepAwakeManagerKtPath)) {
+  let content = fs.readFileSync(keepAwakeManagerKtPath, 'utf8');
+  let changed = false;
+
+  if (content.includes('fun activate(tag: String) {\n    val activity = currentActivity')) {
+    content = content.replace(
+      'fun activate(tag: String) {\n    val activity = currentActivity',
+      'fun activate(tag: String) {\n    val activity = try { currentActivity } catch (t: Throwable) { null } ?: run { tags.add(tag); return }'
+    );
+    changed = true;
+  } else if (content.includes('fun activate(tag: String) {\r\n    val activity = currentActivity')) {
+    content = content.replace(
+      'fun activate(tag: String) {\r\n    val activity = currentActivity',
+      'fun activate(tag: String) {\r\n    val activity = try { currentActivity } catch (t: Throwable) { null } ?: run { tags.add(tag); return }'
+    );
+    changed = true;
+  }
+
+  if (content.includes('fun deactivate(tag: String) {\n    val activity = currentActivity')) {
+    content = content.replace(
+      'fun deactivate(tag: String) {\n    val activity = currentActivity',
+      'fun deactivate(tag: String) {\n    val activity = try { currentActivity } catch (t: Throwable) { null } ?: run { tags.remove(tag); return }'
+    );
+    changed = true;
+  } else if (content.includes('fun deactivate(tag: String) {\r\n    val activity = currentActivity')) {
+    content = content.replace(
+      'fun deactivate(tag: String) {\r\n    val activity = currentActivity',
+      'fun deactivate(tag: String) {\r\n    val activity = try { currentActivity } catch (t: Throwable) { null } ?: run { tags.remove(tag); return }'
+    );
+    changed = true;
+  }
+
+  if (changed) {
+    fs.writeFileSync(keepAwakeManagerKtPath, content, 'utf8');
+    console.log('✅ Patched expo-keep-awake ExpoKeepAwakeManager.kt for safe activity lifecycle');
+  }
+}

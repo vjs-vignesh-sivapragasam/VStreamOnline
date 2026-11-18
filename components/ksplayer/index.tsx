@@ -53,6 +53,9 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
     currentStreamIndex = 0,
     onStreamChange,
     torrentBufferProgress,
+    torrentBufferText,
+    torrentPeers,
+    torrentSpeed,
 }) => {
     if (!isKSPlayerAvailable()) {
         const { MediaPlayer: NativePlayer } = require('@/components/nativeplayer');
@@ -114,6 +117,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
         (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))
     ) : false;
     const effectiveBufferPct = isLocalFile ? undefined : (isTorrent ? torrentBufferProgress : undefined);
+    const effectiveBufferText = isLocalFile ? undefined : (isTorrent ? torrentBufferText : undefined);
     const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(-1);
     const [selectedTextTrack, setSelectedTextTrack] = useState<number>(-1);
     // NEW: current subtitle line text from the native player
@@ -602,6 +606,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 isBuffering={playerState.isBuffering}
                 hasStartedPlaying={playerState.isReady}
                 bufferProgress={effectiveBufferPct}
+                bufferText={effectiveBufferText}
             />
 
             <WaitingLobby
@@ -609,6 +614,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                 isBuffering={playerState.isBuffering}
                 opacity={bufferOpacity}
                 bufferProgress={effectiveBufferPct}
+                bufferText={effectiveBufferText}
             />
 
             {/* SUBTITLE DISPLAY – rendered over video, below controls */}

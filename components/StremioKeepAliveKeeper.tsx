@@ -23,7 +23,7 @@ export const StremioKeepAliveKeeper: React.FC = () => {
 
     return () => {
       unsubscribe();
-      applyScreenKeepAwake(false);
+      applyScreenKeepAwake(false).catch(() => {});
     };
   }, []);
 

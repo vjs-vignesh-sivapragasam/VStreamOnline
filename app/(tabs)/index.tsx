@@ -46,38 +46,7 @@ const LANGUAGE_FILTERS: FilterItem[] = [
   { key: 'kannada', label: 'Kannada', icon: 'language-outline' },
 ];
 
-// ─── Lazy section wrapper ─────────────────────────────────────────────────────
-
-const LazySection = ({
-  section,
-  index,
-  language,
-  onSeeAll,
-}: {
-  section: CatalogSection;
-  index: number;
-  language: Language;
-  onSeeAll: (category: Category, title: string, language: Language) => void;
-}) => {
-  const [shouldLoad, setShouldLoad] = useState(index < 3);
-
-  return (
-    <View onLayout={() => { if (!shouldLoad) setShouldLoad(true); }}>
-      {shouldLoad ? (
-        <PosterList
-          groups={section.groups}
-          title={section.label}
-          type={section.type}
-          language={language}
-          category={section.category}
-          onSeeAll={onSeeAll}
-        />
-      ) : (
-        <View style={{ height: 280, marginBottom: 20 }} />
-      )}
-    </View>
-  );
-};
+// ─── Section renderer ─────────────────────────────────────────────────────────
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -273,12 +242,14 @@ export default function HomeScreen() {
           )}
 
           {/* Category sections */}
-          {sections.map((section, i) => (
-            <LazySection
+          {sections.map((section) => (
+            <PosterList
               key={`${language}-${section.category}`}
-              section={section}
-              index={i}
+              groups={section.groups}
+              title={section.label}
+              type={section.type}
               language={language}
+              category={section.category}
               onSeeAll={(cat, catTitle, catLang) => {
                 setActiveCategory({ category: cat, title: catTitle, language: catLang });
               }}

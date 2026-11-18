@@ -15,6 +15,9 @@ export interface TorrentStats {
   uploadSpeed?: number;
   downloaded?: number;
   streamProgress?: number;
+  headProgress?: number;
+  availablePieces?: number;
+  filePieces?: number;
   streamLen?: number;
   streamName?: string;
   swarmConnections?: number;
@@ -22,14 +25,26 @@ export interface TorrentStats {
 }
 
 export const DEFAULT_TRACKERS = [
-  'udp://tracker.opentrackers.org:1337/announce',
-  'udp://open.stealth.si:80/announce',
+  // Fast UDP trackers with high global availability
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.stealth.si:80/announce', // Port 80 (bypasses ISP UDP block)
   'udp://tracker.torrent.eu.org:451/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://open.tracker.cl:1337/announce',
   'udp://tracker.openbittorrent.com:6969/announce',
-  'udp://opentracker.i2p.rocks:6969/announce',
-  'udp://tracker.moeking.me:6969/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://tracker.qu.ax:6969/announce',
+  'udp://tracker.corpscorp.online:80/announce', // Port 80
+  'udp://tracker2.dler.org:80/announce', // Port 80
+  'udp://tracker-udp.gbitt.info:80/announce', // Port 80
+  'udp://tracker.ducks.party:1984/announce',
+  'udp://tracker.bittor.pw:1337/announce',
+  'udp://tracker.nyaa.vc:6969/announce',
   'udp://explodie.org:6969/announce',
+  'udp://tracker.peerfect.org:6969/announce',
+  // HTTP trackers (reliable fallback when UDP is blocked by network)
   'http://tracker.openbittorrent.com:80/announce',
+  'http://tracker.dler.org:6969/announce',
 ];
 
 export function extractTrackersFromMagnet(magnetUrl?: string): string[] {
@@ -65,8 +80,9 @@ export class StreamingServerClient {
   }
 
   async getStreamingURL(infoHash: string, fileIdx: number = 0, magnetUrl?: string): Promise<string> {
+    const cleanHash = (infoHash || '').toLowerCase().trim();
     const safeIdx = (typeof fileIdx === 'number' && fileIdx >= 0) ? fileIdx : 0;
-    let directURL = `${this.baseURL}/${encodeURIComponent(infoHash)}/${safeIdx}`;
+    let directURL = `${this.baseURL}/${encodeURIComponent(cleanHash)}/${safeIdx}`;
     const trackers = extractTrackersFromMagnet(magnetUrl);
     if (trackers.length > 0) {
       const qs = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
@@ -77,7 +93,8 @@ export class StreamingServerClient {
   }
 
   async getTorrentFiles(infoHash: string, timeoutMs: number = 8000, magnetUrl?: string): Promise<TorrentFile[]> {
-    let url = `${this.baseURL}/${encodeURIComponent(infoHash)}/create`;
+    const cleanHash = (infoHash || '').toLowerCase().trim();
+    let url = `${this.baseURL}/${encodeURIComponent(cleanHash)}/create`;
     const trackers = extractTrackersFromMagnet(magnetUrl);
     if (trackers.length > 0) {
       const qs = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
@@ -133,9 +150,10 @@ export class StreamingServerClient {
 
   async getTorrentStats(infoHash: string, fileIdx?: number): Promise<TorrentStats | null> {
     try {
+      const cleanHash = (infoHash || '').toLowerCase().trim();
       const path = fileIdx !== undefined && fileIdx >= 0
-        ? `${encodeURIComponent(infoHash)}/${fileIdx}/stats.json`
-        : `${encodeURIComponent(infoHash)}/stats.json`;
+        ? `${encodeURIComponent(cleanHash)}/${fileIdx}/stats.json`
+        : `${encodeURIComponent(cleanHash)}/stats.json`;
       const url = `${this.baseURL}/${path}`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 3000);

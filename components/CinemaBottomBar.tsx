@@ -30,7 +30,7 @@ const TAB_CONFIGS: Record<string, TabItemConfig> = {
   },
   search: {
     name: 'search',
-    label: 'Search',
+    label: 'Explore',
     activeIcon: 'search',
     inactiveIcon: 'search-outline',
   },
@@ -208,25 +208,11 @@ export default function CinemaBottomBar({
                 )}
               </View>
 
-              {/* Illuminated Icon Capsule (Always rounded pill shape) */}
-              <View
-                style={[
-                  styles.iconCapsule,
-                  isFocused
-                    ? [
-                        styles.iconCapsuleActive,
-                        {
-                          backgroundColor: theme.iconBg,
-                          borderColor: theme.cardBorder,
-                          borderRadius: 20,
-                        },
-                      ]
-                    : styles.iconCapsuleInactive,
-                ]}
-              >
+              {/* Icon Container (Clean, no background capsule for active tab) */}
+              <View style={styles.iconCapsule}>
                 <Ionicons
                   name={isFocused ? config.activeIcon : config.inactiveIcon}
-                  size={21}
+                  size={22}
                   color={isFocused ? theme.primary : '#71717A'}
                 />
               </View>
@@ -341,22 +327,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   iconCapsule: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 4,
-    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  iconCapsuleActive: {
-    borderWidth: 1,
-    borderRadius: 20,
-  },
-  iconCapsuleInactive: {
-    borderWidth: 1,
-    borderColor: 'transparent',
-    backgroundColor: 'transparent',
-    borderRadius: 20,
   },
   tabLabel: {
     fontSize: 10.5,

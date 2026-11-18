@@ -1,8 +1,8 @@
 import { getPlatformSpecificPlayers, Players, isVLCPlayerSupported } from "@/utils/MediaPlayer";
 import { showAlert } from "@/utils/platform";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState, useRef } from "react";
-import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
+import React, { useEffect, useState, useRef, useMemo } from "react";
+import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image, TouchableOpacity, BackHandler } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { ServerConfig } from "@/components/ServerConfig";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -91,6 +91,7 @@ const MediaPlayerScreen: React.FC = () => {
   const { theme } = useTheme();
   const [streamBufferProgress, setStreamBufferProgress] = useState<number>(0);
   const [streamPeers, setStreamPeers] = useState<number>(0);
+  const [streamSpeed, setStreamSpeed] = useState<number>(0);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [isLoadingStream, setIsLoadingStream] = useState<boolean>(true);
   const [streamError, setStreamError] = useState<string>('');
@@ -104,6 +105,7 @@ const MediaPlayerScreen: React.FC = () => {
 
   const [currentPlayerType, setCurrentPlayerType] = useState<"native" | "ksplayer">("native");
   const [hasTriedNative, setHasTriedNative] = useState(false);
+  const [connectingSeconds, setConnectingSeconds] = useState<number>(0);
   const torrentStatsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const cleanupTorrentStats = () => {
@@ -115,21 +117,87 @@ const MediaPlayerScreen: React.FC = () => {
 
   const startTorrentStatsPolling = (client: StreamingServerClient, infoHash: string, fileIdx: number) => {
     cleanupTorrentStats();
+    setConnectingSeconds(0);
+    const startTimestamp = Date.now();
+    const cleanHash = (infoHash || '').toLowerCase().trim();
     torrentStatsIntervalRef.current = setInterval(async () => {
       try {
-        const stats = await client.getTorrentStats(infoHash, fileIdx >= 0 ? fileIdx : undefined);
+        const stats = await client.getTorrentStats(cleanHash, fileIdx >= 0 ? fileIdx : undefined);
         if (stats) {
-          const rawProgress = stats.streamProgress !== undefined && stats.streamProgress >= 0
-            ? stats.streamProgress * 100
-            : (stats.downloaded && stats.streamLen ? (stats.downloaded / stats.streamLen) * 100 : 0);
-          const pct = Math.min(Math.max(Math.round(rawProgress), 0), 100);
-          setStreamBufferProgress(pct);
           const peers = stats.peers ?? stats.swarmConnections ?? stats.swarmSize ?? 0;
           setStreamPeers(peers);
+          if (stats.downloadSpeed !== undefined) {
+            setStreamSpeed(stats.downloadSpeed);
+          }
+          if (peers === 0) {
+            setConnectingSeconds(Math.floor((Date.now() - startTimestamp) / 1000));
+          } else {
+            setConnectingSeconds(0);
+          }
+
+          // Initial target buffer to start video stream playback smoothly (~5 MB)
+          const TARGET_PREBUFFER_BYTES = 5 * 1024 * 1024;
+          const downloaded = stats.downloaded || 0;
+          const initialBufferPct = Math.min(Math.round((downloaded / TARGET_PREBUFFER_BYTES) * 100), 99);
+
+          // Head pieces progress (first critical pieces of video stream)
+          const headPct = (stats.headProgress !== undefined && stats.headProgress > 0)
+            ? Math.round(stats.headProgress * 100)
+            : 0;
+
+          // Overall file progress (e.g. if file is partially or fully cached)
+          const overallFilePct = (stats.streamProgress !== undefined && stats.streamProgress >= 0)
+            ? Math.round(stats.streamProgress * 100)
+            : (stats.downloaded && stats.streamLen ? Math.round((stats.downloaded / stats.streamLen) * 100) : 0);
+
+          const pct = Math.min(Math.max(headPct, initialBufferPct, overallFilePct), 100);
+          setStreamBufferProgress(pct);
         }
       } catch {}
     }, 600);
   };
+
+  const streamBufferText = useMemo(() => {
+    const formatSpeed = (bytesPerSec?: number): string => {
+      if (!bytesPerSec || bytesPerSec <= 0) return '';
+      if (bytesPerSec >= 1024 * 1024) {
+        return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+      }
+      return `${Math.round(bytesPerSec / 1024)} KB/s`;
+    };
+
+    const speedStr = formatSpeed(streamSpeed);
+    const pct = streamBufferProgress;
+
+    if (pct >= 100) {
+      return 'Starting playback...';
+    }
+    if (pct > 0) {
+      if (speedStr && streamPeers > 0) {
+        return `Buffering: ${pct}% • ${speedStr} (${streamPeers} ${streamPeers === 1 ? 'peer' : 'peers'})`;
+      }
+      if (speedStr) {
+        return `Buffering: ${pct}% • ${speedStr}`;
+      }
+      if (streamPeers > 0) {
+        return `Buffering: ${pct}% (${streamPeers} ${streamPeers === 1 ? 'peer' : 'peers'})`;
+      }
+      return `Buffering: ${pct}%`;
+    }
+    if (streamPeers > 0) {
+      if (speedStr) {
+        return `Buffering: 0% • ${speedStr} (${streamPeers} ${streamPeers === 1 ? 'peer' : 'peers'})`;
+      }
+      return `Buffering: 0% (${streamPeers} ${streamPeers === 1 ? 'peer' : 'peers'})`;
+    }
+    if (connectingSeconds >= 14) {
+      return 'Searching swarm (Few seeders online)...';
+    }
+    if (connectingSeconds >= 6) {
+      return 'Searching DHT & Trackers...';
+    }
+    return 'Connecting to peers... 0%';
+  }, [streamBufferProgress, streamPeers, streamSpeed, connectingSeconds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -344,6 +412,7 @@ const MediaPlayerScreen: React.FC = () => {
     setIsLoadingStream(true);
     setStreamBufferProgress(0);
     setStreamPeers(0);
+    setStreamSpeed(0);
     setStreamError('');
     setCurrentPlayerType("native");
     setHasTriedNative(false);
@@ -494,10 +563,27 @@ const MediaPlayerScreen: React.FC = () => {
 
   // ── Playback callbacks ───────────────────────────────────────────────────────
 
-  const handleBack = async (event: BackEvent): Promise<void> => {
+  const handleBack = async (event?: BackEvent): Promise<void> => {
     cleanupTorrentStats();
-    saveToWatchHistory(Math.floor(event.progress));
-    router.back();
+    if (event?.progress !== undefined && !isNaN(event.progress)) {
+      saveToWatchHistory(Math.floor(event.progress));
+    } else if (progress > 0) {
+      saveToWatchHistory(Math.floor(progress));
+    }
+
+    try {
+      if (Platform.OS !== 'web') {
+        await ScreenOrientation.unlockAsync();
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        StatusBar.setHidden(false, 'slide');
+      }
+    } catch {}
+
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/youtube/downloads');
+    }
   };
 
   const handleUpdateProgress = async (event: UpdateProgressEvent): Promise<void> => {
@@ -619,11 +705,7 @@ const MediaPlayerScreen: React.FC = () => {
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={theme.primary} />
             <Text style={styles.loadingText}>
-              {streamBufferProgress > 0 && streamBufferProgress < 100
-                ? `Buffering: ${streamBufferProgress}%`
-                : (streamBufferProgress >= 100
-                    ? 'Starting playback...'
-                    : (streamPeers > 0 ? `Connecting to ${streamPeers} peers...` : 'Connecting to stream...'))}
+              {streamBufferText}
             </Text>
           </View>
         </View>
@@ -647,7 +729,48 @@ const MediaPlayerScreen: React.FC = () => {
         currentStreamIndex={currentStreamIndex}
         onStreamChange={handleStreamChange}
         torrentBufferProgress={streamBufferProgress}
+        torrentBufferText={streamBufferText}
+        torrentPeers={streamPeers}
+        torrentSpeed={streamSpeed}
       />
+
+      {isTorrent && streamPeers === 0 && connectingSeconds >= 12 && (
+        <View style={styles.peerWarningOverlay} pointerEvents="box-none">
+          <View style={styles.peerWarningCard}>
+            <Ionicons name="information-circle-outline" size={16} color="#FFB020" style={{ marginRight: 6 }} />
+            <Text style={styles.peerWarningText}>
+              Few seeders found for this file.
+            </Text>
+            {streams.length > 1 && (
+              <TouchableOpacity
+                style={styles.switchStreamPill}
+                onPress={() => {
+                  const nextIndex = (currentStreamIndex + 1) % streams.length;
+                  handleStreamChange(nextIndex);
+                }}
+              >
+                <Ionicons name="swap-horizontal" size={13} color="#FFF" style={{ marginRight: 4 }} />
+                <Text style={styles.switchStreamPillText}>Try Next Quality</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.externalPlayerPill}
+              onPress={() => {
+                const s = streams[currentStreamIndex];
+                if (s) {
+                  const platformPlayers = getPlatformSpecificPlayers();
+                  if (platformPlayers.length > 0) {
+                    handleExternalPlayer(s, platformPlayers[0].name, platformPlayers);
+                  }
+                }
+              }}
+            >
+              <Ionicons name="open-outline" size={13} color="#FFF" style={{ marginRight: 4 }} />
+              <Text style={styles.switchStreamPillText}>Open in External</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </GestureHandlerRootView>
   );
 };
@@ -669,6 +792,53 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 14,
     fontWeight: '700',
+  },
+  peerWarningOverlay: {
+    position: 'absolute',
+    bottom: 24,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  peerWarningCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(20, 20, 25, 0.92)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 176, 32, 0.35)',
+    maxWidth: '92%',
+  },
+  peerWarningText: {
+    color: '#E0E0E0',
+    fontSize: 12,
+    fontWeight: '500',
+    marginRight: 10,
+  },
+  switchStreamPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0A84FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    marginRight: 6,
+  },
+  externalPlayerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#30D158',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  switchStreamPillText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
 

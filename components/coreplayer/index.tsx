@@ -43,6 +43,9 @@ export interface ExtendedMediaPlayerProps extends MediaPlayerProps {
     currentStreamIndex?: number;
     onStreamChange?: (index: number) => void;
     torrentBufferProgress?: number;
+    torrentBufferText?: string;
+    torrentPeers?: number;
+    torrentSpeed?: number;
     isTorrent?: boolean;
 }
 
@@ -381,14 +384,14 @@ export const WaitingLobby: React.FC<{
     if (!isBuffering && hasStartedPlaying) return null;
     if (bufferProgress !== undefined && bufferProgress >= 100 && hasStartedPlaying) return null;
 
-    const pct = bufferProgress !== undefined && bufferProgress >= 0 && bufferProgress < 100
+    const pct = bufferProgress !== undefined && bufferProgress >= 0 && bufferProgress <= 100
         ? Math.min(Math.max(Math.round(bufferProgress), 0), 100)
         : null;
 
     const displayText = bufferText || (
-        pct !== null && pct > 0 && !hasStartedPlaying
+        pct !== null && !hasStartedPlaying
             ? `Buffering: ${pct}%`
-            : (hasStartedPlaying ? "Buffering..." : "Connecting to stream...")
+            : (hasStartedPlaying ? "Buffering..." : (pct !== null ? `Buffering: ${pct}%` : "Connecting to stream..."))
     );
 
     return (
@@ -409,13 +412,13 @@ export const ArtworkBackground: React.FC<{
 }> = ({ artwork, isBuffering, hasStartedPlaying = true, error, bufferProgress, bufferText }) => {
     const { theme } = useTheme();
     if (!artwork || hasStartedPlaying || error) return null;
-    const pct = bufferProgress !== undefined && bufferProgress >= 0 && bufferProgress < 100
+    const pct = bufferProgress !== undefined && bufferProgress >= 0 && bufferProgress <= 100
         ? Math.min(Math.max(Math.round(bufferProgress), 0), 100)
         : null;
     const displayText = bufferText || (
-        pct !== null && pct > 0 && !hasStartedPlaying
+        pct !== null && !hasStartedPlaying
             ? `Buffering: ${pct}%`
-            : (hasStartedPlaying ? "Buffering..." : "Connecting to stream...")
+            : (hasStartedPlaying ? "Buffering..." : (pct !== null ? `Buffering: ${pct}%` : "Connecting to stream..."))
     );
     return (
         <View style={styles.artworkContainer}>
@@ -549,9 +552,23 @@ export const ContentFitLabel: React.FC<{
     opacity: Animated.Value;
 }> = ({ show, contentFit, opacity }) => {
     if (!show) return null;
+    const getLabel = () => {
+        const val = (contentFit || '').toLowerCase();
+        if (val === 'contain') return 'Fit to Screen (Original)';
+        if (val === 'cover') return 'Zoom to Fill (Crop)';
+        if (val === 'stretch') return 'Stretch to Screen';
+        return contentFit.toUpperCase();
+    };
+    const getIcon = () => {
+        const val = (contentFit || '').toLowerCase();
+        if (val === 'contain') return 'fit-screen';
+        if (val === 'cover') return 'crop';
+        return 'fullscreen';
+    };
     return (
         <Animated.View style={[styles.contentFitLabelContainer, { opacity }]} pointerEvents="none">
-            <Text style={styles.contentFitLabelText}>{contentFit.toUpperCase()}</Text>
+            <MaterialIcons name={getIcon() as any} size={20} color="#00e5ff" style={{ marginRight: 8 }} />
+            <Text style={styles.contentFitLabelText}>{getLabel()}</Text>
         </Animated.View>
     );
 };
@@ -573,3 +590,4 @@ export const ErrorDisplay: React.FC<{
         </View>
     );
 };
+export { MxPlayerGestures } from './MxPlayerGestures';
