@@ -8,7 +8,7 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Base URL & Constants ─────────────────────────────────────────────────────
 
-export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.solar';
+export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.pizza';
 
 export const KNOWN_TAMILMV_MIRRORS = [
   'https://www.1tamilmv.style',
@@ -1093,10 +1093,32 @@ export function cleanTopicTitle(title: string): { name: string; year: string | n
   cleaned = cleaned.replace(/^\[?\b(?:1tamilmv|tamilmv)\b\]?\s*[-_:]?\s*/i, '');
   cleaned = cleaned.replace(/^[\s\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]+/u, '').trim();
 
+  // Decode common HTML entities
+  cleaned = cleaned
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+
+  // Strip leading format / release bracket tags repeatedly: e.g. [IMAX], [PLF], [◗◖ ATMOS], [ATMOS], [Exclusive]
+  cleaned = cleaned.replace(/^(\s*\[[^\]]{1,35}\]\s*)+/g, '').trim();
+
+  // 1. Match "Title (YYYY)"
   const match = cleaned.match(/^([^(]+?)\s*\((\d{4})\)/);
   if (match) {
     return { name: match[1].trim(), year: match[2] };
   }
+
+  // 2. Match "Title.YYYY." or "Title-YYYY-" (e.g., Jailer-2.2026.1080p)
+  const dotYearMatch = cleaned.match(/^([a-zA-Z0-9\s._-]+?)[.\s_-]+(19\d{2}|20\d{2})[.\s_-]/);
+  if (dotYearMatch && !/^(1080p|720p|2160p|4k)/i.test(dotYearMatch[1])) {
+    const rawName = dotYearMatch[1].replace(/[._-]+/g, ' ').trim();
+    if (rawName.length >= 2) {
+      return { name: rawName, year: dotYearMatch[2] };
+    }
+  }
+
   const beforeRes = cleaned.split(/\s*[-–]\s*(?:4K|2160p|1080p|720p|TRUE|WEB|HDRip|DVDRip|DVD9|DVD5|DVD|HDTV|PreDVD)/i)[0];
   return { name: beforeRes.trim(), year: null };
 }
@@ -1198,8 +1220,12 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
   throw lastError || new Error('Failed to fetch topic magnets from all mirrors');
 }
 
-async function fetchSearchHtml(searchQuery: string, baseUrl: string): Promise<{ html: string; successfulBase: string }> {
-  const searchPath = `/index.php?/search/&q=${encodeURIComponent(searchQuery)}&type=forums_topic&search_and_or=or&sortby=relevancy`;
+async function fetchSearchHtml(
+  searchQuery: string,
+  baseUrl: string,
+  andOr: 'and' | 'or' = 'and'
+): Promise<{ html: string; successfulBase: string }> {
+  const searchPath = `/index.php?/search/&q=${encodeURIComponent(searchQuery)}&type=forums_topic&search_and_or=${andOr}&sortby=relevancy`;
   const mirrorsToTry = [baseUrl, ...KNOWN_TAMILMV_MIRRORS.filter(m => m !== baseUrl)];
 
   for (const mirror of mirrorsToTry) {
@@ -1247,8 +1273,23 @@ function parseTamilMVSearchHtml(html: string, successfulBase: string, language: 
     if (topicUrl.startsWith('//')) topicUrl = 'https:' + topicUrl;
     else if (topicUrl.startsWith('/')) topicUrl = `${successfulBase}${topicUrl}`;
 
-    const forumMatch = str.match(/\/forums\/forum\/(\d+)-/i);
+    const forumMatch = str.match(/\/forums\/forum\/(\d+)-([^\/"]*)/i);
     const forumId = forumMatch ? forumMatch[1] : null;
+    const forumSlug = (forumMatch ? forumMatch[2] : '').toLowerCase();
+
+    // Skip audio, song, and music forum topics (Forum 15 = mp3-songs, Forum 16 = video-songs)
+    if (
+      forumId === '15' ||
+      forumId === '16' ||
+      forumSlug.includes('song') ||
+      forumSlug.includes('mp3') ||
+      forumSlug.includes('music') ||
+      forumSlug.includes('audio') ||
+      /\b(video\s*songs?|mp3\s*songs?|soundtracks?|alac|flac\s*musical|audio\s*track)\b/i.test(rawTitle) ||
+      /\b(original motion picture soundtrack|anirudh ravichander musical|ar rahman musical)\b/i.test(rawTitle)
+    ) {
+      continue;
+    }
 
     const itemLang = detectLanguageFromTitle(rawTitle, forumId);
 
@@ -1323,19 +1364,25 @@ export async function searchTamilMV(
   // Strip generic filler words like "movie", "movies", "film", "padam"
   const cleanQ = trimmed.replace(/\b(movies?|films?|padam|cinema)\b/gi, '').trim() || trimmed;
 
-  // 1. Primary search
-  const { html, successfulBase } = await fetchSearchHtml(trimmed, baseUrl);
+  // 1. Primary search with search_and_or=and (accurate terms)
+  const { html, successfulBase } = await fetchSearchHtml(trimmed, baseUrl, 'and');
   let results = parseTamilMVSearchHtml(html, successfulBase, language);
 
-  // 2. If no results and cleanQ is different from trimmed, try cleanQ
+  // 2. If no results and cleanQ is different from trimmed, try cleanQ with 'and'
   if (results.length === 0 && cleanQ !== trimmed) {
-    const { html: fallbackHtml, successfulBase: fallbackBase } = await fetchSearchHtml(cleanQ, baseUrl);
+    const { html: fallbackHtml, successfulBase: fallbackBase } = await fetchSearchHtml(cleanQ, baseUrl, 'and');
     results = parseTamilMVSearchHtml(fallbackHtml, fallbackBase, language);
   }
 
-  // 3. If short query (<= 3 chars) returns 0 results, try with wildcard *
+  // 3. If still no results for multi-word query, fallback to search_and_or=or
+  if (results.length === 0 && trimmed.includes(' ')) {
+    const { html: orHtml, successfulBase: orBase } = await fetchSearchHtml(trimmed, baseUrl, 'or');
+    results = parseTamilMVSearchHtml(orHtml, orBase, language);
+  }
+
+  // 4. If short query (<= 3 chars) returns 0 results, try with wildcard *
   if (results.length === 0 && cleanQ.length <= 3 && !cleanQ.includes('*')) {
-    const { html: wcHtml, successfulBase: wcBase } = await fetchSearchHtml(`${cleanQ}*`, baseUrl);
+    const { html: wcHtml, successfulBase: wcBase } = await fetchSearchHtml(`${cleanQ}*`, baseUrl, 'and');
     results = parseTamilMVSearchHtml(wcHtml, wcBase, language);
   }
 

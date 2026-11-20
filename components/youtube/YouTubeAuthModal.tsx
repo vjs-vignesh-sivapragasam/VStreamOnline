@@ -10,6 +10,8 @@ import {
   Image,
   Dimensions,
   Platform,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
@@ -61,6 +63,30 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
     }
   }, [authStatus.pending]);
 
+  // Check auth status on app resume while modal is visible (e.g. after returning from Google device auth browser)
+  useEffect(() => {
+    const handleAppStateChange = async (nextState: AppStateStatus) => {
+      if (nextState === 'active' && visible) {
+        try {
+          const status = await youTubeService.getAuthStatus(4000);
+          if (status.authenticated) {
+            stopPolling();
+            if (await isHapticsSupported()) {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            }
+            onAuthChange(status);
+            onClose();
+          } else if (status.pending) {
+            setDeviceCodeData(status.pending);
+          }
+        } catch {}
+      }
+    };
+
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, [visible, onClose, onAuthChange]);
+
   // Clean up timer on close or unmount
   useEffect(() => {
     if (!visible) {
@@ -90,6 +116,7 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           }
           onAuthChange(status);
+          onClose();
         } else if (status.pending) {
           setDeviceCodeData(status.pending);
         }
@@ -207,6 +234,7 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
             if (await isHapticsSupported()) {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             }
+            onClose();
           } catch (e: any) {
             Alert.alert('Logout Error', e?.message || 'Failed to sign out.');
           } finally {

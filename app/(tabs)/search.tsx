@@ -9,6 +9,7 @@ import {
   FlatList,
   useWindowDimensions,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -20,6 +21,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import {
   fetchTamilMVRecentlyAdded,
   searchTamilMV,
+  getPaginationItems,
   GroupedItem,
   TorrentItem,
 } from '@/hooks/useTamilMv';
@@ -259,12 +261,221 @@ const SearchMovieCard = React.memo(({
   );
 });
 
+// ─── Pagination Controls ───────────────────────────────────────────────────────
+
+const PaginationControls = ({
+  currentPage,
+  totalPages,
+  onPageChange,
+  onOpenJumpModal,
+}: {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  onOpenJumpModal: () => void;
+}) => {
+  const { theme } = useTheme();
+  const pages = useMemo(
+    () => getPaginationItems(currentPage, totalPages),
+    [currentPage, totalPages]
+  );
+
+  const handlePrev = async () => {
+    if (currentPage > 1) {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      onPageChange(currentPage - 1);
+    }
+  };
+
+  const handleNext = async () => {
+    if (currentPage < totalPages) {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      onPageChange(currentPage + 1);
+    }
+  };
+
+  const handlePageSelect = async (page: number) => {
+    if (page !== currentPage) {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      onPageChange(page);
+    }
+  };
+
+  return (
+    <View style={styles.paginationContainer}>
+      {/* Top summary row: Page X of Y with quick jump button */}
+      <View style={styles.paginationSummaryRow}>
+        <Text style={styles.paginationSummaryText}>
+          Page <Text style={[styles.paginationSummaryHighlight, { color: theme.primary }]}>{currentPage}</Text> of{' '}
+          <Text style={[styles.paginationSummaryHighlight, { color: theme.primary }]}>{totalPages}</Text>
+        </Text>
+        {totalPages > 1 && (
+          <TouchableOpacity
+            style={styles.jumpButton}
+            onPress={onOpenJumpModal}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="search-outline" size={13} color={theme.primary} style={{ marginRight: 4 }} />
+            <Text style={styles.jumpButtonText}>Jump to Page</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Pagination button bar: Previous | 1 | 2 | 3 | … | N | Next */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.paginationBar}
+      >
+        <TouchableOpacity
+          style={[styles.navBtn, currentPage <= 1 && styles.navBtnDisabled]}
+          onPress={handlePrev}
+          disabled={currentPage <= 1}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="chevron-back"
+            size={16}
+            color={currentPage <= 1 ? '#444' : '#ffffff'}
+          />
+          <Text style={[styles.navBtnText, currentPage <= 1 && styles.navBtnTextDisabled]}>
+            Previous
+          </Text>
+        </TouchableOpacity>
+
+        {pages.map((item: number | '...', index: number) => {
+          if (item === '...') {
+            return (
+              <TouchableOpacity
+                key={`ellipsis-${index}`}
+                style={styles.ellipsisBtn}
+                onPress={onOpenJumpModal}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.ellipsisText}>…</Text>
+              </TouchableOpacity>
+            );
+          }
+
+          const isActive = item === currentPage;
+          return (
+            <TouchableOpacity
+              key={`page-${item}`}
+              style={[
+                styles.pageBtn,
+                isActive && { backgroundColor: theme.primary, borderColor: theme.primary },
+              ]}
+              onPress={() => handlePageSelect(item)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.pageBtnText, isActive && styles.pageBtnTextActive]}>
+                {item}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+
+        <TouchableOpacity
+          style={[styles.navBtn, currentPage >= totalPages && styles.navBtnDisabled]}
+          onPress={handleNext}
+          disabled={currentPage >= totalPages}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.navBtnText, currentPage >= totalPages && styles.navBtnTextDisabled]}>
+            Next
+          </Text>
+          <Ionicons
+            name="chevron-forward"
+            size={16}
+            color={currentPage >= totalPages ? '#444' : '#ffffff'}
+          />
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  );
+};
+
+// ─── Jump To Page Modal ────────────────────────────────────────────────────────
+
+const JumpModal = ({
+  visible,
+  onClose,
+  totalPages,
+  onJump,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  totalPages: number;
+  onJump: (page: number) => void;
+}) => {
+  const { theme } = useTheme();
+  const [pageInput, setPageInput] = useState('');
+
+  const handleConfirm = () => {
+    const p = parseInt(pageInput.trim(), 10);
+    if (!isNaN(p) && p >= 1 && p <= totalPages) {
+      onJump(p);
+      setPageInput('');
+      onClose();
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+          <Text style={styles.modalTitle}>Jump to Page</Text>
+          <Text style={styles.modalSubtitle}>
+            Enter page number (1 – {totalPages})
+          </Text>
+
+          <TextInput
+            style={styles.modalInput}
+            value={pageInput}
+            onChangeText={setPageInput}
+            placeholder={`1 - ${totalPages}`}
+            placeholderTextColor="#666"
+            keyboardType="number-pad"
+            autoFocus
+            onSubmitEditing={handleConfirm}
+          />
+
+          <View style={styles.modalActions}>
+            <TouchableOpacity style={styles.modalCancelBtn} onPress={onClose}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalGoBtn, { backgroundColor: theme.primary }]}
+              onPress={handleConfirm}
+            >
+              <Text style={styles.modalGoText}>Go</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+};
+
 // ─── Search Screen ────────────────────────────────────────────────────────────
 
 const SearchScreen = () => {
   const { theme } = useTheme();
   const params = useLocalSearchParams<{ query?: string }>();
   const [query, setQuery]                         = useState(params.query || '');
+  const ITEMS_PER_PAGE                            = 24;
+  const [searchPage, setSearchPage]               = useState(1);
+  const [recentPage, setRecentPage]               = useState(1);
+  const [jumpModalVisible, setJumpModalVisible]   = useState(false);
+  const [jumpTarget, setJumpTarget]               = useState<'search' | 'recent'>('search');
+  const searchScrollRef                           = useRef<ScrollView>(null);
+  const recentScrollRef                           = useRef<ScrollView>(null);
   const [showRecentlyAdded, setShowRecentlyAdded] = useState(false);
   const [recentlyAddedMovies, setRecentlyAddedMovies] = useState<GroupedItem[]>(() => {
     try {
@@ -336,6 +547,8 @@ const SearchScreen = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setSelectedCategory(key);
+    setSearchPage(1);
+    setRecentPage(1);
   }, []);
 
   // If a query parameter was passed on mount, handle it
@@ -418,28 +631,78 @@ const SearchScreen = () => {
     });
   }, []);
 
-  // Filter movies by query (single deduplicated pass)
+  // Filter movies by query: combine local recently added and live search results (deduplicated)
   const filteredMovies = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    if (liveSearchResults.length === 0) return [];
+
+    const normQ = q.replace(/[._-]+/g, ' ').trim();
+    const qWords = normQ.split(/\s+/).filter(Boolean);
+
+    const matchesQuery = (g: GroupedItem) => {
+      // Exclude audio / song releases that may have slipped into cache or live results
+      const allTitles = (g.name || '') + ' ' + g.items.map((i) => i.title || '').join(' ');
+      if (
+        /\b(video\s*songs?|mp3\s*songs?|soundtracks?|alac|flac\s*musical|audio\s*track)\b/i.test(allTitles) ||
+        /\b(original motion picture soundtrack|anirudh ravichander musical|ar rahman musical)\b/i.test(allTitles)
+      ) {
+        return false;
+      }
+
+      const normName = (g.name || '').toLowerCase().replace(/[._-]+/g, ' ');
+      const rawName = (g.name || '').toLowerCase();
+
+      // Check full phrase match
+      if (normName.includes(normQ) || rawName.includes(q)) return true;
+
+      // Check all words match in name
+      if (qWords.length > 1 && qWords.every((w) => normName.includes(w))) return true;
+
+      // Check year match if user typed a year
+      if (g.year && qWords.includes(g.year.toString())) return true;
+
+      // Check items title match
+      return g.items.some((i) => {
+        const normTitle = (i.title || '').toLowerCase().replace(/[._-]+/g, ' ');
+        if (normTitle.includes(normQ) || (i.title || '').toLowerCase().includes(q)) return true;
+        if (qWords.length > 1 && qWords.every((w) => normTitle.includes(w))) return true;
+        return false;
+      });
+    };
 
     const movieMap = new Map<string, GroupedItem>();
+
+    // 1. Populate from recentlyAddedMovies first (instant match for movies in recently added!)
+    for (const g of recentlyAddedMovies) {
+      if (matchesQuery(g)) {
+        const key = `${(g.name || '').toLowerCase().trim()}|||${g.year || ''}`;
+        movieMap.set(key, g);
+      }
+    }
+
+    // 2. Merge matching movies from liveSearchResults
     for (const g of liveSearchResults) {
-      const nameMatch = g.name?.toLowerCase().includes(q);
-      const yearMatch = g.year ? g.year.toString().includes(q) : false;
-      const titleMatch = g.items.some((i) => i.title.toLowerCase().includes(q));
-      const langMatch = g.items.some((i) => i.language?.toLowerCase().includes(q));
-      if (nameMatch || yearMatch || titleMatch || langMatch) {
-        const key = `${(g.name || '').toLowerCase()}|||${g.year || ''}`;
-        if (!movieMap.has(key)) {
+      if (matchesQuery(g)) {
+        const key = `${(g.name || '').toLowerCase().trim()}|||${g.year || ''}`;
+        const existing = movieMap.get(key);
+        if (!existing) {
           movieMap.set(key, g);
+        } else {
+          const existingGuids = new Set(existing.items.map((it) => it.guid || it.groupid));
+          const newItems = g.items.filter((it) => !existingGuids.has(it.guid || it.groupid));
+          if (newItems.length > 0) {
+            existing.items = [...existing.items, ...newItems];
+          }
+          if (!existing.items[0]?.poster && g.items.find((it) => it.poster)) {
+            const p = g.items.find((it) => it.poster)?.poster;
+            if (p && existing.items[0]) existing.items[0].poster = p;
+          }
         }
       }
     }
 
     return Array.from(movieMap.values());
-  }, [query, liveSearchResults]);
+  }, [query, recentlyAddedMovies, liveSearchResults]);
 
   // Category statistics & grouped sections for Recently Added (single-pass O(N))
   const { recentCategoryCounts, recentGroupedByCategory } = useMemo(() => {
@@ -540,6 +803,20 @@ const SearchScreen = () => {
     if (selectedCategory === 'all') return filteredMovies;
     return filteredMovies.filter((g) => getGroupCategory(g) === selectedCategory);
   }, [filteredMovies, selectedCategory]);
+
+  const searchTotalPages = Math.ceil(displayedSearchMovies.length / ITEMS_PER_PAGE);
+  const paginatedSearchMovies = useMemo(() => {
+    if (searchTotalPages <= 1) return displayedSearchMovies;
+    const start = (searchPage - 1) * ITEMS_PER_PAGE;
+    return displayedSearchMovies.slice(start, start + ITEMS_PER_PAGE);
+  }, [displayedSearchMovies, searchPage, searchTotalPages]);
+
+  const recentTotalPages = Math.ceil(displayedRecentMovies.length / ITEMS_PER_PAGE);
+  const paginatedRecentMovies = useMemo(() => {
+    if (recentTotalPages <= 1) return displayedRecentMovies;
+    const start = (recentPage - 1) * ITEMS_PER_PAGE;
+    return displayedRecentMovies.slice(start, start + ITEMS_PER_PAGE);
+  }, [displayedRecentMovies, recentPage, recentTotalPages]);
 
   const searchCategoryFilterOptions = useMemo(() => {
     return CATEGORY_CONFIG.filter((cfg) => {
@@ -645,7 +922,15 @@ const SearchScreen = () => {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {filteredMovies.length > 0 && (
+          {isSearchingLive && filteredMovies.length === 0 ? (
+            <View style={styles.searchingLoadingContainer}>
+              <View style={[styles.loadingPulseCircle, { backgroundColor: theme.iconBg, borderColor: theme.indicator || theme.cardBorder }]}>
+                <ActivityIndicator size="large" color={theme.primary} />
+              </View>
+              <Text style={styles.catalogLoadingTitle}>Searching for "{query}"</Text>
+              <Text style={styles.catalogLoadingText}>Finding best movie matches across all categories…</Text>
+            </View>
+          ) : filteredMovies.length > 0 ? (
             <View style={styles.resultsGridSection}>
               <View style={styles.resultsHeaderRow}>
                 <Text style={styles.resultsCountText}>
@@ -702,16 +987,32 @@ const SearchScreen = () => {
               ) : (
                 /* Single Filtered Category Grid */
                 displayedSearchMovies.length > 0 ? (
-                  <View style={styles.gridWrap}>
-                    {displayedSearchMovies.map((group) => (
-                      <SearchMovieCard
-                        key={`movie-${group.name}-${group.year || ''}`}
-                        group={group}
-                        cardWidth={cardWidth}
-                        posterHeight={posterHeight}
-                        onPress={handleCardPress}
+                  <View>
+                    <View style={styles.gridWrap}>
+                      {paginatedSearchMovies.map((group) => (
+                        <SearchMovieCard
+                          key={`movie-${group.name}-${group.year || ''}`}
+                          group={group}
+                          cardWidth={cardWidth}
+                          posterHeight={posterHeight}
+                          onPress={handleCardPress}
+                        />
+                      ))}
+                    </View>
+                    {searchTotalPages > 1 && (
+                      <PaginationControls
+                        currentPage={searchPage}
+                        totalPages={searchTotalPages}
+                        onPageChange={(p) => {
+                          setSearchPage(p);
+                          searchScrollRef.current?.scrollTo({ y: 0, animated: true });
+                        }}
+                        onOpenJumpModal={() => {
+                          setJumpTarget('search');
+                          setJumpModalVisible(true);
+                        }}
                       />
-                    ))}
+                    )}
                   </View>
                 ) : (
                   <View style={styles.emptyCategoryWrap}>
@@ -729,12 +1030,12 @@ const SearchScreen = () => {
                 )
               )}
             </View>
-          )}
+          ) : null}
 
           {/* No Search Matches Found */}
           {!isSearchingLive && filteredMovies.length === 0 && (
             <View style={styles.emptyStateContainer}>
-              <View style={styles.emptyStateIconContainer}>
+              <View style={[styles.emptyStateIconContainer, { backgroundColor: theme.iconBg }]}>
                 <Ionicons name="search-outline" color={theme.primary} size={48} />
               </View>
               <Text style={styles.emptyStateTitle}>No movies found</Text>
@@ -775,7 +1076,7 @@ const SearchScreen = () => {
         >
           {isLoadingRecent && recentlyAddedMovies.length === 0 ? (
             <View style={styles.catalogLoadingContainer}>
-              <View style={styles.loadingPulseCircle}>
+              <View style={[styles.loadingPulseCircle, { backgroundColor: theme.iconBg, borderColor: theme.indicator || theme.cardBorder }]}>
                 <ActivityIndicator color={theme.primary} size="large" />
               </View>
               <Text style={styles.catalogLoadingTitle}>Loading Recently Added</Text>
@@ -858,16 +1159,32 @@ const SearchScreen = () => {
               ) : (
                 /* Single Filtered Category Grid */
                 displayedRecentMovies.length > 0 ? (
-                  <View style={styles.gridWrap}>
-                    {displayedRecentMovies.map((group, index) => (
-                      <SearchMovieCard
-                        key={`recent-${group.name}-${group.year || ''}-${index}`}
-                        group={group}
-                        cardWidth={cardWidth}
-                        posterHeight={posterHeight}
-                        onPress={handleCardPress}
+                  <View>
+                    <View style={styles.gridWrap}>
+                      {paginatedRecentMovies.map((group, index) => (
+                        <SearchMovieCard
+                          key={`recent-${group.name}-${group.year || ''}-${index}`}
+                          group={group}
+                          cardWidth={cardWidth}
+                          posterHeight={posterHeight}
+                          onPress={handleCardPress}
+                        />
+                      ))}
+                    </View>
+                    {recentTotalPages > 1 && (
+                      <PaginationControls
+                        currentPage={recentPage}
+                        totalPages={recentTotalPages}
+                        onPageChange={(p) => {
+                          setRecentPage(p);
+                          recentScrollRef.current?.scrollTo({ y: 0, animated: true });
+                        }}
+                        onOpenJumpModal={() => {
+                          setJumpTarget('recent');
+                          setJumpModalVisible(true);
+                        }}
                       />
-                    ))}
+                    )}
                   </View>
                 ) : (
                   <View style={styles.emptyCategoryWrap}>
@@ -1203,36 +1520,175 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#151518',
   },
-  topBadgesRow: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    right: 6,
+  // ─── Pagination Styles ───────────────────────────────────────────────────────
+  paginationContainer: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  paginationSummaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+    paddingHorizontal: 4,
   },
-  yearBadge: {
+  paginationSummaryText: {
+    color: '#8E8E93',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  paginationSummaryHighlight: {
+    fontWeight: '700',
+  },
+  jumpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1c1c1e',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2c2c2e',
+  },
+  jumpButtonText: {
+    color: '#d1d1d6',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  paginationBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 4,
+    flexGrow: 1,
+  },
+  pageBtn: {
+    minWidth: 38,
+    height: 38,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#18181a',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pageBtnText: {
+    color: '#d1d1d6',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pageBtnTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  ellipsisBtn: {
+    minWidth: 32,
+    height: 38,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ellipsisText: {
+    color: '#8E8E93',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  navBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 38,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#18181a',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 4,
+  },
+  navBtnDisabled: {
+    opacity: 0.35,
+    backgroundColor: '#121214',
+    borderColor: 'transparent',
+  },
+  navBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  navBtnTextDisabled: {
+    color: '#666666',
+  },
+  modalOverlay: {
+    flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
   },
-  yearBadgeText: {
-    fontSize: 9,
+  modalContent: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#1c1c1e',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#2c2c2e',
+  },
+  modalTitle: {
+    fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
+    marginBottom: 6,
   },
-  langBadge: {
-    backgroundColor: 'rgba(83, 90, 255, 0.85)',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginBottom: 16,
   },
-  langBadgeText: {
-    fontSize: 8,
-    fontWeight: '700',
+  modalInput: {
+    backgroundColor: '#121214',
+    borderWidth: 1,
+    borderColor: '#3a3a3c',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     color: '#ffffff',
-    letterSpacing: 0.2,
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#2c2c2e',
+  },
+  modalCancelText: {
+    color: '#ffffff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  modalGoBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  modalGoText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  searchingLoadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+    width: '100%',
   },
   cardTitle: {
     fontSize: 13,

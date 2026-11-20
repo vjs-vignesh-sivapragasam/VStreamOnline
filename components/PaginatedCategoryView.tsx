@@ -32,6 +32,7 @@ import { isHapticsSupported } from '@/utils/platform';
 import BottomSpacing from '@/components/BottomSpacing';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@/contexts/ThemeContext';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,7 +59,6 @@ const CategoryItemCard = ({
   const best = getBestItem(group);
   const [posterUri, setPosterUri] = useState<string | null>(best?.poster || null);
   const releasesCount = group.items.length;
-  const lang = best?.language || 'tamil';
   const type = category === 'series' ? 'series' : 'movie';
 
   const cleanedTitle = useMemo(() => {
@@ -112,21 +112,6 @@ const CategoryItemCard = ({
           </View>
         )}
 
-        {/* Top Badges */}
-        <View style={styles.topBadgesRow}>
-          {group.year ? (
-            <View style={styles.yearBadge}>
-              <Text style={styles.yearBadgeText}>{group.year}</Text>
-            </View>
-          ) : null}
-
-          {lang ? (
-            <View style={styles.langBadge}>
-              <Text style={styles.langBadgeText}>{lang.toUpperCase()}</Text>
-            </View>
-          ) : null}
-        </View>
-
         {releasesCount > 1 ? (
           <View style={styles.releaseBadge}>
             <Text style={styles.releaseBadgeText}>{releasesCount} releases</Text>
@@ -155,6 +140,7 @@ const PaginationControls = ({
   onPageChange: (page: number) => void;
   onOpenJumpModal: () => void;
 }) => {
+  const { theme } = useTheme();
   const pages = useMemo(
     () => getPaginationItems(currentPage, totalPages),
     [currentPage, totalPages]
@@ -192,8 +178,8 @@ const PaginationControls = ({
       {/* Top summary row: Page X of Y with quick jump button */}
       <View style={styles.paginationSummaryRow}>
         <Text style={styles.paginationSummaryText}>
-          Page <Text style={styles.paginationSummaryHighlight}>{currentPage}</Text> of{' '}
-          <Text style={styles.paginationSummaryHighlight}>{totalPages}</Text>
+          Page <Text style={[styles.paginationSummaryHighlight, { color: theme.primary }]}>{currentPage}</Text> of{' '}
+          <Text style={[styles.paginationSummaryHighlight, { color: theme.primary }]}>{totalPages}</Text>
         </Text>
         {totalPages > 1 && (
           <TouchableOpacity
@@ -247,7 +233,7 @@ const PaginationControls = ({
           return (
             <TouchableOpacity
               key={`page-${item}`}
-              style={[styles.pageBtn, isActive && styles.pageBtnActive]}
+              style={[styles.pageBtn, isActive && { backgroundColor: theme.primary, borderColor: theme.primary }]}
               onPress={() => handlePageSelect(item)}
               activeOpacity={0.7}
             >
@@ -291,6 +277,7 @@ const JumpModal = ({
   totalPages: number;
   onJump: (page: number) => void;
 }) => {
+  const { theme } = useTheme();
   const [pageInput, setPageInput] = useState('');
 
   const handleConfirm = () => {
@@ -326,7 +313,7 @@ const JumpModal = ({
             <TouchableOpacity style={styles.modalCancelBtn} onPress={onClose}>
               <Text style={styles.modalCancelText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.modalGoBtn} onPress={handleConfirm}>
+            <TouchableOpacity style={[styles.modalGoBtn, { backgroundColor: theme.primary }]} onPress={handleConfirm}>
               <Text style={styles.modalGoText}>Go</Text>
             </TouchableOpacity>
           </View>
@@ -351,6 +338,7 @@ export default function PaginatedCategoryView({
   title,
   onBack,
 }: PaginatedCategoryViewProps) {
+  const { theme } = useTheme();
   const { items, currentPage, totalPages, loading, error, goToPage, refresh } =
     useTamilMVPaginated(language, category, 1);
 
@@ -425,8 +413,8 @@ export default function PaginatedCategoryView({
         </TouchableOpacity>
 
         <View style={styles.headerMetaRow}>
-          <View style={styles.headerBadge}>
-            <Text style={styles.headerBadgeText}>
+          <View style={[styles.headerBadge, { backgroundColor: theme.iconBg, borderColor: theme.cardBorder }]}>
+            <Text style={[styles.headerBadgeText, { color: theme.primaryLight || theme.primary }]}>
               PAGE {currentPage} OF {totalPages}
             </Text>
           </View>
@@ -435,7 +423,7 @@ export default function PaginatedCategoryView({
 
       {loading && items.length === 0 ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#535aff" />
+          <ActivityIndicator size="large" color={theme.primary} />
           <Text style={styles.loadingText}>Loading {title} (Page {currentPage})…</Text>
         </View>
       ) : error && items.length === 0 ? (
@@ -459,8 +447,8 @@ export default function PaginatedCategoryView({
             <RefreshControl
               refreshing={loading}
               onRefresh={refresh}
-              tintColor="#535aff"
-              colors={['#535aff']}
+              tintColor={theme.primary}
+              colors={[theme.primary]}
             />
           }
           ListHeaderComponent={

@@ -1125,12 +1125,37 @@ class YouTubeService {
     return subscribed;
   }
 
+  private cachedAuthStatus: YouTubeAuthStatus | null = null;
+
+  getCachedAuthStatus(): YouTubeAuthStatus {
+    if (this.cachedAuthStatus) return this.cachedAuthStatus;
+    try {
+      const raw = storageService.getItem('yt_auth_status_cached');
+      if (raw) {
+        this.cachedAuthStatus = JSON.parse(raw);
+        return this.cachedAuthStatus!;
+      }
+    } catch {}
+    return { authenticated: false };
+  }
+
+  setCachedAuthStatus(status: YouTubeAuthStatus) {
+    this.cachedAuthStatus = status;
+    try {
+      if (status.authenticated) {
+        storageService.setItem('yt_auth_status_cached', JSON.stringify(status));
+      } else {
+        storageService.removeItem('yt_auth_status_cached');
+      }
+    } catch {}
+  }
+
   // ── YouTube Google Account / SSO ──────────────────────────────────────────
 
-  async getAuthStatus(timeoutMs = 1000): Promise<YouTubeAuthStatus> {
+  async getAuthStatus(timeoutMs = 4000): Promise<YouTubeAuthStatus> {
     try {
       const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
-      if (!baseUrl) return { authenticated: false };
+      if (!baseUrl) return this.getCachedAuthStatus();
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1139,11 +1164,13 @@ class YouTubeService {
       }).finally(() => clearTimeout(timer));
 
       if (res.ok) {
-        return await res.json();
+        const status = await res.json();
+        this.setCachedAuthStatus(status);
+        return status;
       }
-      return { authenticated: false };
+      return this.getCachedAuthStatus();
     } catch {
-      return { authenticated: false };
+      return this.getCachedAuthStatus();
     }
   }
 
@@ -1169,8 +1196,9 @@ class YouTubeService {
     }
   }
 
-  async logout(timeoutMs = 3000): Promise<boolean> {
+  async logout(timeoutMs = 5000): Promise<boolean> {
     try {
+      this.setCachedAuthStatus({ authenticated: false });
       const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
       if (!baseUrl) return false;
       const controller = new AbortController();
@@ -1188,12 +1216,16 @@ class YouTubeService {
 
   // ── Authenticated Real YouTube Feeds ───────────────────────────────────────
 
-  async getHomeFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
+  async getHomeFeed(continuationToken?: string, timeoutMs = 8000): Promise<YouTubeSearchResult> {
     try {
       const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      if (!baseUrl) return { videos: [] };
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(`${baseUrl}/yt/feed/home`, {
+      const url = continuationToken
+        ? `${baseUrl}/yt/feed/home?continuation=${encodeURIComponent(continuationToken)}`
+        : `${baseUrl}/yt/feed/home`;
+      const res = await fetch(url, {
         signal: controller.signal,
       }).finally(() => clearTimeout(timer));
 
@@ -1202,7 +1234,7 @@ class YouTubeService {
         const clean = (data.results || []).filter(
           (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
         );
-        return { videos: clean };
+        return { videos: clean, continuationToken: data.continuationToken };
       }
       return { videos: [] };
     } catch (err: any) {
@@ -1211,12 +1243,16 @@ class YouTubeService {
     }
   }
 
-  async getSubscriptionsFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
+  async getSubscriptionsFeed(continuationToken?: string, timeoutMs = 8000): Promise<YouTubeSearchResult> {
     try {
       const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      if (!baseUrl) return { videos: [] };
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(`${baseUrl}/yt/feed/subscriptions`, {
+      const url = continuationToken
+        ? `${baseUrl}/yt/feed/subscriptions?continuation=${encodeURIComponent(continuationToken)}`
+        : `${baseUrl}/yt/feed/subscriptions`;
+      const res = await fetch(url, {
         signal: controller.signal,
       }).finally(() => clearTimeout(timer));
 
@@ -1225,7 +1261,7 @@ class YouTubeService {
         const clean = (data.results || []).filter(
           (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
         );
-        return { videos: clean };
+        return { videos: clean, continuationToken: data.continuationToken };
       }
       return { videos: [] };
     } catch (err: any) {

@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { GroupedItem, Language, TorrentItem, useTamilMV, useTamilMVTopReleases, cleanTopicTitle } from '@/hooks/useTamilMv';
 import { tmdbService, TmdbDetails } from '@/services/TmdbService';
+import { useTheme } from '@/contexts/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -233,11 +234,13 @@ const CarouselSlideItem = ({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PosterCarousel({
+
     filter = 'tamil',
     onItemPress,
     autoPlay = true,
     autoPlayInterval = 5000,
 }: CarouselProps) {
+    const { theme } = useTheme();
     const [activeIndex, setActiveIndex] = useState(0);
     const [dimensions, setDimensions] = useState(() => {
         const { width, height } = Dimensions.get('window');
@@ -393,7 +396,7 @@ export default function PosterCarousel({
         return (
             <View style={[styles.loadingContainer, { height: carouselHeight }]}>
                 {loading
-                    ? <ActivityIndicator color="#535aff" />
+                    ? <ActivityIndicator color={theme.primary} />
                     : <Text style={styles.emptyText}>No content available</Text>
                 }
             </View>
@@ -442,7 +445,7 @@ export default function PosterCarousel({
                                     key={`dot-${index}`}
                                     style={[
                                         styles.paginationDot,
-                                        activeIndex === index && styles.paginationDotActive,
+                                        activeIndex === index && [styles.paginationDotActive, { backgroundColor: theme.primary }],
                                     ]}
                                     onPress={() => scrollToIndex(index)}
                                 />

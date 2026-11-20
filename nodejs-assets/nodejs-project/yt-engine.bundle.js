@@ -38923,6 +38923,25 @@ async function restoreAuthIfAvailable(client) {
   }
 }
 
+function extractTvTiles(obj, results = []) {
+  if (!obj || typeof obj !== 'object') return results;
+  if (obj.tileRenderer) {
+    results.push(obj.tileRenderer);
+  } else if (obj.contentId && (obj.metadata || obj.header)) {
+    results.push(obj);
+  }
+  if (Array.isArray(obj)) {
+    for (const item of obj) extractTvTiles(item, results);
+  } else {
+    for (const key of Object.keys(obj)) {
+      if (key !== 'trackingParams' && key !== 'responseContext') {
+        extractTvTiles(obj[key], results);
+      }
+    }
+  }
+  return results;
+}
+
 function parseTvTile(tile) {
   if (!tile) return null;
   const t = tile.tileRenderer || tile;
@@ -38933,11 +38952,15 @@ function parseTvTile(tile) {
   const lines = t.metadata?.tileMetadataRenderer?.lines || [];
   const channel = lines[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.runs?.map((r) => r.text).join('') || 
                   lines[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.simpleText || '';
-  const views = lines[1]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.simpleText || '';
-  const published = lines[1]?.lineRenderer?.items?.[2]?.lineItemRenderer?.text?.simpleText || '';
+  const line1Items = (lines[1]?.lineRenderer?.items || [])
+    .map(i => i.lineItemRenderer?.text?.simpleText || i.lineItemRenderer?.text?.runs?.map(r=>r.text).join(''))
+    .filter(t => t && t.trim() !== '•');
+  const views = line1Items.find(t => /view/i.test(t)) || line1Items[0] || '';
+  const published = line1Items.find(t => /ago|streamed|yesterday/i.test(t)) || line1Items[1] || '';
   const thumbnail = t.header?.tileHeaderRenderer?.thumbnail?.thumbnails?.slice(-1)[0]?.url || 
                     (`https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
-  const duration = t.header?.tileHeaderRenderer?.thumbnailOverlays?.[0]?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || '';
+  const duration = t.header?.tileHeaderRenderer?.thumbnailOverlays?.find((o) => o?.thumbnailOverlayTimeStatusRenderer)?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || 
+                   t.header?.tileHeaderRenderer?.thumbnailOverlays?.[0]?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || '';
   return { id, title, channel, thumbnail, duration, views, published };
 }
 
@@ -39214,60 +39237,111 @@ var server = import_http.default.createServer(async (req, res) => {
     try {
       const yt = await getClient("WEB");
       let videos = [];
+      let nextToken = null;
+      const seenIds = new Set();
+      function addVideo(v) {
+        if (v && v.id && !seenIds.has(v.id)) {
+          seenIds.add(v.id);
+          videos.push(v);
+        }
+      }
+
+      const continuationParam = parsedUrl.searchParams.get("continuation") || parsedUrl.searchParams.get("page");
+      let page = 1;
+      if (continuationParam) {
+        const m = continuationParam.match(/page:?(\d+)/i);
+        if (m) page = parseInt(m[1], 10) || 1;
+      }
+
       if (yt.session.logged_in) {
         try {
-          const subs = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', client: 'TV' });
-          const tabs = subs.data?.contents?.tvBrowseRenderer?.content?.tvSecondaryNavRenderer?.sections?.[0]?.tvSecondaryNavSectionRenderer?.tabs || [];
-          const allItems = tabs[0]?.tabRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer?.contents?.[0]?.shelfRenderer?.content?.horizontalListRenderer?.items || [];
-          for (const item of allItems) {
-            const parsed = parseTvTile(item);
-            if (parsed && !videos.some((v) => v.id === parsed.id)) {
-              videos.push(parsed);
-            }
-          }
-          const channelNames = tabs.slice(1, 6).map((t) => t.tabRenderer?.title).filter((t) => t && t !== 'A-Z');
-          const guest = await getClient("GUEST");
-          for (const chName of channelNames) {
+          if (page === 1) {
             try {
-              const chSearch = await guest.search(chName, { type: 'video' });
-              const list = chSearch.videos || [];
-              for (const v of list.slice(0, 3)) {
-                if (v?.id && !videos.some((exist) => exist.id === v.id)) {
-                  videos.push({
-                    id: v.id,
-                    title: v.title?.text || v.title?.toString?.() || '',
-                    channel: v.author?.name || chName,
-                    thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
-                    duration: v.duration?.text || '',
-                    views: v.short_view_count?.text || v.views?.text || '',
-                    published: v.published?.text || ''
-                  });
-                }
+              const what = await yt.session.actions.execute('/browse', { browseId: 'FEwhat_to_watch', client: 'TV' });
+              const whatTiles = extractTvTiles(what.data);
+              for (const tile of whatTiles) {
+                const parsed = parseTvTile(tile);
+                if (parsed) addVideo(parsed);
               }
             } catch (_) {}
+          }
+
+          const subs = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', client: 'TV' });
+          if (page === 1) {
+            const subTiles = extractTvTiles(subs.data);
+            for (const tile of subTiles) {
+              const parsed = parseTvTile(tile);
+              if (parsed) addVideo(parsed);
+            }
+          }
+
+          const tabs = subs.data?.contents?.tvBrowseRenderer?.content?.tvSecondaryNavRenderer?.sections?.[0]?.tvSecondaryNavSectionRenderer?.tabs || [];
+          const validTabs = tabs.slice(1).filter(t => t.tabRenderer?.endpoint?.browseEndpoint?.params && t.tabRenderer?.title !== 'A-Z');
+
+          const BATCH_SIZE = 5;
+          const startIdx = (page - 1) * BATCH_SIZE;
+          const endIdx = startIdx + BATCH_SIZE;
+          const currentTabs = validTabs.slice(startIdx, endIdx);
+
+          if (endIdx < validTabs.length) {
+            nextToken = `page:${page + 1}`;
+          }
+
+          if (currentTabs.length > 0) {
+            const channelFetches = currentTabs.map(async (tab) => {
+              try {
+                const params = tab.tabRenderer.endpoint.browseEndpoint.params;
+                const chRes = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', params, client: 'TV' });
+                const tiles = extractTvTiles(chRes.data);
+                return tiles.map(parseTvTile).filter(Boolean);
+              } catch (_) {
+                return [];
+              }
+            });
+
+            const channelResults = await Promise.all(channelFetches);
+            let maxLen = 0;
+            for (const list of channelResults) {
+              if (list.length > maxLen) maxLen = list.length;
+            }
+            for (let i = 0; i < maxLen; i++) {
+              for (const list of channelResults) {
+                if (list[i]) addVideo(list[i]);
+              }
+            }
           }
         } catch (e) {
           console.warn("[yt-server] Personalized home error:", e.message);
         }
       }
+
       if (videos.length === 0) {
         try {
           const guest = await getClient("GUEST");
           const searchResult = await guest.search("trending popular new videos");
           const list = searchResult.videos || [];
-          videos = list.filter((v) => v.id).map((v) => ({
-            id: v.id,
-            title: v.title?.text || v.title?.toString?.() || "",
-            channel: v.author?.name || "",
-            thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
-            duration: v.duration?.text || "",
-            views: v.short_view_count?.text || v.views?.text || "",
-            published: v.published?.text || ""
-          }));
+          for (const v of list) {
+            if (v && v.id) {
+              addVideo({
+                id: v.id,
+                title: v.title?.text || v.title?.toString?.() || "",
+                channel: v.author?.name || v.author?.toString?.() || "",
+                thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+                duration: v.duration?.text || "",
+                views: v.short_view_count?.text || v.views?.text || "",
+                published: v.published?.text || ""
+              });
+            }
+          }
         } catch (_) {}
       }
+
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ results: videos, authenticated: !!yt.session.logged_in }));
+      res.end(JSON.stringify({
+        results: videos,
+        continuationToken: nextToken,
+        authenticated: !!yt.session.logged_in
+      }));
     } catch (err) {
       console.warn("[yt-server] Home feed error:", err.message);
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -39284,23 +39358,69 @@ var server = import_http.default.createServer(async (req, res) => {
         return;
       }
       let videos = [];
+      let nextToken = null;
+      const seenIds = new Set();
+      function addVideo(v) {
+        if (v && v.id && !seenIds.has(v.id)) {
+          seenIds.add(v.id);
+          videos.push(v);
+        }
+      }
+
+      const continuationParam = parsedUrl.searchParams.get("continuation") || parsedUrl.searchParams.get("page");
+      let page = 1;
+      if (continuationParam) {
+        const m = continuationParam.match(/page:?(\d+)/i);
+        if (m) page = parseInt(m[1], 10) || 1;
+      }
+
       try {
         const subs = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', client: 'TV' });
+        if (page === 1) {
+          const subTiles = extractTvTiles(subs.data);
+          for (const tile of subTiles) {
+            const parsed = parseTvTile(tile);
+            if (parsed) addVideo(parsed);
+          }
+        }
+
         const tabs = subs.data?.contents?.tvBrowseRenderer?.content?.tvSecondaryNavRenderer?.sections?.[0]?.tvSecondaryNavSectionRenderer?.tabs || [];
-        for (const tab of tabs) {
-          const items = tab?.tabRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer?.contents?.[0]?.shelfRenderer?.content?.horizontalListRenderer?.items || [];
-          for (const item of items) {
-            const parsed = parseTvTile(item);
-            if (parsed && !videos.some((v) => v.id === parsed.id)) {
-              videos.push(parsed);
+        const validTabs = tabs.slice(1).filter(t => t.tabRenderer?.endpoint?.browseEndpoint?.params && t.tabRenderer?.title !== 'A-Z');
+
+        const BATCH_SIZE = 6;
+        const startIdx = (page - 1) * BATCH_SIZE;
+        const endIdx = startIdx + BATCH_SIZE;
+        const currentTabs = validTabs.slice(startIdx, endIdx);
+
+        if (endIdx < validTabs.length) {
+          nextToken = `page:${page + 1}`;
+        }
+
+        if (currentTabs.length > 0) {
+          const channelFetches = currentTabs.map(async (tab) => {
+            try {
+              const params = tab.tabRenderer.endpoint.browseEndpoint.params;
+              const chRes = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', params, client: 'TV' });
+              const tiles = extractTvTiles(chRes.data);
+              return tiles.map(parseTvTile).filter(Boolean);
+            } catch (_) {
+              return [];
+            }
+          });
+
+          const channelResults = await Promise.all(channelFetches);
+          for (const list of channelResults) {
+            for (const v of list) {
+              addVideo(v);
             }
           }
         }
       } catch (subErr) {
         console.warn("[yt-server] Subscriptions TV browse error:", subErr.message);
       }
+
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ results: videos, authenticated: true }));
+      res.end(JSON.stringify({ results: videos, continuationToken: nextToken, authenticated: true }));
     } catch (err) {
       console.warn("[yt-server] Subscriptions feed error:", err.message);
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -39317,17 +39437,15 @@ var server = import_http.default.createServer(async (req, res) => {
         return;
       }
       let videos = [];
+      const seenIds = new Set();
       try {
         const hist = await yt.session.actions.execute('/browse', { browseId: 'FEhistory', client: 'TV' });
-        const surface = hist.data?.contents?.tvBrowseRenderer?.content?.tvSurfaceContentRenderer?.content;
-        const sections = surface?.sectionListRenderer?.contents || [];
-        for (const s of sections) {
-          const items = s.shelfRenderer?.content?.horizontalListRenderer?.items || [];
-          for (const item of items) {
-            const parsed = parseTvTile(item);
-            if (parsed && !videos.some((v) => v.id === parsed.id)) {
-              videos.push(parsed);
-            }
+        const tiles = extractTvTiles(hist.data);
+        for (const tile of tiles) {
+          const parsed = parseTvTile(tile);
+          if (parsed && !seenIds.has(parsed.id)) {
+            seenIds.add(parsed.id);
+            videos.push(parsed);
           }
         }
       } catch (hErr) {

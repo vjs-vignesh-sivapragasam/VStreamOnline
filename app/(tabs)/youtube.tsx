@@ -14,6 +14,7 @@ import {
   Platform,
   Modal,
   ToastAndroid,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -171,7 +172,7 @@ const VideoCard = memo<VideoCardProps>(({
             {item.title}
           </Text>
           <Text style={styles.videoSubtitle} numberOfLines={1}>
-            {item.channel}{item.published ? ` • ${formatPublishedTime(item.published)}` : ''}
+            {item.channel}{item.views ? ` • ${item.views}` : ''}{item.published ? ` • ${formatPublishedTime(item.published)}` : ''}
           </Text>
         </View>
 
@@ -259,7 +260,7 @@ const VideoCard = memo<VideoCardProps>(({
 export default function YouTubeScreen() {
   const router = useRouter();
   const { theme } = useTheme();
-  const [authStatus, setAuthStatus] = useState<YouTubeAuthStatus>({ authenticated: false });
+  const [authStatus, setAuthStatus] = useState<YouTubeAuthStatus>(() => youTubeService.getCachedAuthStatus());
   const [isAuthModalVisible, setIsAuthModalVisible] = useState(false);
   const { playVideo: playInYouTubeWatch } = useYouTubePlayer();
   const flatListRef = useRef<FlatList>(null);
@@ -283,7 +284,7 @@ export default function YouTubeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => youTubeService.getCachedAuthStatus().authenticated ? 'Home' : 'All');
   const [videos, setVideos] = useState<YouTubeVideoItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -393,6 +394,51 @@ export default function YouTubeScreen() {
     }).catch(() => {});
     return () => { mounted = false; };
   }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await youTubeService.logout();
+      setAuthStatus({ authenticated: false, user: null, pending: null });
+      if (selectedCategory !== 'History') {
+        setSelectedCategory('All');
+        fetchVideos('All', true);
+      }
+      if (await isHapticsSupported()) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (err: any) {
+      Alert.alert('Logout Error', err?.message || 'Failed to sign out.');
+    }
+  }, [selectedCategory]);
+
+  // Check Google / YouTube auth status on app resume (e.g. returning from browser auth)
+  useEffect(() => {
+    const handleCheckAuth = async () => {
+      try {
+        const status = await youTubeService.getAuthStatus(4000);
+        setAuthStatus((prev) => {
+          if (prev.authenticated !== status.authenticated || prev.user?.name !== status.user?.name) {
+            if (status.authenticated && selectedCategory === 'All') {
+              setSelectedCategory('Home');
+              fetchVideos('Home', true);
+            }
+            return status;
+          }
+          return prev;
+        });
+      } catch {}
+    };
+
+    const sub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        handleCheckAuth();
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [selectedCategory]);
 
   // Dynamic Category Chips reflecting Google Account feeds
   const dynamicCategoryChips = useMemo(() => {
@@ -504,10 +550,17 @@ export default function YouTubeScreen() {
       setLoadMoreError(null);
 
       try {
-        const continuationResult = await youTubeService.fetchContinuation(
-          token,
-          apiKeyRef.current
-        );
+        let continuationResult: YouTubeSearchResult;
+        if (activeQueryRef.current === 'Home') {
+          continuationResult = await youTubeService.getHomeFeed(token);
+        } else if (activeQueryRef.current === 'Subscriptions') {
+          continuationResult = await youTubeService.getSubscriptionsFeed(token);
+        } else {
+          continuationResult = await youTubeService.fetchContinuation(
+            token,
+            apiKeyRef.current
+          );
+        }
 
         const fetchedVideos = (continuationResult.videos || []).filter(
           (v) => !v.isShort && !v.title?.toLowerCase().includes('#short')

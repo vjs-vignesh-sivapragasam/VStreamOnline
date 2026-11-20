@@ -10,6 +10,7 @@ import {
   ScrollView,
   RefreshControl,
   Modal,
+  Alert,
   Share,
   Platform,
 } from 'react-native';
@@ -26,6 +27,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 interface YouTubeYouScreenProps {
   authStatus: YouTubeAuthStatus;
   onOpenAuth: () => void;
+  onLogout?: () => void;
   onOpenSearch: () => void;
   onPlayVideo: (video: YouTubeVideoItem) => void;
   onDownloadVideo: (video: YouTubeVideoItem) => void;
@@ -39,6 +41,7 @@ type LibraryFilterType = 'Recent' | 'Downloaded' | 'Playlists' | 'Music';
 export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
   authStatus,
   onOpenAuth,
+  onLogout,
   onOpenSearch,
   onPlayVideo,
   onDownloadVideo,
@@ -188,6 +191,29 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
   const shortsThumbnail = savedShortsList[0]?.thumbnail || historyList.find((h) => h.isShort)?.thumbnail || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=400';
   const myListThumbnail = myList[0]?.thumbnail || historyList[1]?.thumbnail || 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=400';
 
+  const handleLogoutPress = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out of your YouTube account?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          if (await isHapticsSupported()) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }
+          if (onLogout) {
+            onLogout();
+          } else {
+            try {
+              await youTubeService.logout();
+              onOpenAuth();
+            } catch {}
+          }
+        },
+      },
+    ]);
+  };
+
   return (
     <ScrollView
       style={styles.container}
@@ -299,15 +325,15 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
             </View>
           </View>
 
-          {/* Action Buttons: Switch account | Google Account */}
+          {/* Action Buttons: Switch account | Google Account | Sign Out */}
           <View style={styles.profileButtonsRow}>
             <TouchableOpacity
               style={styles.switchAccountBtn}
               onPress={onOpenAuth}
               activeOpacity={0.8}
             >
-              <Ionicons name="swap-horizontal-outline" size={16} color="#0f0f0f" style={{ marginRight: 6 }} />
-              <Text style={styles.switchAccountBtnText}>Switch account</Text>
+              <Ionicons name="swap-horizontal-outline" size={15} color="#0f0f0f" style={{ marginRight: 4 }} />
+              <Text style={styles.switchAccountBtnText} numberOfLines={1}>Switch</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -315,8 +341,17 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
               onPress={onOpenAuth}
               activeOpacity={0.8}
             >
-              <Ionicons name="logo-google" size={15} color="#ffffff" style={{ marginRight: 6 }} />
-              <Text style={styles.googleAccountBtnText}>Google Account</Text>
+              <Ionicons name="logo-google" size={14} color="#ffffff" style={{ marginRight: 4 }} />
+              <Text style={styles.googleAccountBtnText} numberOfLines={1}>Google</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.signOutBtn}
+              onPress={handleLogoutPress}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="log-out-outline" size={15} color="#ff453a" style={{ marginRight: 4 }} />
+              <Text style={styles.signOutBtnText} numberOfLines={1}>Sign Out</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -913,6 +948,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  signOutBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 69, 58, 0.12)',
+    height: 38,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.35)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signOutBtnText: {
+    color: '#ff453a',
+    fontSize: 13,
+    fontWeight: '700',
   },
   googleAccountBtnText: {
     color: '#ffffff',

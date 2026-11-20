@@ -307,6 +307,14 @@ function RootLayoutNav() {
               }}
             />
             <Stack.Screen
+              name="settings/coffee"
+              options={{
+                headerShown: false,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
+              }}
+            />
+            <Stack.Screen
               name="settings/tmdb"
               options={{
                 headerShown: false,

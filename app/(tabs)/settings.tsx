@@ -272,6 +272,23 @@ const SettingsScreen = () => {
           </View>
         )}
 
+        {/* Support & Development Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>SUPPORT & DEVELOPMENT</Text>
+          <View style={styles.settingsGroup}>
+            <SettingItem
+              title="Buy Me a Coffee"
+              icon="cafe-outline"
+              subtitle="Support VPLEX development via UPI (GPay / PhonePe)"
+              badgeText="Support ❤️"
+              badgeColor="#FF9F0A"
+              onPress={() => onSettingsItemPress({ route: '/settings/coffee' })}
+              isFirst={true}
+              isLast={true}
+            />
+          </View>
+        </View>
+
         {/* General / About Section */}
         {generalList.length > 0 && (
           <View style={styles.section}>

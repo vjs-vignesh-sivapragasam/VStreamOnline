@@ -491,6 +491,60 @@ const AboutUsScreen: React.FC = () => {
           </AnimatedTouchable>
         </Animated.View>
 
+        {/* ── BUY ME A COFFEE PROMO BANNER ── */}
+        <Animated.View
+          style={[
+            styles.coffeeBannerCard,
+            {
+              opacity: actionsAnim,
+              transform: [
+                {
+                  translateY: actionsAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={['rgba(255, 159, 10, 0.16)', 'rgba(255, 159, 10, 0.04)', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.coffeeBannerGradient}
+          />
+          <View style={styles.coffeeBannerContent}>
+            <View style={styles.coffeeIconContainer}>
+              <Text style={{ fontSize: 28 }}>☕</Text>
+            </View>
+            <View style={styles.coffeeTextContainer}>
+              <View style={styles.coffeeTitleRow}>
+                <Text style={styles.coffeeTitle}>Buy Me a Coffee</Text>
+                <View style={styles.coffeeBadge}>
+                  <Text style={styles.coffeeBadgeText}>SUPPORT</Text>
+                </View>
+              </View>
+              <Text style={styles.coffeeDesc}>
+                Love VPLEX? Fuel future development & server upkeep with a small UPI contribution!
+              </Text>
+              <TouchableOpacity
+                style={[styles.coffeeBtn, { backgroundColor: '#FF9F0A' }]}
+                onPress={async () => {
+                  if (await isHapticsSupported()) {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  }
+                  router.push('/settings/coffee' as any);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.coffeeBtnText}>Contribute via GPay / PhonePe</Text>
+                <Ionicons name="arrow-forward" size={15} color="#000000" style={{ marginLeft: 6 }} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+
         {/* ── 3. CREATOR'S VISION & TECH STACK ── */}
         <Animated.View
           style={[
@@ -1388,6 +1442,88 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#8E8E93',
     marginTop: 2,
+  },
+
+  /* 9. Coffee Banner */
+  coffeeBannerCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 159, 10, 0.25)',
+    backgroundColor: 'rgba(26, 26, 30, 0.7)',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  coffeeBannerGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  coffeeBannerContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'flex-start',
+  },
+  coffeeIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 159, 10, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 159, 10, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  coffeeTextContainer: {
+    flex: 1,
+  },
+  coffeeTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  coffeeTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  coffeeBadge: {
+    backgroundColor: 'rgba(255, 159, 10, 0.2)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 159, 10, 0.4)',
+  },
+  coffeeBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FF9F0A',
+    letterSpacing: 0.5,
+  },
+  coffeeDesc: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: 'rgba(255, 255, 255, 0.65)',
+    marginBottom: 12,
+  },
+  coffeeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  coffeeBtnText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#000000',
   },
 });
 
