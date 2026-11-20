@@ -17,7 +17,7 @@ import {
   Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Video, { VideoRef, ResizeMode } from 'react-native-video';
+import Video, { VideoRef, ResizeMode, SelectedTrackType } from 'react-native-video';
 import Slider from '@react-native-assets/slider';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
@@ -26,7 +26,7 @@ import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksp
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
-import { youTubeService, SponsorSegment } from '@/services/YouTubeService';
+import { youTubeService, SponsorSegment, YouTubeCaptionTrack } from '@/services/YouTubeService';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 
 const { width } = Dimensions.get('window');
@@ -76,6 +76,7 @@ export interface YouTubeInlinePlayerProps {
   onRetry?: () => void;
   onSwipeExit?: () => void;
   isFullScreen?: boolean;
+  captionTracks?: YouTubeCaptionTrack[];
 }
 
 function formatTime(seconds: number): string {
@@ -261,7 +262,61 @@ const INJECTED_BEFORE_CONTENT_JS = `
   true;
 `;
 
-function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'cover', pipEnabled: boolean = true, isLooping: boolean = false): string {
+interface SubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+function parseVttToCues(vttText: string): SubtitleCue[] {
+  const lines = vttText.replace(/\r\n/g, '\n').split('\n');
+  const cues: SubtitleCue[] = [];
+  let currentStart: number | null = null;
+  let currentEnd: number | null = null;
+  let currentTextLines: string[] = [];
+
+  const timeRegex = /(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})/;
+
+  function parseTime(h: string | undefined, m: string, s: string, ms: string): number {
+    const hours = h ? parseInt(h, 10) : 0;
+    const mins = parseInt(m, 10);
+    const secs = parseInt(s, 10);
+    const millis = parseInt(ms, 10);
+    return hours * 3600 + mins * 60 + secs + millis / 1000;
+  }
+
+  for (const line of lines) {
+    const match = line.match(timeRegex);
+    if (match) {
+      if (currentStart !== null && currentEnd !== null && currentTextLines.length > 0) {
+        cues.push({
+          start: currentStart,
+          end: currentEnd,
+          text: currentTextLines.join(' ').replace(/<[^>]+>/g, '').trim(),
+        });
+      }
+      currentStart = parseTime(match[1], match[2], match[3], match[4]);
+      currentEnd = parseTime(match[5], match[6], match[7], match[8]);
+      currentTextLines = [];
+    } else if (currentStart !== null && line.trim()) {
+      if (!line.includes('-->') && !line.startsWith('NOTE') && !line.startsWith('WEBVTT') && !line.startsWith('STYLE')) {
+        currentTextLines.push(line.trim());
+      }
+    }
+  }
+
+  if (currentStart !== null && currentEnd !== null && currentTextLines.length > 0) {
+    cues.push({
+      start: currentStart,
+      end: currentEnd,
+      text: currentTextLines.join(' ').replace(/<[^>]+>/g, '').trim(),
+    });
+  }
+
+  return cues;
+}
+
+function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'cover', pipEnabled: boolean = true, isLooping: boolean = false, initialCCOn: boolean = false): string {
   const topOffset = 10;
   const initialFitCss = fitMode === 'contain' ? 'contain' : fitMode === 'stretch' ? 'fill' : 'cover';
   return `
@@ -315,8 +370,6 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
       .player-control-overlay .top-row,
       .ytm-custom-control-top,
       .player-controls-top,
-      .player-control-overlay,
-      .player-control-container,
       .player-controls-content {
         display: none !important;
         visibility: hidden !important;
@@ -341,8 +394,6 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
       ytm-watch .player-size,
       .html5-video-container,
       .html5-video-player,
-      .player-control-overlay,
-      .player-control-container,
       .player-controls-content,
       ytm-custom-control {
         position: absolute !important;
@@ -365,6 +416,21 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         box-shadow: none !important;
         box-sizing: border-box !important;
         overflow: hidden !important;
+      }
+
+      /* 2a. Player control overlays must be non-blocking and transparent so video and captions render cleanly */
+      .player-control-overlay,
+      .player-control-container {
+        position: absolute !important;
+        top: 0 !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        pointer-events: none !important;
       }
 
       /* 2b. YouTube Shorts container support & fit */
@@ -440,8 +506,6 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
       button[aria-label*="Full screen" i],
       button[aria-label*="Fullscreen" i],
       .ytp-cued-thumbnail-overlay,
-      .player-control-overlay.fadeout,
-      .player-control-overlay.fade-out,
       .fadeout .middle-row,
       .fadeout .player-controls-middle,
       .fadeout .top-row,
@@ -895,6 +959,116 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
     function syncControlsVisibility() {}
 
     // ------------------------------------------------------------------
+    // CLOSED CAPTIONS (CC) ENGINE CONTROLLER
+    // ------------------------------------------------------------------
+    window.__agyCaptionsEnabled = ${initialCCOn};
+
+    window.__agySetCaptionsEnabled = function(enabled) {
+      window.__agyCaptionsEnabled = !!enabled;
+
+      // 1. Maintain dynamic style element that controls caption element display
+      var styleEl = document.getElementById('agy-cc-style');
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'agy-cc-style';
+        (document.head || document.documentElement).appendChild(styleEl);
+      }
+
+      if (enabled) {
+        styleEl.textContent =
+          '.caption-window, .ytp-caption-window-container, .ytm-caption-window-container, ' +
+          'ytm-caption-track-view, .captions-text, .caption-visual-line { ' +
+          '  display: block !important; ' +
+          '  visibility: visible !important; ' +
+          '  opacity: 1 !important; ' +
+          '  z-index: 2147483640 !important; ' +
+          '  pointer-events: none !important; ' +
+          '} ' +
+          '.caption-visual-line, .captions-text { ' +
+          '  display: inline-block !important; ' +
+          '} ' +
+          '.caption-window, ytm-caption-track-view { ' +
+          '  bottom: 40px !important; ' +
+          '}';
+      } else {
+        styleEl.textContent =
+          '.caption-window, .ytp-caption-window-container, .ytm-caption-window-container, ' +
+          'ytm-caption-track-view, .captions-text, .caption-visual-line, [class*="caption-window"] { ' +
+          '  display: none !important; ' +
+          '  visibility: hidden !important; ' +
+          '  opacity: 0 !important; ' +
+          '  height: 0px !important; ' +
+          '  width: 0px !important; ' +
+          '  pointer-events: none !important; ' +
+          '}';
+      }
+
+      // 2. Control YouTube HTML5 Player API
+      var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+      if (p) {
+        try {
+          if (typeof p.loadModule === 'function') {
+            p.loadModule('captions');
+          }
+          if (enabled) {
+            if (typeof p.toggleSubtitlesOn === 'function') {
+              p.toggleSubtitlesOn();
+            }
+            if (typeof p.setOption === 'function') {
+              var tracks = (typeof p.getOption === 'function' ? p.getOption('captions', 'tracklist') : []) || [];
+              var track = tracks.find(function(t) { return t.languageCode === 'en' || (t.vssId && t.vssId.indexOf('en') !== -1); }) || tracks[0] || { languageCode: 'en' };
+              p.setOption('captions', 'track', track);
+              p.setOption('captions', 'reload', true);
+            }
+          } else {
+            if (typeof p.setOption === 'function') {
+              p.setOption('captions', 'track', {});
+            }
+            if (typeof p.toggleSubtitles === 'function') {
+              var curTrack = (typeof p.getOption === 'function' ? p.getOption('captions', 'track') : null);
+              if (curTrack && (curTrack.languageCode || curTrack.vssId)) {
+                p.toggleSubtitles();
+              }
+            }
+          }
+        } catch(e) {}
+      }
+
+      // 3. Control HTML5 <video> textTracks
+      var v = document.querySelector('video');
+      if (v && v.textTracks) {
+        try {
+          for (var i = 0; i < v.textTracks.length; i++) {
+            var trk = v.textTracks[i];
+            if (trk.kind === 'subtitles' || trk.kind === 'captions') {
+              trk.mode = enabled ? 'showing' : 'hidden';
+            }
+          }
+        } catch(e) {}
+      }
+
+      // 4. Check DOM buttons
+      try {
+        var ccBtns = document.querySelectorAll(
+          '.ytp-subtitles-button, .ytm-subtitles-button, ' +
+          'button[aria-label*="Captions" i], button[aria-label*="subtitles" i], ' +
+          'button[aria-label*="closed captions" i], [aria-label*="Captions" i]'
+        );
+        for (var j = 0; j < ccBtns.length; j++) {
+          var btn = ccBtns[j];
+          var isPressed = btn.getAttribute('aria-pressed') === 'true' ||
+                          btn.classList.contains('ytp-subtitles-button-active') ||
+                          btn.classList.contains('active');
+          if (isPressed !== enabled) {
+            btn.click();
+          }
+        }
+      } catch(e) {}
+    };
+
+    window.__agySetCaptionsEnabled(${initialCCOn});
+
+    // ------------------------------------------------------------------
     // 1. PREVENT YOUTUBE AUTO 2X SPEED ON SCREEN TOUCH / HOLD
     // ------------------------------------------------------------------
     window.__userDesiredPlaybackRate = 1.0;
@@ -1228,12 +1402,12 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         });
       });
 
-      // Completely hide and disable all YouTube mobile web control elements
+      // Completely hide and disable all YouTube mobile web control elements (excluding subtitles/captions)
       var webControls = document.querySelectorAll(
-        '.player-control-overlay, .player-control-container, .player-controls-content, ' +
+        '.player-controls-content, ' +
         '.player-controls-top, .player-controls-middle, .player-controls-bottom, ' +
         '.player-control-overlay .top-row, .player-control-overlay .middle-row, .player-control-overlay .bottom-row, ' +
-        '.ytp-chrome-top, .ytp-chrome-bottom, ytm-custom-control, ytm-custom-control-top, ytm-custom-control-middle, ' +
+        '.ytp-chrome-top, .ytp-chrome-bottom, ytm-custom-control-top, ytm-custom-control-middle, ' +
         '.ytm-time-display, .ytm-fullscreen-button, .player-control-fullscreen-button, ' +
         '.player-control-play-pause-icon, .player-control-seek-button, .player-control-button, ' +
         '.ytp-settings-button, .ytm-settings-button, .ytp-subtitles-button, .ytm-subtitles-button, ' +
@@ -1241,6 +1415,12 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         'button[aria-label*="Full screen" i], button[aria-label*="Fullscreen" i], .ytp-cued-thumbnail-overlay'
       );
       webControls.forEach(function(el) {
+        if (
+          (el.closest && el.closest('ytm-caption-track-view, .caption-window, .ytp-caption-window-container, .ytm-caption-window-container')) ||
+          (el.matches && el.matches('ytm-caption-track-view, .caption-window, .ytp-caption-window-container, .ytm-caption-window-container, .captions-text, .caption-visual-line'))
+        ) {
+          return;
+        }
         el.style.setProperty('display', 'none', 'important');
         el.style.setProperty('visibility', 'hidden', 'important');
         el.style.setProperty('opacity', '0', 'important');
@@ -1248,6 +1428,17 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
         el.style.setProperty('width', '0px', 'important');
         el.style.setProperty('pointer-events', 'none', 'important');
       });
+
+      var overlays = document.querySelectorAll('.player-control-overlay, .player-control-container');
+      overlays.forEach(function(el) {
+        el.style.setProperty('background', 'transparent', 'important');
+        el.style.setProperty('background-color', 'transparent', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
+      });
+
+      if (typeof window.__agySetCaptionsEnabled === 'function') {
+        window.__agySetCaptionsEnabled(window.__agyCaptionsEnabled);
+      }
 
       // Remove bottom navigation bars & clutter
       var navBars = document.querySelectorAll('ytm-pivot-bar-renderer, ytm-pivot-bar, .pivot-bar, [role="tablist"], ytm-mobile-bottom-bar-renderer, #pivot-bar, [class*="pivot-bar"], [class*="bottom-nav"], ytm-navigation-bar');
@@ -1540,6 +1731,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   onScreenFitChange,
   topInset,
   isFullScreen = false,
+  captionTracks,
 }) => {
   useKeepAwake('YOUTUBE_PLAYER_PLAYBACK');
   const effectiveTopInset = Math.max(topInset || 0, Platform.OS === 'ios' ? 44 : 24);
@@ -2156,7 +2348,68 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   }, [handleToggleResizeMode]);
 
   const [isAutoplay, setIsAutoplay] = useState(true);
-  const [isCCOn, setIsCCOn] = useState(false);
+  const [isCCOn, setIsCCOn] = useState<boolean>(() => {
+    try {
+      return storageService.getItem('@youtube_cc_enabled') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [nativeSubtitleCues, setNativeSubtitleCues] = useState<SubtitleCue[]>([]);
+
+  useEffect(() => {
+    if (!captionTracks || captionTracks.length === 0) {
+      setNativeSubtitleCues([]);
+      return;
+    }
+    const track =
+      captionTracks.find(
+        (t) => t.languageCode === 'en' || (t.name && t.name.toLowerCase().includes('english'))
+      ) || captionTracks[0];
+
+    if (!track?.baseUrl) {
+      setNativeSubtitleCues([]);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchSubtitles = async () => {
+      try {
+        let url = track.baseUrl;
+        if (!url.includes('fmt=')) {
+          url += '&fmt=vtt';
+        }
+        const res = await fetch(url);
+        if (res.ok) {
+          const text = await res.text();
+          if (!cancelled) {
+            const parsed = parseVttToCues(text);
+            setNativeSubtitleCues(parsed);
+          }
+        }
+      } catch (e) {
+        console.warn('[YouTubeInlinePlayer] Could not fetch native subtitle track:', e);
+      }
+    };
+    fetchSubtitles();
+    return () => {
+      cancelled = true;
+    };
+  }, [captionTracks, videoId]);
+
+  useEffect(() => {
+    if (isWebActive && webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        (function() {
+          if (typeof window.__agySetCaptionsEnabled === 'function') {
+            window.__agySetCaptionsEnabled(${isCCOn});
+          }
+        })();
+        true;
+      `);
+    }
+  }, [isCCOn, isWebActive, videoId]);
 
   const handleToggleAutoplay = useCallback(async () => {
     if (await isHapticsSupported()) {
@@ -2180,15 +2433,38 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     }
     setIsCCOn((prev) => {
       const next = !prev;
+      try {
+        storageService.setItem('@youtube_cc_enabled', next ? 'true' : 'false');
+      } catch {}
+
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-      setFeedbackPill({ label: next ? 'Subtitles turned on' : 'Subtitles turned off', icon: 'chatbox-ellipses-outline' });
+      setFeedbackPill({
+        label: next ? 'Subtitles turned on' : 'Subtitles turned off',
+        icon: 'chatbox-ellipses-outline',
+      });
       feedbackTimerRef.current = setTimeout(() => {
         setFeedbackPill(null);
       }, 1800);
+
+      if (isWebActive && webViewRef.current) {
+        webViewRef.current.injectJavaScript(`
+          (function() {
+            if (typeof window.__agySetCaptionsEnabled === 'function') {
+              window.__agySetCaptionsEnabled(${next});
+            }
+          })();
+          true;
+        `);
+      }
+
       return next;
     });
     scheduleControlsHide();
-  }, [scheduleControlsHide]);
+  }, [isWebActive, scheduleControlsHide]);
+
+  const handleToggleCCFromModal = useCallback(async () => {
+    await handleToggleCC();
+  }, [handleToggleCC]);
 
   const handleCastPress = useCallback(async () => {
     if (await isHapticsSupported()) {
@@ -2317,8 +2593,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   );
 
   const cleanPlayerJs = useMemo(
-    () => getInjectedCleanPlayerJs(effectiveTopInset, videoResizeMode, isPipEnabled, effectiveLoop),
-    [effectiveTopInset, videoResizeMode, isPipEnabled, effectiveLoop]
+    () => getInjectedCleanPlayerJs(effectiveTopInset, videoResizeMode, isPipEnabled, effectiveLoop, isCCOn),
+    [effectiveTopInset, videoResizeMode, isPipEnabled, effectiveLoop, isCCOn]
   );
 
   return (
@@ -2381,6 +2657,14 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             setTimeout(() => {
               setShowPosterShield(false);
             }, 600);
+            webViewRef.current?.injectJavaScript(`
+              (function() {
+                if (typeof window.__agySetCaptionsEnabled === 'function') {
+                  window.__agySetCaptionsEnabled(${isCCOn});
+                }
+              })();
+              true;
+            `);
           }}
           onMessage={(event) => {
             try {
@@ -2508,6 +2792,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             resizeMode={videoResizeMode === 'contain' ? 'contain' : videoResizeMode === 'stretch' ? 'stretch' : 'cover'}
             style={StyleSheet.absoluteFill}
             controls={false}
+            selectedTextTrack={isCCOn ? { type: SelectedTrackType.LANGUAGE, value: 'en' } : { type: SelectedTrackType.DISABLED }}
             playInBackground={true}
             playWhenInactive={true}
             enterPictureInPictureOnLeave={isPipEnabled}
@@ -2605,6 +2890,17 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         </View>
       )}
         </>
+      )}
+
+      {/* Native Player Subtitle Overlay (when not in WebView mode) */}
+      {!isWebActive && isCCOn && !!(!isWebActive && isCCOn && nativeSubtitleCues.length > 0 && nativeSubtitleCues.find((c) => actualCurrentTime >= c.start && actualCurrentTime <= c.end)?.text) && (
+        <View style={styles.nativeSubtitleContainer} pointerEvents="none">
+          <View style={styles.nativeSubtitleBox}>
+            <Text style={styles.nativeSubtitleText}>
+              {nativeSubtitleCues.find((c) => actualCurrentTime >= c.start && actualCurrentTime <= c.end)?.text}
+            </Text>
+          </View>
+        </View>
       )}
 
       {/* Tap Overlay to reveal/hide controls (active in both Web & Native) */}
@@ -3089,6 +3385,40 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                     >
                       <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
                     </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Closed Captions / Subtitles Option */}
+                <TouchableOpacity
+                  style={styles.settingsRow}
+                  onPress={handleToggleCCFromModal}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.settingsRowLeft}>
+                    <Ionicons
+                      name="chatbox-ellipses-outline"
+                      size={20}
+                      color={isCCOn ? '#535aff' : '#ffffff'}
+                    />
+                    <Text style={styles.settingsRowLabel}>Captions</Text>
+                  </View>
+                  <View style={styles.settingsRowRight}>
+                    <Text
+                      style={[
+                        styles.settingsRowValue,
+                        isCCOn && { color: '#535aff', fontWeight: '700' },
+                      ]}
+                    >
+                      {isCCOn ? 'On' : 'Off'}
+                    </Text>
+                    <Switch
+                      value={isCCOn}
+                      onValueChange={() => handleToggleCCFromModal()}
+                      trackColor={{ false: '#3a3a3c', true: '#535aff' }}
+                      thumbColor="#ffffff"
+                      ios_backgroundColor="#3a3a3c"
+                      style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }], marginLeft: 4 }}
+                    />
                   </View>
                 </TouchableOpacity>
 
@@ -4036,5 +4366,32 @@ const styles = StyleSheet.create({
     backgroundColor: '#535aff',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  nativeSubtitleContainer: {
+    position: 'absolute',
+    bottom: 54,
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 40,
+    pointerEvents: 'none',
+  },
+  nativeSubtitleBox: {
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 6,
+    maxWidth: '90%',
+  },
+  nativeSubtitleText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 19,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
 });

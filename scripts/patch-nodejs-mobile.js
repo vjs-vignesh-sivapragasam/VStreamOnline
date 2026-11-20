@@ -167,7 +167,8 @@ if (fs.existsSync(expoRouterUseScreensPath)) {
         if (__DEV__) {
             console.error(\`[expo-router] Failed to load route module for "\${value?.contextKey}" (route: "\${value?.route}"). Module is undefined.\`);
         }
-        return { default: EmptyRoute_1.EmptyRoute, SuspenseFallback: undefined };
+        const EmptyComponent = (typeof EmptyRoute_1 !== 'undefined' && EmptyRoute_1.EmptyRoute) || (typeof _EmptyRoute !== 'undefined' && _EmptyRoute.EmptyRoute) || (() => null);
+        return { default: EmptyComponent, SuspenseFallback: undefined };
     }
     const { ErrorBoundary, SuspenseFallback, unstable_settings, ...component } = rawImport;`;
 

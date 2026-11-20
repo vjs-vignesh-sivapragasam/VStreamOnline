@@ -12,6 +12,8 @@ export interface YouTubeVideoItem {
   views?: string;
   published?: string;
   isShort?: boolean;
+  watchProgress?: number;
+  watchedAt?: number;
 }
 
 export function formatPublishedTime(published?: string): string {
@@ -57,6 +59,14 @@ export interface YouTubeFormatOption {
   type: 'video' | 'audio';
 }
 
+export interface YouTubeCaptionTrack {
+  baseUrl: string;
+  name: string;
+  languageCode: string;
+  vssId?: string;
+  kind?: string;
+}
+
 export interface YouTubeVideoDetails {
   id: string;
   title: string;
@@ -64,6 +74,7 @@ export interface YouTubeVideoDetails {
   thumbnail: string;
   duration?: number;
   views?: number;
+  captionTracks?: YouTubeCaptionTrack[];
   formats: {
     progressive: YouTubeFormatOption[];
     videoAdaptive: YouTubeFormatOption[];
@@ -657,6 +668,14 @@ class YouTubeService {
               }));
             }
 
+            const captionTracks: YouTubeCaptionTrack[] = (data.captions || []).map((ct: any) => ({
+              baseUrl: ct.baseUrl || ct.base_url || '',
+              name: typeof ct.name === 'object' ? (ct.name.text || ct.name.simpleText || ct.name.toString?.() || '') : (ct.name || ''),
+              languageCode: ct.languageCode || ct.language_code || 'en',
+              vssId: ct.vssId || ct.vss_id,
+              kind: ct.kind,
+            }));
+
             return {
               id: data.id || videoId,
               title: data.title || fallbackItem?.title || 'YouTube Video',
@@ -664,6 +683,7 @@ class YouTubeService {
               thumbnail: data.thumbnail || fallbackItem?.thumbnail || `https://i.ytimg.com/vi/${data.id || videoId}/hqdefault.jpg`,
               duration: data.duration,
               views: data.views,
+              captionTracks,
               formats: {
                 progressive: progressiveFormats,
                 videoAdaptive: videoAdaptiveFormats,
@@ -1225,15 +1245,57 @@ class YouTubeService {
 
       if (res.ok) {
         const data = await res.json();
-        const clean = (data.results || []).filter(
-          (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
-        );
-        return { videos: clean };
+        const items = (data.results || []).map((v: any) => ({
+          ...v,
+          isShort: v.isShort ?? (v.title?.toLowerCase().includes('#short') || (v.duration && v.duration.startsWith('0:') && parseInt(v.duration.split(':')[1] || '99') <= 60)),
+          watchProgress: v.watchProgress ?? (v.percent_duration_watched ?? (v.percentDurationWatched ?? 0)),
+        }));
+        return { videos: items };
       }
       return { videos: [] };
     } catch (err: any) {
       console.warn('[YouTubeService] getHistoryFeed error:', err);
       return { videos: [] };
+    }
+  }
+
+  async getLikedVideosFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/feed/liked`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const data = await res.json();
+        return { videos: data.results || [] };
+      }
+      return { videos: [] };
+    } catch (err: any) {
+      console.warn('[YouTubeService] getLikedVideosFeed error:', err);
+      return { videos: [] };
+    }
+  }
+
+  async getPlaylistsFeed(timeoutMs = 6000): Promise<any[]> {
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${baseUrl}/yt/feed/playlists`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const data = await res.json();
+        return data.results || [];
+      }
+      return [];
+    } catch (err: any) {
+      console.warn('[YouTubeService] getPlaylistsFeed error:', err);
+      return [];
     }
   }
 
@@ -1243,3 +1305,5 @@ class YouTubeService {
 }
 
 export const youTubeService = new YouTubeService();
+
+

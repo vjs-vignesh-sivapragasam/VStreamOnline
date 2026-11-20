@@ -39450,6 +39450,17 @@ var server = import_http.default.createServer(async (req, res) => {
           type: "audio"
         });
       }
+      let captionTracks = [];
+      try {
+        const rawCaptions = info2.captions?.caption_tracks || info2.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+        captionTracks = rawCaptions.map((ct) => ({
+          baseUrl: ct.base_url || ct.baseUrl || '',
+          name: typeof ct.name === 'object' ? (ct.name.text || ct.name.simpleText || ct.name.toString?.() || '') : (ct.name || ''),
+          languageCode: ct.language_code || ct.languageCode || '',
+          vssId: ct.vss_id || ct.vssId || '',
+          kind: ct.kind || '',
+        }));
+      } catch (cErr) {}
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         id: v,
@@ -39459,6 +39470,7 @@ var server = import_http.default.createServer(async (req, res) => {
         duration: info2.basic_info?.duration,
         views: info2.basic_info?.view_count,
         clientType,
+        captions: captionTracks,
         formats: {
           progressive: progressiveFormats,
           videoAdaptive,

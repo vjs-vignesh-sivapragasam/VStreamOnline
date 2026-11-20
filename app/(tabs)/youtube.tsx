@@ -32,6 +32,8 @@ import {
 import { youTubeListService, SavedYouTubeItem } from '@/services/YouTubeListService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
+import { YouTubeYouScreen } from '@/components/youtube/YouTubeYouScreen';
+import { youTubeHistoryService } from '@/services/YouTubeHistoryService';
 import { YouTubeAuthModal } from '@/components/youtube/YouTubeAuthModal';
 import { useTheme } from '@/hooks/useTheme';
 import { useYouTubePlayer } from '@/contexts/YouTubePlayerContext';
@@ -397,7 +399,7 @@ export default function YouTubeScreen() {
     if (authStatus.authenticated) {
       return ['Home', 'Subscriptions', 'History', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
     }
-    return CATEGORY_CHIPS;
+    return ['All', 'History', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
   }, [authStatus.authenticated]);
 
   /**
@@ -415,12 +417,16 @@ export default function YouTubeScreen() {
     try {
       let result: YouTubeSearchResult;
 
+      if (target === 'History') {
+        setIsLoading(false);
+        setRefreshing(false);
+        return;
+      }
+
       if (target === 'Home') {
         result = await youTubeService.getHomeFeed();
       } else if (target === 'Subscriptions') {
         result = await youTubeService.getSubscriptionsFeed();
-      } else if (target === 'History') {
-        result = await youTubeService.getHistoryFeed();
       } else {
         let resolvedQuery = target;
         let sp: string | undefined = undefined;
@@ -849,8 +855,35 @@ export default function YouTubeScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar style="light" />
 
-      {/* Header Bar */}
-      <View style={styles.headerBar}>
+      {selectedCategory === 'History' ? (
+        <YouTubeYouScreen
+          authStatus={authStatus}
+          onOpenAuth={() => setIsAuthModalVisible(true)}
+          onOpenSearch={() => {
+            setSelectedCategory(authStatus.authenticated ? 'Home' : 'All');
+            setIsSearchOpen(true);
+            setTimeout(() => searchInputRef.current?.focus(), 100);
+          }}
+          onBackToFeed={() => setSelectedCategory(authStatus.authenticated ? 'Home' : 'All')}
+          onPlayVideo={(v) => {
+            playInYouTubeWatch({
+              id: v.id,
+              title: v.title,
+              channel: v.channel,
+              thumbnail: v.thumbnail,
+              duration: v.duration,
+              views: v.views,
+              published: v.published,
+            });
+          }}
+          onDownloadVideo={(v) => handleOpenDownloadModal(v)}
+          onOpenSettings={() => setIsAuthModalVisible(true)}
+          theme={theme}
+        />
+      ) : (
+        <>
+          {/* Header Bar */}
+          <View style={styles.headerBar}>
         <View style={styles.headerTopRow}>
           {/* Logo: Tap "Premium" to refresh and reload YouTube Home */}
           <TouchableOpacity
@@ -918,7 +951,7 @@ export default function YouTubeScreen() {
             <TouchableOpacity
               style={[
                 styles.headerActionBtn,
-                myListModalVisible && [
+                selectedCategory === 'History' && [
                   styles.headerActionBtnActive,
                   { backgroundColor: `${theme.primary}33`, borderColor: theme.primary, borderWidth: 1 },
                 ],
@@ -927,7 +960,7 @@ export default function YouTubeScreen() {
                 if (await isHapticsSupported()) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }
-                setMyListModalVisible(true);
+                setSelectedCategory('History');
               }}
               activeOpacity={0.7}
               hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
@@ -951,12 +984,13 @@ export default function YouTubeScreen() {
               style={[
                 styles.headerActionBtn,
                 authStatus.authenticated && [styles.headerAccountBtn, { borderColor: theme.primary }],
+                selectedCategory === 'History' && { borderColor: '#ffffff', borderWidth: 1.5 },
               ]}
               onPress={async () => {
                 if (await isHapticsSupported()) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }
-                setIsAuthModalVisible(true);
+                setSelectedCategory((prev) => (prev === 'History' ? (authStatus.authenticated ? 'Home' : 'All') : 'History'));
               }}
               activeOpacity={0.7}
               hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
@@ -1169,6 +1203,8 @@ export default function YouTubeScreen() {
             />
           }
         />
+      )}
+        </>
       )}
 
       {/* Quality Picker Modal */}

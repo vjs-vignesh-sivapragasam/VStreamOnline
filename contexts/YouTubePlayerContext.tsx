@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { youTubeService, YouTubeVideoDetails, YouTubeVideoItem } from '@/services/YouTubeService';
 import { dataConsumptionService } from '@/services/DataConsumptionService';
+import { youTubeHistoryService } from '@/services/YouTubeHistoryService';
 
 export interface ActiveYouTubeVideo {
   id: string;
@@ -82,6 +83,19 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     fallbackCountRef.current = 0;
     lastTrackTimeRef.current = 0;
     setCurrentVideo(video);
+
+    const isShortVideo = video.title?.toLowerCase().includes('#short') || (video.duration && video.duration.startsWith('0:') && parseInt(video.duration.split(':')[1] || '99') <= 60);
+    youTubeHistoryService.recordWatch({
+      id: video.id,
+      title: video.title,
+      channel: video.channel,
+      thumbnail: video.thumbnail,
+      duration: video.duration,
+      views: video.views,
+      published: video.published,
+      isShort: !!isShortVideo,
+      watchProgress: 5,
+    }).catch(() => {});
     setVideoDetails(null);
     setStreamUrl(null);
     setPlaybackError(null);
@@ -430,6 +444,10 @@ export const YouTubePlayerProvider: React.FC<{ children: ReactNode }> = ({ child
     if (delta >= 4 && delta < 30) {
       lastTrackTimeRef.current = cur;
       dataConsumptionService.trackStreamingSeconds(delta, currentQuality);
+      if (dur > 0 && cur > 0 && activeVideoIdRef.current) {
+        const pct = Math.min(100, Math.max(5, Math.round((cur / dur) * 100)));
+        youTubeHistoryService.updateWatchProgress(activeVideoIdRef.current, pct).catch(() => {});
+      }
     } else if (delta < 0 || delta >= 30) {
       lastTrackTimeRef.current = cur;
     }

@@ -666,6 +666,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             isLooping={isLooping}
             availableQualities={availableQualities}
             onChangeQuality={changeQuality}
+            captionTracks={videoDetails?.captionTracks}
             onSetPlaybackSpeed={setPlaybackSpeed}
             onToggleLoop={() => setIsLooping(!isLooping)}
           />
