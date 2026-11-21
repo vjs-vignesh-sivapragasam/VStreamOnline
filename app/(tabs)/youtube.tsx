@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import {
   youTubeService,
   YouTubeVideoItem,
@@ -33,7 +33,6 @@ import {
 import { youTubeListService, SavedYouTubeItem } from '@/services/YouTubeListService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
-import { YouTubeYouScreen } from '@/components/youtube/YouTubeYouScreen';
 import { youTubeHistoryService } from '@/services/YouTubeHistoryService';
 import { YouTubeAuthModal } from '@/components/youtube/YouTubeAuthModal';
 import { useTheme } from '@/hooks/useTheme';
@@ -440,12 +439,32 @@ export default function YouTubeScreen() {
     };
   }, [selectedCategory]);
 
+  // Instantly sync auth avatar and state whenever returning to YouTube tab
+  useFocusEffect(
+    useCallback(() => {
+      const current = youTubeService.getCachedAuthStatus();
+      setAuthStatus((prev) => {
+        if (
+          prev.authenticated !== current.authenticated ||
+          prev.user?.name !== current.user?.name ||
+          prev.user?.avatar !== current.user?.avatar
+        ) {
+          if (current.authenticated && selectedCategory === 'All') {
+            setSelectedCategory('Home');
+          }
+          return current;
+        }
+        return prev;
+      });
+    }, [selectedCategory])
+  );
+
   // Dynamic Category Chips reflecting Google Account feeds
   const dynamicCategoryChips = useMemo(() => {
     if (authStatus.authenticated) {
-      return ['Home', 'Subscriptions', 'History', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
+      return ['Home', 'Subscriptions', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
     }
-    return ['All', 'History', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
+    return ['All', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
   }, [authStatus.authenticated]);
 
   /**
@@ -908,164 +927,75 @@ export default function YouTubeScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <StatusBar style="light" />
 
-      {selectedCategory === 'History' ? (
-        <YouTubeYouScreen
-          authStatus={authStatus}
-          onOpenAuth={() => setIsAuthModalVisible(true)}
-          onOpenSearch={() => {
-            setSelectedCategory(authStatus.authenticated ? 'Home' : 'All');
-            setIsSearchOpen(true);
-            setTimeout(() => searchInputRef.current?.focus(), 100);
-          }}
-          onBackToFeed={() => setSelectedCategory(authStatus.authenticated ? 'Home' : 'All')}
-          onPlayVideo={(v) => {
-            playInYouTubeWatch({
-              id: v.id,
-              title: v.title,
-              channel: v.channel,
-              thumbnail: v.thumbnail,
-              duration: v.duration,
-              views: v.views,
-              published: v.published,
-            });
-          }}
-          onDownloadVideo={(v) => handleOpenDownloadModal(v)}
-          onOpenSettings={() => setIsAuthModalVisible(true)}
-          theme={theme}
-        />
-      ) : (
-        <>
+
           {/* Header Bar */}
           <View style={styles.headerBar}>
-        <View style={styles.headerTopRow}>
-          {/* Logo: Tap "Premium" to refresh and reload YouTube Home */}
-          <TouchableOpacity
-            style={styles.logoRow}
-            onPress={handleHomeRefresh}
-            activeOpacity={0.7}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <View style={styles.ytLogoBox}>
-              <Ionicons name="play" size={14} color="#ffffff" />
+            <View style={styles.headerTopRow}>
+              {/* Logo: Tap "Premium" to refresh and reload YouTube Home */}
+              <TouchableOpacity
+                style={styles.logoRow}
+                onPress={handleHomeRefresh}
+                activeOpacity={0.7}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <View style={styles.ytLogoBox}>
+                  <Ionicons name="play" size={11} color="#ffffff" style={styles.ytPlayTriangle} />
+                </View>
+                <Text style={styles.logoText}>Premium</Text>
+              </TouchableOpacity>
+
+              {/* Top Header Icons: Search, Profile Avatar */}
+              <View style={styles.headerActionsRow}>
+                {/* 1. Search Icon */}
+                <TouchableOpacity
+                  style={styles.headerIconButton}
+                  onPress={() => {
+                    setIsSearchOpen((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setTimeout(() => searchInputRef.current?.focus(), 100);
+                      }
+                      return next;
+                    });
+                  }}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                >
+                  <Ionicons
+                    name={isSearchOpen ? 'close' : 'search-outline'}
+                    size={23}
+                    color="#ffffff"
+                  />
+                </TouchableOpacity>
+
+                {/* 2. Google / YouTube Account Profile Avatar Button */}
+                <TouchableOpacity
+                  style={styles.headerAvatarButton}
+                  onPress={async () => {
+                    if (await isHapticsSupported()) {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }
+                    router.push('/youtubeSettings' as any);
+                  }}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                >
+                  {authStatus.authenticated && authStatus.user?.avatar ? (
+                    <Image source={{ uri: authStatus.user.avatar }} style={styles.headerAvatarImg} />
+                  ) : authStatus.authenticated ? (
+                    <View style={[styles.headerAvatarFallback, { backgroundColor: theme.primary }]}>
+                      <Text style={styles.headerAvatarFallbackText}>
+                        {(authStatus.user?.name || 'U').charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.headerSignedOutAvatar}>
+                      <Ionicons name="person" size={14} color="#ffffff" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-            <Text style={styles.logoText}>Premium</Text>
-
-
-          </TouchableOpacity>
-
-          {/* Top Header Icons: Downloads, Search, My List, Profile Avatar */}
-          <View style={styles.headerActionsRow}>
-            {/* 1. Downloads Shortcut with real-time Badge */}
-            <TouchableOpacity
-              style={styles.headerActionBtn}
-              onPress={() => router.push({ pathname: '/(tabs)/library' as any, params: { tab: 'YouTube' } })}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-            >
-              <Ionicons name="cloud-download-outline" size={20} color="#ffffff" />
-              {downloadsCount > 0 && (
-                <View style={[styles.headerBadge, { backgroundColor: theme.primary }]}>
-                  <Text style={styles.headerBadgeText}>
-                    {downloadsCount > 99 ? '99+' : downloadsCount}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* 2. Search Icon */}
-            <TouchableOpacity
-              style={[
-                styles.headerActionBtn,
-                isSearchOpen && [
-                  styles.headerActionBtnActive,
-                  { backgroundColor: `${theme.primary}33`, borderColor: theme.primary, borderWidth: 1 },
-                ],
-              ]}
-              onPress={() => {
-                setIsSearchOpen((prev) => {
-                  const next = !prev;
-                  if (next) {
-                    setTimeout(() => searchInputRef.current?.focus(), 100);
-                  }
-                  return next;
-                });
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-            >
-              <Ionicons
-                name={isSearchOpen ? 'close' : 'search-outline'}
-                size={21}
-                color="#ffffff"
-              />
-            </TouchableOpacity>
-
-            {/* 2. My List Icon */}
-            <TouchableOpacity
-              style={[
-                styles.headerActionBtn,
-                selectedCategory === 'History' && [
-                  styles.headerActionBtnActive,
-                  { backgroundColor: `${theme.primary}33`, borderColor: theme.primary, borderWidth: 1 },
-                ],
-              ]}
-              onPress={async () => {
-                if (await isHapticsSupported()) {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
-                setSelectedCategory('History');
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-            >
-              <Ionicons
-                name="bookmark-outline"
-                size={19}
-                color="#ffffff"
-              />
-              {savedList.length > 0 && (
-                <View style={[styles.headerBadge, { backgroundColor: theme.primary }]}>
-                  <Text style={styles.headerBadgeText}>
-                    {savedList.length > 99 ? '99+' : savedList.length}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* 3. Google / YouTube Account Profile Avatar Button */}
-            <TouchableOpacity
-              style={[
-                styles.headerActionBtn,
-                authStatus.authenticated && [styles.headerAccountBtn, { borderColor: theme.primary }],
-                selectedCategory === 'History' && { borderColor: '#ffffff', borderWidth: 1.5 },
-              ]}
-              onPress={async () => {
-                if (await isHapticsSupported()) {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
-                setSelectedCategory((prev) => (prev === 'History' ? (authStatus.authenticated ? 'Home' : 'All') : 'History'));
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-            >
-              {authStatus.authenticated && authStatus.user?.avatar ? (
-                <Image source={{ uri: authStatus.user.avatar }} style={styles.headerAvatarImg} />
-              ) : authStatus.authenticated ? (
-                <View style={[styles.headerAvatarFallback, { backgroundColor: theme.primary }]}>
-                  <Text style={styles.headerAvatarFallbackText}>
-                    {(authStatus.user?.name || 'U').charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-              ) : (
-                <Ionicons
-                  name="person-circle-outline"
-                  size={23}
-                  color="#ffffff"
-                />
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
 
         {/* Expandable Search Input Box with Real YouTube Link Paste */}
         {isSearchOpen && (
@@ -1257,9 +1187,6 @@ export default function YouTubeScreen() {
           }
         />
       )}
-        </>
-      )}
-
       {/* Quality Picker Modal */}
       <QualityPickerModal
         visible={downloadModalVisible}
@@ -1557,86 +1484,31 @@ const styles = StyleSheet.create({
   },
   headerBar: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
-    backgroundColor: '#0a0a0c',
+    paddingTop: 6,
+    paddingBottom: 6,
+    backgroundColor: '#0f0f0f',
   },
   headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 40,
+    height: 44,
   },
   logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  headerActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  headerActionBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  headerActionBtnActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-  },
-  headerAccountBtn: {
-    borderWidth: 1.5,
-    borderColor: '#ffffff',
-    overflow: 'hidden',
-  },
-  headerAvatarImg: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-  },
-  headerAvatarFallback: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerAvatarFallbackText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  headerBadge: {
-    position: 'absolute',
-    top: -2,
-    right: -4,
-    backgroundColor: '#ff0000',
-    borderRadius: 9,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#0a0a0c',
-  },
-  headerBadgeText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '700',
+    gap: 5,
   },
   ytLogoBox: {
-    width: 28,
+    width: 29,
     height: 20,
-    borderRadius: 6,
+    borderRadius: 5.5,
     backgroundColor: '#FF0000',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  ytPlayTriangle: {
+    marginLeft: 1.5,
   },
   logoText: {
     color: '#ffffff',
@@ -1644,10 +1516,54 @@ const styles = StyleSheet.create({
     fontFamily: Platform.select({
       ios: 'AvenirNextCondensed-Bold',
       android: 'sans-serif-condensed',
-      default: 'sans-serif',
+      default: 'sans-serif-condensed',
     }),
-    fontWeight: '800',
-    letterSpacing: -0.7,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+  },
+  headerActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+  },
+  headerIconButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarImg: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  headerAvatarFallback: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarFallbackText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  headerSignedOutAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#383838',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   adFreeBadge: {
     backgroundColor: 'rgba(0, 255, 136, 0.15)',

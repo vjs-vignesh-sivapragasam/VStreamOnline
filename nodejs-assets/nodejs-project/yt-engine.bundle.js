@@ -39122,7 +39122,7 @@ async function resolveVideoWithClients(videoId) {
     adaptive: []
   };
 }
-var server = import_http.default.createServer(async (req, res) => {
+var ytRequestHandler = async (req, res) => {
   const parsedUrl = new URL(req.url, "http://127.0.0.1:11472");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS, HEAD");
@@ -39874,7 +39874,8 @@ var server = import_http.default.createServer(async (req, res) => {
   }
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "Not found" }));
-});
+};
+var server = import_http.default.createServer(ytRequestHandler);
 var PORT = 11472;
 server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
@@ -39884,10 +39885,10 @@ server.on("error", (err) => {
   }
 });
 try {
-  server.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, "127.0.0.1", () => {
     console.log(`YouTube engine listening on http://127.0.0.1:${PORT}`);
   });
 } catch (e) {
   console.warn('[yt-server] listen on 11472 error:', e);
 }
-module.exports = { getClient, server };
+module.exports = { getClient, server, handler: ytRequestHandler, requestHandler: ytRequestHandler };

@@ -246,6 +246,14 @@ function RootLayoutNav() {
               }}
             />
             <Stack.Screen
+              name="youtubeSettings"
+              options={{
+                headerShown: false,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
+              }}
+            />
+            <Stack.Screen
               name="youtube/downloads"
               options={{
                 headerShown: false,

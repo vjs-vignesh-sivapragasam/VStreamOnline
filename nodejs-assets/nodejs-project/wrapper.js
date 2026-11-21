@@ -17,6 +17,38 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('[NODEJS-MOBILE-UNHANDLED-REJECTION]', reason);
 });
 
+// 2b. Global polyfills for embedded mobile Node.js environment
+if (typeof globalThis.Event === 'undefined') {
+  try {
+    globalThis.Event = require('events').Event || class Event {};
+  } catch (_) {
+    globalThis.Event = class Event {};
+  }
+}
+if (typeof globalThis.CustomEvent === 'undefined') {
+  globalThis.CustomEvent = class CustomEvent extends (globalThis.Event || Object) {
+    constructor(type, options) {
+      super(type, options);
+      this.detail = options?.detail ?? null;
+    }
+  };
+}
+if (typeof globalThis.ReadableStream === 'undefined') {
+  try {
+    globalThis.ReadableStream = require('stream/web').ReadableStream;
+  } catch (_) {}
+}
+if (!String.prototype.isWellFormed) {
+  String.prototype.isWellFormed = function () {
+    try {
+      encodeURIComponent(this);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+}
+
 // 3. Configure safe writable paths for embedded environment (prevents read-only /tmp EROFS crash)
 try {
   const baseDir = process.cwd();
@@ -86,16 +118,23 @@ try {
 
 // 6. Start YouTube streaming engine safely with lazy-load resilience
 let ytHandler = null;
+let lastYtError = null;
+let isCreatingYtServer = false;
+
 function getYtHandler() {
   if (ytHandler) return ytHandler;
   try {
+    isCreatingYtServer = true;
     const ytModule = require('./yt-engine.bundle.js');
-    if (ytModule && ytModule.server) {
-      ytHandler = ytModule.server.listeners('request')[0];
+    isCreatingYtServer = false;
+    ytHandler = ytModule.handler || ytModule.requestHandler || (ytModule.server && ytModule.server.listeners('request')[0]);
+    if (ytHandler) {
       console.log('[NODEJS-MOBILE] ✅ yt-engine loaded and ready');
     }
   } catch (e) {
-    console.warn('[NODEJS-MOBILE] Could not start yt-engine:', e);
+    isCreatingYtServer = false;
+    lastYtError = e;
+    console.warn('[NODEJS-MOBILE] Could not start yt-engine:', e && e.stack ? e.stack : e);
   }
   return ytHandler;
 }
@@ -106,6 +145,9 @@ getYtHandler();
 const http = require('http');
 const originalCreateServer = http.createServer;
 http.createServer = function (requestListener) {
+  if (isCreatingYtServer) {
+    return originalCreateServer.call(this, requestListener);
+  }
   return originalCreateServer.call(this, (req, res) => {
     if (req.url && req.url.startsWith('/yt/')) {
       const handler = getYtHandler();
@@ -113,7 +155,9 @@ http.createServer = function (requestListener) {
         return handler(req, res);
       }
       res.writeHead(503, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-      res.end(JSON.stringify({ error: 'YouTube engine initializing, please retry' }));
+      res.end(JSON.stringify({
+        error: lastYtError ? ('YouTube engine error: ' + (lastYtError.message || lastYtError)) : 'YouTube engine initializing, please retry'
+      }));
       return;
     }
     if (requestListener) {

@@ -102,6 +102,23 @@ export interface YouTubeUserProfile {
   avatar?: string;
 }
 
+export interface YouTubeOAuthTokens {
+  access_token: string;
+  refresh_token?: string;
+  expires_at: number;
+  token_type?: string;
+  scope?: string;
+}
+
+export interface GoogleSSOResult {
+  device_code: string;
+  user_code: string;
+  verification_url: string;
+  auth_url: string;
+  interval: number;
+  expires_in: number;
+}
+
 export interface YouTubeAuthStatus {
   authenticated: boolean;
   pending?: {
@@ -120,6 +137,14 @@ export interface YouTubeAuthStartResponse {
   expires_in?: number;
   error?: string;
 }
+
+// ── Google / YouTube OAuth2 Constants ─────────────────────────────────────────
+export const GOOGLE_OAUTH_CLIENT_ID = '861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com';
+export const GOOGLE_OAUTH_CLIENT_SECRET = 'SboVhoG9s0rNafixCSGGKXAT';
+export const GOOGLE_OAUTH_DEVICE_CODE_URL = 'https://www.youtube.com/o/oauth2/device/code';
+export const GOOGLE_OAUTH_TOKEN_URL = 'https://www.youtube.com/o/oauth2/token';
+export const GOOGLE_OAUTH_SCOPES = 'http://gdata.youtube.com https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube-paid-content';
+export const YT_OAUTH_TOKENS_KEY = 'yt_oauth_tokens';
 
 const YT_SUBSCRIPTIONS_KEY = 'yt_local_subscriptions';
 const STREMIO_ENGINE_PORT = 11470;
@@ -244,9 +269,9 @@ class YouTubeService {
    * Resolves the active base URL for the YouTube engine.
    * Checks loopback, developer LAN IP, and custom server settings concurrently for instant pick up (<50ms).
    */
-  async resolveActiveBaseUrl(timeoutMs = 1200): Promise<string | null> {
+  async resolveActiveBaseUrl(timeoutMs = 1200, forceRefresh = false): Promise<string | null> {
     const now = Date.now();
-    if (this.activeBaseUrl && now - this.lastPingTime < 15000) {
+    if (!forceRefresh && this.activeBaseUrl && now - this.lastPingTime < 15000) {
       return this.activeBaseUrl;
     }
 
@@ -275,12 +300,6 @@ class YouTubeService {
       return fastestUrl;
     } catch {
       // All pings timed out or failed
-    }
-
-    // On mobile, fallback directly to the embedded Stremio engine (same port 11470 as TamilMV)
-    if (Platform.OS !== 'web') {
-      this.activeBaseUrl = `http://127.0.0.1:${STREMIO_ENGINE_PORT}`;
-      return this.activeBaseUrl;
     }
 
     this.activeBaseUrl = null;
@@ -1150,67 +1169,385 @@ class YouTubeService {
     } catch {}
   }
 
-  // ── YouTube Google Account / SSO ──────────────────────────────────────────
-
-  async getAuthStatus(timeoutMs = 4000): Promise<YouTubeAuthStatus> {
+  getOAuthTokens(): YouTubeOAuthTokens | null {
     try {
-      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
-      if (!baseUrl) return this.getCachedAuthStatus();
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(`${baseUrl}/yt/auth/status`, {
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timer));
-
-      if (res.ok) {
-        const status = await res.json();
-        this.setCachedAuthStatus(status);
-        return status;
+      const raw = storageService.getItem(YT_OAUTH_TOKENS_KEY);
+      if (raw) {
+        return JSON.parse(raw);
       }
-      return this.getCachedAuthStatus();
-    } catch {
-      return this.getCachedAuthStatus();
-    }
+    } catch {}
+    return null;
   }
 
-  async startAuth(timeoutMs = 12000): Promise<YouTubeAuthStartResponse> {
+  setOAuthTokens(tokens: YouTubeOAuthTokens | null) {
     try {
-      const baseUrl = await this.resolveActiveBaseUrl(2000);
-      if (!baseUrl) {
-        return { status: 'error', error: 'YouTube engine is not connected. Please ensure the local streaming service is running.' };
+      if (tokens) {
+        storageService.setItem(YT_OAUTH_TOKENS_KEY, JSON.stringify(tokens));
+      } else {
+        storageService.removeItem(YT_OAUTH_TOKENS_KEY);
       }
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(`${baseUrl}/yt/auth/start`, {
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timer));
-
-      if (res.ok) {
-        return await res.json();
-      }
-      const data = await res.json().catch(() => ({}));
-      return { status: 'error', error: data.error || 'Failed to start authentication' };
-    } catch (err: any) {
-      return { status: 'error', error: err?.message || 'Authentication timeout' };
-    }
+    } catch {}
   }
 
-  async logout(timeoutMs = 5000): Promise<boolean> {
+  // ── Real Google SSO (OAuth2 Device Flow) ───────────────────────────────────
+
+  /**
+   * Initializes Google SSO by requesting a device code and verification URL.
+   * Pre-fills `?user_code=` so the browser opens directly to Google's "Choose an account" screen.
+   */
+  async startGoogleSSO(): Promise<GoogleSSOResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+
     try {
-      this.setCachedAuthStatus({ authenticated: false });
-      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
-      if (!baseUrl) return false;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(`${baseUrl}/yt/auth/logout`, {
+      const res = await fetch(GOOGLE_OAUTH_DEVICE_CODE_URL, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        body: JSON.stringify({
+          client_id: GOOGLE_OAUTH_CLIENT_ID,
+          scope: GOOGLE_OAUTH_SCOPES,
+          device_id: '12345678-1234-4234-8234-123456789abc',
+          device_model: 'ytlr::',
+        }),
         signal: controller.signal,
       }).finally(() => clearTimeout(timer));
 
-      return res.ok;
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Google SSO error (${res.status}): ${errText || res.statusText}`);
+      }
+
+      const data = await res.json();
+      if (!data.device_code || !data.user_code) {
+        throw new Error(data.error_description || data.error || 'Failed to initialize Google SSO');
+      }
+
+      const verificationUrl = data.verification_url || 'https://www.google.com/device';
+      // Appending ?user_code= automatically validates code and displays Google account picker!
+      const authUrl = `${verificationUrl}?user_code=${encodeURIComponent(data.user_code)}`;
+
+      return {
+        device_code: data.device_code,
+        user_code: data.user_code,
+        verification_url: verificationUrl,
+        auth_url: authUrl,
+        interval: data.interval || 5,
+        expires_in: data.expires_in || 1800,
+      };
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        throw new Error('Connection timed out contacting Google servers. Please check your network.');
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Polls Google token endpoint until user approves or code expires.
+   */
+  async pollGoogleSSOToken(deviceCode: string): Promise<{
+    status: 'pending' | 'success' | 'expired' | 'error';
+    tokens?: YouTubeOAuthTokens;
+    error?: string;
+  }> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+
+      const res = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        body: JSON.stringify({
+          client_id: GOOGLE_OAUTH_CLIENT_ID,
+          client_secret: GOOGLE_OAUTH_CLIENT_SECRET,
+          code: deviceCode,
+          grant_type: 'http://oauth.net/grant_type/device/1.0',
+        }),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      const data = await res.json();
+
+      if (data.access_token) {
+        const tokens: YouTubeOAuthTokens = {
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+          expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+          token_type: data.token_type || 'Bearer',
+          scope: data.scope,
+        };
+        this.setOAuthTokens(tokens);
+        return { status: 'success', tokens };
+      }
+
+      if (data.error === 'authorization_pending' || data.error === 'slow_down') {
+        return { status: 'pending' };
+      }
+
+      if (data.error === 'expired_token') {
+        return { status: 'expired', error: 'Verification code expired. Please try again.' };
+      }
+
+      return { status: 'error', error: data.error_description || data.error || 'Authorization failed' };
     } catch {
-      return false;
+      return { status: 'pending' };
+    }
+  }
+
+  /**
+   * Refreshes access token in background using saved refresh token.
+   */
+  async refreshGoogleAccessToken(): Promise<string | null> {
+    const existing = this.getOAuthTokens();
+    if (!existing?.refresh_token) return null;
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+
+      const res = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          client_id: GOOGLE_OAUTH_CLIENT_ID,
+          client_secret: GOOGLE_OAUTH_CLIENT_SECRET,
+          refresh_token: existing.refresh_token,
+          grant_type: 'refresh_token',
+        }),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.access_token) {
+          const updated: YouTubeOAuthTokens = {
+            ...existing,
+            access_token: data.access_token,
+            expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+          };
+          this.setOAuthTokens(updated);
+          return updated.access_token;
+        }
+      }
+    } catch (err) {
+      console.warn('[YouTubeService] refreshGoogleAccessToken error:', err);
+    }
+    return null;
+  }
+
+  /**
+   * Fetches real user channel name, handle/email, and high-res avatar from Google API.
+   */
+  async fetchGoogleUserProfile(accessToken: string): Promise<YouTubeUserProfile> {
+    let name = 'YouTube User';
+    let email = '';
+    let avatar = '';
+
+    // 1. YouTube Channel Snippet
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+
+      const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        },
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.items) && data.items.length > 0) {
+          const ch = data.items[0];
+          if (ch.snippet?.title) {
+            name = ch.snippet.title.trim();
+          }
+          if (ch.snippet?.customUrl) {
+            email = ch.snippet.customUrl;
+          }
+          const thumbs = ch.snippet?.thumbnails;
+          if (thumbs) {
+            avatar = thumbs.high?.url || thumbs.medium?.url || thumbs.default?.url || '';
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[YouTubeService] channel info fetch error:', err);
+    }
+
+    // 2. Tokeninfo for email
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+
+      const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`, {
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (res.ok) {
+        const info = await res.json();
+        if (info.email && !email.includes('@')) {
+          email = info.email;
+        }
+        if (name === 'YouTube User' && info.email) {
+          name = info.email.split('@')[0];
+        }
+      }
+    } catch {}
+
+    if (!avatar) {
+      avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FF0000&color=fff`;
+    }
+
+    return {
+      name,
+      email: email || undefined,
+      avatar,
+    };
+  }
+
+  /**
+   * Finalizes Google SSO with tokens and saves profile.
+   */
+  async completeGoogleSSO(tokens: YouTubeOAuthTokens): Promise<YouTubeAuthStatus> {
+    this.setOAuthTokens(tokens);
+    const profile = await this.fetchGoogleUserProfile(tokens.access_token);
+    const newStatus: YouTubeAuthStatus = {
+      authenticated: true,
+      user: profile,
+    };
+    this.setCachedAuthStatus(newStatus);
+    return newStatus;
+  }
+
+  async loginWithGoogleAccount(user: { name?: string; email: string; avatar?: string }): Promise<YouTubeAuthStatus> {
+    const cleanName = user.name?.trim() || user.email.split('@')[0] || 'YouTube User';
+    const status: YouTubeAuthStatus = {
+      authenticated: true,
+      user: {
+        name: cleanName,
+        email: user.email.trim(),
+        avatar: user.avatar?.trim() || `https://ui-avatars.com/api/?name=${encodeURIComponent(cleanName)}&background=FF0000&color=fff`,
+      },
+    };
+    this.setCachedAuthStatus(status);
+    return status;
+  }
+
+  // ── Auth Status & Session Management ───────────────────────────────────────
+
+  async getAuthStatus(timeoutMs = 1500): Promise<YouTubeAuthStatus> {
+    try {
+      const cached = this.getCachedAuthStatus();
+      if (cached.authenticated) {
+        // Refresh token if near expiration (< 5 min)
+        const tokens = this.getOAuthTokens();
+        if (tokens?.refresh_token && tokens.expires_at - Date.now() < 300000) {
+          this.refreshGoogleAccessToken().catch(() => {});
+        }
+        return cached;
+      }
+
+      // Check stored tokens if cache was cleared
+      const tokens = this.getOAuthTokens();
+      if (tokens?.access_token) {
+        if (tokens.expires_at > Date.now()) {
+          const profile = await this.fetchGoogleUserProfile(tokens.access_token);
+          const status: YouTubeAuthStatus = { authenticated: true, user: profile };
+          this.setCachedAuthStatus(status);
+          return status;
+        } else if (tokens.refresh_token) {
+          const refreshedToken = await this.refreshGoogleAccessToken();
+          if (refreshedToken) {
+            const profile = await this.fetchGoogleUserProfile(refreshedToken);
+            const status: YouTubeAuthStatus = { authenticated: true, user: profile };
+            this.setCachedAuthStatus(status);
+            return status;
+          }
+        }
+      }
+
+      // If a local engine is running, check if it has session
+      const baseUrl = await this.resolveActiveBaseUrl(Math.min(timeoutMs, 600));
+      if (baseUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 1000);
+        const res = await fetch(`${baseUrl}/yt/auth/status`, {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const status = await res.json();
+          if (status.authenticated) {
+            this.setCachedAuthStatus(status);
+            return status;
+          }
+        }
+      }
+
+      return { authenticated: false };
+    } catch {
+      return this.getCachedAuthStatus();
+    }
+  }
+
+  async startAuth(timeoutMs = 4000): Promise<YouTubeAuthStartResponse> {
+    // For local backend device auth if available
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(600);
+      if (baseUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(`${baseUrl}/yt/auth/start`, {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          return await res.json();
+        }
+      }
+    } catch {}
+
+    // Direct Google SSO device flow fallback
+    try {
+      const sso = await this.startGoogleSSO();
+      return {
+        status: 'pending',
+        user_code: sso.user_code,
+        verification_url: sso.auth_url,
+        expires_in: sso.expires_in,
+      };
+    } catch (err: any) {
+      return { status: 'error', error: err?.message || 'Failed to start authentication' };
+    }
+  }
+
+  async logout(timeoutMs = 3000): Promise<boolean> {
+    try {
+      this.setOAuthTokens(null);
+      this.setCachedAuthStatus({ authenticated: false, user: null, pending: null });
+
+      const baseUrl = await this.resolveActiveBaseUrl(400);
+      if (baseUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        await fetch(`${baseUrl}/yt/auth/logout`, {
+          method: 'POST',
+          signal: controller.signal,
+        }).catch(() => {}).finally(() => clearTimeout(timer));
+      }
+      return true;
+    } catch {
+      return true;
     }
   }
 

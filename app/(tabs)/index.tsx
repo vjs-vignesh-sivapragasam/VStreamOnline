@@ -73,7 +73,7 @@ const LazySection = ({
           onSeeAll={onSeeAll}
         />
       ) : (
-        <View style={{ height: 280, marginBottom: 20 }} />
+        <View style={{ height: 220, marginBottom: 20 }} />
       )}
     </View>
   );

@@ -13,10 +13,12 @@ import {
   Alert,
   Share,
   Platform,
+  AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { youTubeHistoryService, YouTubeHistoryItem } from '@/services/YouTubeHistoryService';
-import { youTubeListService, SavedYouTubeItem } from '@/services/YouTubeListService';
+import { youTubeListService } from '@/services/YouTubeListService';
 import { youTubeService, YouTubeAuthStatus, YouTubeVideoItem } from '@/services/YouTubeService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import * as Haptics from 'expo-haptics';
@@ -25,21 +27,43 @@ import { isHapticsSupported } from '@/utils/platform';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface YouTubeYouScreenProps {
-  authStatus: YouTubeAuthStatus;
-  onOpenAuth: () => void;
+  authStatus?: YouTubeAuthStatus;
+  onOpenAuth?: () => void;
   onLogout?: () => void;
-  onOpenSearch: () => void;
-  onPlayVideo: (video: YouTubeVideoItem) => void;
-  onDownloadVideo: (video: YouTubeVideoItem) => void;
+  onOpenSearch?: () => void;
+  onPlayVideo?: (video: YouTubeVideoItem) => void;
+  onDownloadVideo?: (video: YouTubeVideoItem) => void;
   onOpenSettings?: () => void;
   onBackToFeed?: () => void;
-  theme: any;
+  theme?: any;
 }
 
-type LibraryFilterType = 'Recent' | 'Downloaded' | 'Playlists' | 'Music';
+type LibraryFilterType = 'Downloaded' | 'Music';
+
+const isAudioDownload = (item: DownloadItem): boolean => {
+  const fileName = (item.fileName || '').toLowerCase();
+  const fileUri = (item.fileUri || '').toLowerCase();
+  const id = (item.id || '').toLowerCase();
+  const title = (item.title || '').toLowerCase();
+  return (
+    fileName.endsWith('.mp3') ||
+    fileName.endsWith('.m4a') ||
+    fileName.endsWith('.aac') ||
+    fileName.endsWith('.wav') ||
+    fileName.endsWith('.flac') ||
+    fileName.endsWith('.opus') ||
+    fileUri.endsWith('.mp3') ||
+    fileUri.endsWith('.m4a') ||
+    fileUri.endsWith('.aac') ||
+    id.includes('_mp3') ||
+    id.includes('_audio') ||
+    title.endsWith('.mp3') ||
+    title.endsWith('.m4a')
+  );
+};
 
 export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
-  authStatus,
+  authStatus: propAuthStatus,
   onOpenAuth,
   onLogout,
   onOpenSearch,
@@ -49,20 +73,22 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
   onBackToFeed,
   theme,
 }) => {
+  const router = useRouter();
+  const [internalAuthStatus, setInternalAuthStatus] = useState<YouTubeAuthStatus>(() =>
+    propAuthStatus || youTubeService.getCachedAuthStatus()
+  );
+  const authStatus = propAuthStatus || internalAuthStatus;
+
   const [historyList, setHistoryList] = useState<YouTubeHistoryItem[]>([]);
-  const [likedList, setLikedList] = useState<SavedYouTubeItem[]>([]);
-  const [savedShortsList, setSavedShortsList] = useState<SavedYouTubeItem[]>([]);
-  const [myList, setMyList] = useState<SavedYouTubeItem[]>([]);
-  const [downloadedList, setDownloadedList] = useState<DownloadItem[]>([]);
-  const [onlinePlaylists, setOnlinePlaylists] = useState<any[]>([]);
-  const [selectedFilter, setSelectedFilter] = useState<LibraryFilterType>('Recent');
+  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+  const [selectedFilter, setSelectedFilter] = useState<LibraryFilterType>('Downloaded');
   const [refreshing, setRefreshing] = useState(false);
 
   // Selected item for 3-dots action sheet
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<YouTubeHistoryItem | null>(null);
   const [isHistoryActionSheetVisible, setIsHistoryActionSheetVisible] = useState(false);
 
-  // Playlist view modal (for Liked Videos, Saved Shorts, or My List)
+  // Playlist view modal (for Watch History)
   const [activePlaylistTitle, setActivePlaylistTitle] = useState<string | null>(null);
   const [activePlaylistVideos, setActivePlaylistVideos] = useState<any[]>([]);
   const [isPlaylistModalVisible, setIsPlaylistModalVisible] = useState(false);
@@ -72,42 +98,35 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
       const history = await youTubeHistoryService.getHistory();
       setHistoryList(history);
 
-      const liked = youTubeHistoryService.getLikedVideos();
-      setLikedList(liked);
-
-      const shorts = youTubeHistoryService.getSavedShorts();
-      setSavedShortsList(shorts);
-
-      const saved = youTubeListService.getSavedList();
-      setMyList(saved);
-
       const dl = downloadService.getDownloads().filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct');
-      setDownloadedList(dl);
+      setDownloads(dl);
 
-      if (authStatus.authenticated) {
-        const playlists = await youTubeService.getPlaylistsFeed();
-        setOnlinePlaylists(playlists);
+      if (!propAuthStatus) {
+        const s = await youTubeService.getAuthStatus();
+        setInternalAuthStatus(s);
       }
     } catch (err) {
       console.warn('[YouTubeYouScreen] loadAllData error:', err);
     }
-  }, [authStatus.authenticated]);
+  }, [propAuthStatus]);
 
   useEffect(() => {
     loadAllData();
     const unsubHistory = youTubeHistoryService.subscribe(() => {
-      loadAllData();
-    });
-    const unsubList = youTubeListService.subscribe((list) => {
-      setMyList(list);
+      youTubeHistoryService.getHistory().then(setHistoryList);
     });
     const unsubDl = downloadService.addListener((items) => {
-      setDownloadedList(items.filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct'));
+      setDownloads(items.filter((d) => d.id.startsWith('yt_') || d.sourceType === 'direct'));
+    });
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        youTubeService.getAuthStatus().then(setInternalAuthStatus).catch(() => {});
+      }
     });
 
     return () => {
+      appStateSub.remove();
       unsubHistory();
-      unsubList();
       unsubDl();
     };
   }, [loadAllData]);
@@ -186,11 +205,6 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
     setIsHistoryActionSheetVisible(false);
   };
 
-  // First thumbnail helpers for playlists
-  const likedThumbnail = likedList[0]?.thumbnail || historyList[0]?.thumbnail || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400';
-  const shortsThumbnail = savedShortsList[0]?.thumbnail || historyList.find((h) => h.isShort)?.thumbnail || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=400';
-  const myListThumbnail = myList[0]?.thumbnail || historyList[1]?.thumbnail || 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=400';
-
   const handleLogoutPress = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out of your YouTube account?', [
       { text: 'Cancel', style: 'cancel' },
@@ -206,13 +220,100 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
           } else {
             try {
               await youTubeService.logout();
-              onOpenAuth();
+              if (onOpenAuth) onOpenAuth();
             } catch {}
           }
         },
       },
     ]);
   };
+
+  // Download actions
+  const handlePlayDownloadedVideo = (item: DownloadItem) => {
+    if (item.status === 'completed' && item.fileUri) {
+      router.push({
+        pathname: '/stream/player' as any,
+        params: {
+          videoUrl: item.fileUri,
+          title: item.title,
+          poster: item.poster || '',
+        },
+      });
+    } else if (onPlayVideo) {
+      onPlayVideo({
+        id: item.id.replace('yt_', ''),
+        title: item.title,
+        channel: 'Downloaded',
+        thumbnail: item.poster || '',
+      });
+    }
+  };
+
+  const handlePlayDownloadedAudio = (item: DownloadItem) => {
+    if (item.status === 'completed' && item.fileUri) {
+      router.push({
+        pathname: '/music/player' as any,
+        params: {
+          id: item.id,
+          fileUri: item.fileUri,
+          title: item.title,
+          poster: item.poster || '',
+        },
+      });
+    }
+  };
+
+  const handleTogglePause = async (item: DownloadItem) => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (item.status === 'downloading') {
+      downloadService.pauseDownload(item.id);
+    } else {
+      downloadService.resumeDownload(item.id);
+    }
+  };
+
+  const handleDeleteDownload = async (item: DownloadItem) => {
+    Alert.alert('Delete Download', `Delete "${item.title}" from your device?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          if (await isHapticsSupported()) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }
+          await downloadService.deleteDownload(item.id);
+        },
+      },
+    ]);
+  };
+
+  const handleExportDownload = async (item: DownloadItem) => {
+    await downloadService.exportOrShareDownload(item);
+  };
+
+  // Filter video vs audio downloads
+  const videoDownloads = useMemo(() => {
+    return downloads.filter((d) => !isAudioDownload(d));
+  }, [downloads]);
+  const activeVideoDownloads = useMemo(() => {
+    return videoDownloads.filter((d) => d.status === 'downloading' || d.status === 'paused' || d.status === 'error');
+  }, [videoDownloads]);
+  const completedVideoDownloads = useMemo(() => {
+    return videoDownloads.filter((d) => d.status === 'completed');
+  }, [videoDownloads]);
+
+  const musicDownloads = useMemo(() => {
+    return downloads.filter((d) => isAudioDownload(d));
+  }, [downloads]);
+  const activeMusicDownloads = useMemo(() => {
+    return musicDownloads.filter((d) => d.status === 'downloading' || d.status === 'paused' || d.status === 'error');
+  }, [musicDownloads]);
+  const completedMusicDownloads = useMemo(() => {
+    return musicDownloads.filter((d) => d.status === 'completed');
+  }, [musicDownloads]);
 
   return (
     <ScrollView
@@ -223,77 +324,24 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
         <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FF0000" colors={['#FF0000']} />
       }
     >
-      {/* ── 1. Top Header Row (Accounts v | Bell 9+ | Search | Settings) ── */}
+      {/* ── 1. Top Header Row (Back | Title | Settings) ── */}
       <View style={styles.topHeaderBar}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {onBackToFeed && (
-            <TouchableOpacity
-              style={styles.iconCircleBtn}
-              onPress={async () => {
-                if (await isHapticsSupported()) {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
-                onBackToFeed();
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="arrow-back" size={22} color="#ffffff" />
-            </TouchableOpacity>
-          )}
-
-          {/* Left: Accounts Dropdown Button */}
-          <TouchableOpacity
-            style={styles.accountsBtn}
-          onPress={async () => {
-            if (await isHapticsSupported()) {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }
-            onOpenAuth();
-          }}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.accountsBtnText}>
-            {authStatus.authenticated ? 'Accounts' : 'Sign in'}
-          </Text>
-          <Ionicons name="chevron-down" size={14} color="#ffffff" style={{ marginLeft: 5 }} />
-        </TouchableOpacity>
-        </View>
-
-        {/* Right Action Icons: Notifications (9+), Search, Settings */}
-        <View style={styles.topHeaderRightIcons}>
-          {/* Notifications with badge */}
+        <View style={styles.headerLeftRow}>
           <TouchableOpacity
             style={styles.iconCircleBtn}
-            activeOpacity={0.7}
-            onPress={() => {}}
-          >
-            <Ionicons name="notifications-outline" size={21} color="#ffffff" />
-            <View style={styles.notifBadge}>
-              <Text style={styles.notifBadgeText}>9+</Text>
-            </View>
-          </TouchableOpacity>
-
-          {/* Search */}
-          <TouchableOpacity
-            style={styles.iconCircleBtn}
-            onPress={onOpenSearch}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="search-outline" size={21} color="#ffffff" />
-          </TouchableOpacity>
-
-          {/* Settings */}
-          <TouchableOpacity
-            style={styles.iconCircleBtn}
-            onPress={() => {
-              if (onOpenSettings) onOpenSettings();
-              else onOpenAuth();
+            onPress={async () => {
+              if (await isHapticsSupported()) {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }
+              if (onBackToFeed) onBackToFeed();
+              else router.back();
             }}
             activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="settings-outline" size={21} color="#ffffff" />
+            <Ionicons name="arrow-back" size={22} color="#ffffff" />
           </TouchableOpacity>
+          <Text style={styles.headerTitleText}>YouTube Settings</Text>
         </View>
       </View>
 
@@ -301,18 +349,16 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
       {authStatus.authenticated && authStatus.user ? (
         <View style={styles.profileSection}>
           <View style={styles.profileInfoRow}>
-            {/* Circular Avatar */}
             {authStatus.user.avatar ? (
               <Image source={{ uri: authStatus.user.avatar }} style={styles.profileAvatar} />
             ) : (
-              <View style={[styles.profileAvatarFallback, { backgroundColor: theme.primary || '#FF0000' }]}>
+              <View style={[styles.profileAvatarFallback, { backgroundColor: theme?.primary || '#FF0000' }]}>
                 <Text style={styles.profileAvatarInitial}>
                   {(authStatus.user.name || 'Y').charAt(0).toUpperCase()}
                 </Text>
               </View>
             )}
 
-            {/* Dynamic Name & Handle */}
             <View style={styles.profileMetaBox}>
               <Text style={styles.profileName} numberOfLines={1}>
                 {authStatus.user.name || 'YouTube User'}
@@ -325,11 +371,11 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
             </View>
           </View>
 
-          {/* Action Buttons: Switch account | Google Account | Sign Out */}
+          {/* Action Buttons: Switch | Google | Sign Out */}
           <View style={styles.profileButtonsRow}>
             <TouchableOpacity
               style={styles.switchAccountBtn}
-              onPress={onOpenAuth}
+              onPress={() => (onOpenAuth ? onOpenAuth() : null)}
               activeOpacity={0.8}
             >
               <Ionicons name="swap-horizontal-outline" size={15} color="#0f0f0f" style={{ marginRight: 4 }} />
@@ -338,7 +384,7 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
 
             <TouchableOpacity
               style={styles.googleAccountBtn}
-              onPress={onOpenAuth}
+              onPress={() => (onOpenAuth ? onOpenAuth() : null)}
               activeOpacity={0.8}
             >
               <Ionicons name="logo-google" size={14} color="#ffffff" style={{ marginRight: 4 }} />
@@ -376,7 +422,7 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
                 if (await isHapticsSupported()) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }
-                onOpenAuth();
+                if (onOpenAuth) onOpenAuth();
               }}
               activeOpacity={0.8}
             >
@@ -418,34 +464,30 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
 
             return (
               <View style={styles.historyCardContainer}>
-                {/* Thumbnail Container */}
                 <TouchableOpacity
                   style={styles.historyThumbBox}
                   activeOpacity={0.8}
-                  onPress={() => onPlayVideo(item)}
+                  onPress={() => onPlayVideo && onPlayVideo(item)}
                 >
                   <Image source={{ uri: item.thumbnail }} style={styles.historyThumbImg} />
 
-                  {/* Shorts Icon Badge on bottom-right of thumbnail */}
                   {isShort && (
                     <View style={styles.shortsBadge}>
                       <Ionicons name="flash" size={11} color="#ffffff" />
                     </View>
                   )}
 
-                  {/* Red Watch Progress Bar at Bottom of Thumbnail */}
                   <View style={styles.progressBarTrack}>
                     <View style={[styles.progressBarFill, { width: `${progressPct}%` }]} />
                   </View>
                 </TouchableOpacity>
 
-                {/* Details below Thumbnail: Title, 3-dots, Channel */}
                 <View style={styles.historyCardMeta}>
                   <View style={styles.historyTitleRow}>
                     <Text
                       style={styles.historyCardTitle}
                       numberOfLines={2}
-                      onPress={() => onPlayVideo(item)}
+                      onPress={() => onPlayVideo && onPlayVideo(item)}
                     >
                       {item.title}
                     </Text>
@@ -472,15 +514,12 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
         <Text style={styles.sectionTitle}>Library</Text>
       </View>
 
-      {/* Library Filter Pills (Recent v | Downloaded | Playlists | Music) */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterPillsContent}
-        style={styles.filterPillsScroll}
-      >
-        {(['Recent', 'Downloaded', 'Playlists', 'Music'] as LibraryFilterType[]).map((pill) => {
+      {/* Library Filter Pills (Downloaded | Music) */}
+      <View style={styles.filterPillsRow}>
+        {(['Downloaded', 'Music'] as LibraryFilterType[]).map((pill) => {
           const isSelected = selectedFilter === pill;
+          const count = pill === 'Downloaded' ? videoDownloads.length : musicDownloads.length;
+
           return (
             <TouchableOpacity
               key={pill}
@@ -493,172 +532,237 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
               }}
               activeOpacity={0.7}
             >
+              <Ionicons
+                name={pill === 'Downloaded' ? 'film-outline' : 'musical-notes-outline'}
+                size={15}
+                color={isSelected ? '#000000' : '#ffffff'}
+                style={{ marginRight: 6 }}
+              />
               <Text style={[styles.filterPillText, isSelected && styles.filterPillTextSelected]}>
-                {pill}
+                {pill === 'Downloaded' ? 'Downloaded Videos' : 'Music Tracks'}
               </Text>
-              {pill === 'Recent' && (
-                <Ionicons
-                  name="chevron-down"
-                  size={12}
-                  color={isSelected ? '#000000' : '#ffffff'}
-                  style={{ marginLeft: 4 }}
-                />
+              {count > 0 && (
+                <View style={[styles.pillBadge, isSelected && styles.pillBadgeSelected]}>
+                  <Text style={[styles.pillBadgeText, isSelected && styles.pillBadgeTextSelected]}>
+                    {count}
+                  </Text>
+                </View>
               )}
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+      </View>
 
       {/* ── 5. Library Items List ── */}
       <View style={styles.libraryListContainer}>
-        {/* If Downloaded filter is selected */}
         {selectedFilter === 'Downloaded' ? (
-          downloadedList.length === 0 ? (
+          videoDownloads.length === 0 ? (
             <View style={styles.emptyLibraryBox}>
               <Ionicons name="cloud-download-outline" size={38} color="#555555" />
-              <Text style={styles.emptyLibraryTitle}>No Downloads</Text>
+              <Text style={styles.emptyLibraryTitle}>No Video Downloads</Text>
               <Text style={styles.emptyLibrarySub}>Downloaded YouTube videos will appear here for offline viewing</Text>
             </View>
           ) : (
-            downloadedList.map((d) => (
-              <TouchableOpacity
-                key={d.id}
-                style={styles.libraryRowItem}
-                activeOpacity={0.7}
-                onPress={() => {
-                  onPlayVideo({
-                    id: d.id.replace('yt_', ''),
-                    title: d.title,
-                    channel: 'Downloaded',
-                    thumbnail: d.streamUrl || '',
-                  });
-                }}
-              >
-                <View style={styles.libraryThumbWrapper}>
-                  <View style={[styles.libraryThumbPlaceholder, { backgroundColor: '#222222' }]}>
-                    <Ionicons name="videocam" size={28} color="#FF0000" />
-                  </View>
-                  <View style={styles.thumbIconBadge}>
-                    <Ionicons name="checkmark-circle" size={13} color="#00e676" />
-                  </View>
+            <>
+              {/* Active in-progress video downloads */}
+              {activeVideoDownloads.length > 0 && (
+                <View style={{ marginBottom: 14 }}>
+                  <Text style={styles.subSectionTitle}>In Progress ({activeVideoDownloads.length})</Text>
+                  {activeVideoDownloads.map((item) => (
+                    <View key={item.id} style={styles.activeCard}>
+                      {item.poster ? (
+                        <Image source={{ uri: item.poster }} style={styles.activePoster} />
+                      ) : (
+                        <View style={[styles.activePoster, styles.posterFallback]}>
+                          <Ionicons name="film-outline" size={24} color="#888888" />
+                        </View>
+                      )}
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.activeTitle} numberOfLines={1}>{item.title}</Text>
+                        <Text style={styles.activeMeta}>
+                          {downloadService.formatBytes(item.downloadedBytes)} / {downloadService.formatBytes(item.totalBytes)} • {Math.round(item.progress)}%
+                        </Text>
+                        <View style={styles.activeBtnRow}>
+                          <TouchableOpacity
+                            style={[styles.smallBtn, { backgroundColor: '#333333' }]}
+                            onPress={() => handleTogglePause(item)}
+                          >
+                            <Text style={styles.smallBtnText}>{item.status === 'downloading' ? 'Pause' : 'Resume'}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.smallBtn, { backgroundColor: 'rgba(255, 69, 58, 0.2)' }]}
+                            onPress={() => handleDeleteDownload(item)}
+                          >
+                            <Text style={[styles.smallBtnText, { color: '#ff453a' }]}>Cancel</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
                 </View>
-                <View style={styles.libraryItemMeta}>
-                  <Text style={styles.libraryItemTitle} numberOfLines={1}>{d.title}</Text>
-                  <Text style={styles.libraryItemSubtitle}>Downloaded · Ready to watch offline</Text>
-                </View>
-                <Ionicons name="ellipsis-vertical" size={18} color="#888888" />
-              </TouchableOpacity>
-            ))
+              )}
+
+              {/* Completed video downloads */}
+              {completedVideoDownloads.map((d) => (
+                <TouchableOpacity
+                  key={d.id}
+                  style={styles.libraryRowItem}
+                  activeOpacity={0.7}
+                  onPress={() => handlePlayDownloadedVideo(d)}
+                >
+                  <View style={styles.libraryThumbWrapper}>
+                    {d.poster ? (
+                      <Image source={{ uri: d.poster }} style={styles.libraryThumbImg} />
+                    ) : (
+                      <View style={[styles.libraryThumbPlaceholder, { backgroundColor: '#222222' }]}>
+                        <Ionicons name="videocam" size={28} color="#FF0000" />
+                      </View>
+                    )}
+                    <View style={styles.thumbIconBadge}>
+                      <Ionicons name="checkmark-circle" size={13} color="#00e676" />
+                    </View>
+                  </View>
+                  <View style={styles.libraryItemMeta}>
+                    <Text style={styles.libraryItemTitle} numberOfLines={1}>{d.title}</Text>
+                    <Text style={styles.libraryItemSubtitle}>
+                      {downloadService.formatBytes(d.totalBytes || d.downloadedBytes)} • Ready to watch offline
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.rowDotsBtn}
+                    onPress={() => handleExportDownload(d)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons name="share-outline" size={18} color="#888888" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.rowDotsBtn}
+                    onPress={() => handleDeleteDownload(d)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#ff453a" />
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              ))}
+            </>
           )
         ) : (
-          <>
-            {/* 1. Liked videos */}
-            <TouchableOpacity
-              style={styles.libraryRowItem}
-              activeOpacity={0.7}
-              onPress={() => openPlaylist('Liked videos', likedList.length > 0 ? likedList : historyList.slice(0, 5))}
-            >
-              <View style={styles.libraryThumbWrapper}>
-                <Image source={{ uri: likedThumbnail }} style={styles.libraryThumbImg} />
-                <View style={styles.thumbIconBadge}>
-                  <Ionicons name="thumbs-up" size={12} color="#ffffff" />
-                </View>
-              </View>
-              <View style={styles.libraryItemMeta}>
-                <Text style={styles.libraryItemTitle} numberOfLines={1}>Liked videos</Text>
-                <Text style={styles.libraryItemSubtitle}>
-                  Private {likedList.length > 0 ? `· ${likedList.length} videos` : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.rowDotsBtn}
-                onPress={() => openPlaylist('Liked videos', likedList.length > 0 ? likedList : historyList.slice(0, 5))}
-              >
-                <Ionicons name="ellipsis-vertical" size={18} color="#888888" />
-              </TouchableOpacity>
-            </TouchableOpacity>
-
-            {/* 2. Saved Shorts */}
-            <TouchableOpacity
-              style={styles.libraryRowItem}
-              activeOpacity={0.7}
-              onPress={() => openPlaylist('Saved Shorts', savedShortsList.length > 0 ? savedShortsList : historyList.filter((h) => h.isShort))}
-            >
-              <View style={styles.libraryThumbWrapper}>
-                <Image source={{ uri: shortsThumbnail }} style={styles.libraryThumbImg} />
-                <View style={styles.thumbIconBadge}>
-                  <Ionicons name="flash" size={12} color="#ffffff" />
-                </View>
-              </View>
-              <View style={styles.libraryItemMeta}>
-                <Text style={styles.libraryItemTitle} numberOfLines={1}>Saved Shorts</Text>
-                <Text style={styles.libraryItemSubtitle}>
-                  Private {savedShortsList.length > 0 ? `· ${savedShortsList.length} shorts` : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.rowDotsBtn}
-                onPress={() => openPlaylist('Saved Shorts', savedShortsList.length > 0 ? savedShortsList : historyList.filter((h) => h.isShort))}
-              >
-                <Ionicons name="ellipsis-vertical" size={18} color="#888888" />
-              </TouchableOpacity>
-            </TouchableOpacity>
-
-            {/* 3. My List / Custom Playlists */}
-            <TouchableOpacity
-              style={styles.libraryRowItem}
-              activeOpacity={0.7}
-              onPress={() => openPlaylist('My List', myList)}
-            >
-              <View style={styles.libraryThumbWrapper}>
-                <Image source={{ uri: myListThumbnail }} style={styles.libraryThumbImg} />
-                <View style={styles.thumbIconBadge}>
-                  <Ionicons name="bookmark" size={12} color="#ffffff" />
-                </View>
-              </View>
-              <View style={styles.libraryItemMeta}>
-                <Text style={styles.libraryItemTitle} numberOfLines={1}>My List</Text>
-                <Text style={styles.libraryItemSubtitle}>
-                  Private · {myList.length} {myList.length === 1 ? 'video' : 'videos'}
-                </Text>
-              </View>
-              <TouchableOpacity style={styles.rowDotsBtn} onPress={() => openPlaylist('My List', myList)}>
-                <Ionicons name="ellipsis-vertical" size={18} color="#888888" />
-              </TouchableOpacity>
-            </TouchableOpacity>
-
-            {/* 4. Google Account Playlists (if any) */}
-            {onlinePlaylists.map((pl, idx) => (
-              <TouchableOpacity
-                key={pl.id || `pl_${idx}`}
-                style={styles.libraryRowItem}
-                activeOpacity={0.7}
-                onPress={() => {
-                  youTubeService.searchWithContinuation(pl.title || 'Playlist').then((res) => {
-                    openPlaylist(pl.title || 'Playlist', res.videos);
-                  });
-                }}
-              >
-                <View style={styles.libraryThumbWrapper}>
-                  {pl.thumbnail ? (
-                    <Image source={{ uri: pl.thumbnail }} style={styles.libraryThumbImg} />
-                  ) : (
-                    <View style={[styles.libraryThumbPlaceholder, { backgroundColor: '#1E1E1E' }]}>
-                      <Ionicons name="list" size={24} color="#ffffff" />
-                    </View>
-                  )}
-                  <View style={styles.thumbIconBadge}>
-                    <Ionicons name="list" size={12} color="#ffffff" />
+          /* MUSIC TAB */
+          musicDownloads.length === 0 ? (
+            <View style={styles.emptyLibraryBox}>
+              <Ionicons name="musical-notes-outline" size={38} color="#555555" />
+              <Text style={styles.emptyLibraryTitle}>No Music Downloads</Text>
+              <Text style={styles.emptyLibrarySub}>Downloaded MP3 tracks and audio will appear here for offline listening</Text>
+            </View>
+          ) : (
+            <>
+              {/* Music Player Hero */}
+              {completedMusicDownloads.length > 0 && (
+                <TouchableOpacity
+                  style={styles.musicHeroBanner}
+                  onPress={() => handlePlayDownloadedAudio(completedMusicDownloads[0])}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.musicHeroIconWrap, { backgroundColor: '#FF0000' }]}>
+                    <Ionicons name="disc" size={24} color="#ffffff" />
                   </View>
+                  <View style={styles.musicHeroTextWrap}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.musicHeroTitle}>Music Player</Text>
+                      <View style={styles.musicHeroBadge}>
+                        <Text style={styles.musicHeroBadgeText}>{completedMusicDownloads.length} Songs</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.musicHeroSub} numberOfLines={1}>
+                      Play downloaded MP3 tracks with audio visualizer & background playback
+                    </Text>
+                  </View>
+                  <Ionicons name="play-circle" size={32} color="#00e5ff" />
+                </TouchableOpacity>
+              )}
+
+              {/* Active in-progress audio downloads */}
+              {activeMusicDownloads.length > 0 && (
+                <View style={{ marginBottom: 14 }}>
+                  <Text style={styles.subSectionTitle}>In Progress ({activeMusicDownloads.length})</Text>
+                  {activeMusicDownloads.map((item) => (
+                    <View key={item.id} style={styles.activeCard}>
+                      {item.poster ? (
+                        <Image source={{ uri: item.poster }} style={styles.activePoster} />
+                      ) : (
+                        <View style={[styles.activePoster, styles.posterFallback]}>
+                          <Ionicons name="musical-notes" size={24} color="#00e5ff" />
+                        </View>
+                      )}
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.activeTitle} numberOfLines={1}>{item.title}</Text>
+                        <Text style={styles.activeMeta}>
+                          {downloadService.formatBytes(item.downloadedBytes)} / {downloadService.formatBytes(item.totalBytes)} • {Math.round(item.progress)}%
+                        </Text>
+                        <View style={styles.activeBtnRow}>
+                          <TouchableOpacity
+                            style={[styles.smallBtn, { backgroundColor: '#333333' }]}
+                            onPress={() => handleTogglePause(item)}
+                          >
+                            <Text style={styles.smallBtnText}>{item.status === 'downloading' ? 'Pause' : 'Resume'}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.smallBtn, { backgroundColor: 'rgba(255, 69, 58, 0.2)' }]}
+                            onPress={() => handleDeleteDownload(item)}
+                          >
+                            <Text style={[styles.smallBtnText, { color: '#ff453a' }]}>Cancel</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
                 </View>
-                <View style={styles.libraryItemMeta}>
-                  <Text style={styles.libraryItemTitle} numberOfLines={1}>{pl.title}</Text>
-                  <Text style={styles.libraryItemSubtitle}>Public · Playlist</Text>
-                </View>
-                <Ionicons name="ellipsis-vertical" size={18} color="#888888" />
-              </TouchableOpacity>
-            ))}
-          </>
+              )}
+
+              {/* Completed music downloads */}
+              {completedMusicDownloads.map((d) => (
+                <TouchableOpacity
+                  key={d.id}
+                  style={styles.libraryRowItem}
+                  activeOpacity={0.7}
+                  onPress={() => handlePlayDownloadedAudio(d)}
+                >
+                  <View style={styles.libraryThumbWrapper}>
+                    {d.poster ? (
+                      <Image source={{ uri: d.poster }} style={styles.libraryThumbImg} />
+                    ) : (
+                      <View style={[styles.libraryThumbPlaceholder, { backgroundColor: '#1a2228' }]}>
+                        <Ionicons name="musical-notes" size={26} color="#00e5ff" />
+                      </View>
+                    )}
+                    <View style={[styles.thumbIconBadge, { backgroundColor: '#00e5ff' }]}>
+                      <Ionicons name="musical-note" size={11} color="#000000" />
+                    </View>
+                  </View>
+                  <View style={styles.libraryItemMeta}>
+                    <Text style={styles.libraryItemTitle} numberOfLines={1}>{d.title}</Text>
+                    <Text style={styles.libraryItemSubtitle}>
+                      {downloadService.formatBytes(d.totalBytes || d.downloadedBytes)} • MP3 Audio
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.rowDotsBtn}
+                    onPress={() => handleExportDownload(d)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons name="share-outline" size={18} color="#888888" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.rowDotsBtn}
+                    onPress={() => handleDeleteDownload(d)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#ff453a" />
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              ))}
+            </>
+          )
         )}
       </View>
 
@@ -698,7 +802,7 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
                 style={styles.actionSheetRow}
                 onPress={() => {
                   setIsHistoryActionSheetVisible(false);
-                  if (selectedHistoryItem) onPlayVideo(selectedHistoryItem);
+                  if (selectedHistoryItem && onPlayVideo) onPlayVideo(selectedHistoryItem);
                 }}
               >
                 <Ionicons name="play-circle-outline" size={22} color="#ffffff" style={styles.actionSheetIcon} />
@@ -718,7 +822,7 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
                 style={styles.actionSheetRow}
                 onPress={() => {
                   setIsHistoryActionSheetVisible(false);
-                  if (selectedHistoryItem) onDownloadVideo(selectedHistoryItem);
+                  if (selectedHistoryItem && onDownloadVideo) onDownloadVideo(selectedHistoryItem);
                 }}
               >
                 <Ionicons name="arrow-down-circle-outline" size={22} color="#ffffff" style={styles.actionSheetIcon} />
@@ -739,7 +843,7 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
         </View>
       </Modal>
 
-      {/* ── Modal: Playlist Viewer (Liked Videos, Saved Shorts, My List) ── */}
+      {/* ── Modal: Playlist Viewer (Watch History) ── */}
       <Modal
         visible={isPlaylistModalVisible}
         transparent={true}
@@ -785,7 +889,7 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
                     activeOpacity={0.7}
                     onPress={() => {
                       setIsPlaylistModalVisible(false);
-                      onPlayVideo(item);
+                      if (onPlayVideo) onPlayVideo(item);
                     }}
                   >
                     <Image source={{ uri: item.thumbnail }} style={styles.playlistVideoThumb} />
@@ -801,7 +905,7 @@ export const YouTubeYouScreen: React.FC<YouTubeYouScreenProps> = ({
                       style={{ padding: 6 }}
                       onPress={() => {
                         setIsPlaylistModalVisible(false);
-                        onPlayVideo(item);
+                        if (onPlayVideo) onPlayVideo(item);
                       }}
                     >
                       <Ionicons name="play-circle" size={24} color="#ffffff" />
@@ -834,23 +938,15 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 10 : 16,
     paddingBottom: 12,
   },
-  accountsBtn: {
+  headerLeftRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#272727',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
+    gap: 10,
   },
-  accountsBtnText: {
+  headerTitleText: {
     color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  topHeaderRightIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    fontSize: 18,
+    fontWeight: '700',
   },
   iconCircleBtn: {
     width: 38,
@@ -858,24 +954,7 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
-  },
-  notifBadge: {
-    position: 'absolute',
-    top: 2,
-    right: 1,
-    backgroundColor: '#cc0000',
-    borderRadius: 9,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    minWidth: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notifBadgeText: {
-    color: '#ffffff',
-    fontSize: 9,
-    fontWeight: '800',
+    backgroundColor: '#1f1f1f',
   },
   // ── Profile Section ──
   profileSection: {
@@ -1013,32 +1092,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  viewChannelBtn: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    height: 38,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  viewChannelBtnText: {
-    color: '#0f0f0f',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  getPremiumBtn: {
-    flex: 1,
-    backgroundColor: '#272727',
-    height: 38,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  getPremiumBtnText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
   // ── Section Headers ──
   sectionHeaderRow: {
     paddingHorizontal: 16,
@@ -1142,21 +1195,20 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   // ── Library Section ──
-  filterPillsScroll: {
-    maxHeight: 46,
-    marginBottom: 8,
-  },
-  filterPillsContent: {
+  filterPillsRow: {
+    flexDirection: 'row',
     paddingHorizontal: 16,
-    gap: 8,
+    gap: 10,
+    marginBottom: 12,
   },
   filterPill: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#272727',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
   },
   filterPillSelected: {
     backgroundColor: '#ffffff',
@@ -1169,19 +1221,92 @@ const styles = StyleSheet.create({
   filterPillTextSelected: {
     color: '#0f0f0f',
   },
+  pillBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginLeft: 6,
+  },
+  pillBadgeSelected: {
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+  },
+  pillBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  pillBadgeTextSelected: {
+    color: '#000000',
+  },
   libraryListContainer: {
     paddingHorizontal: 16,
-    marginTop: 10,
-    gap: 14,
+    marginTop: 6,
+    gap: 12,
+  },
+  subSectionTitle: {
+    color: '#888888',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  activeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1c1c1e',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 8,
+  },
+  activePoster: {
+    width: 60,
+    height: 60,
+    borderRadius: 6,
+    backgroundColor: '#2a2a2a',
+  },
+  posterFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeTitle: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  activeMeta: {
+    color: '#888888',
+    fontSize: 11,
+    marginTop: 3,
+  },
+  activeBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  smallBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  smallBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '600',
   },
   libraryRowItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#181818',
+    borderRadius: 10,
+    padding: 10,
   },
   libraryThumbWrapper: {
-    width: 138,
-    height: 78,
-    borderRadius: 10,
+    width: 100,
+    height: 60,
+    borderRadius: 8,
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#1e1e1e',
@@ -1199,28 +1324,28 @@ const styles = StyleSheet.create({
   },
   thumbIconBadge: {
     position: 'absolute',
-    bottom: 6,
-    right: 6,
+    bottom: 4,
+    right: 4,
     backgroundColor: 'rgba(0,0,0,0.85)',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
+    borderRadius: 10,
+    width: 20,
+    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
   libraryItemMeta: {
     flex: 1,
-    marginLeft: 14,
+    marginLeft: 12,
     justifyContent: 'center',
   },
   libraryItemTitle: {
     color: '#ffffff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
   },
   libraryItemSubtitle: {
     color: '#aaaaaa',
-    fontSize: 13,
+    fontSize: 12,
     marginTop: 3,
   },
   rowDotsBtn: {
@@ -1230,6 +1355,9 @@ const styles = StyleSheet.create({
     paddingVertical: 36,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#161616',
+    borderRadius: 12,
+    paddingHorizontal: 20,
   },
   emptyLibraryTitle: {
     color: '#ffffff',
@@ -1242,6 +1370,48 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
     textAlign: 'center',
+  },
+  musicHeroBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 229, 255, 0.08)',
+    borderColor: 'rgba(0, 229, 255, 0.35)',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+  },
+  musicHeroIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  musicHeroTextWrap: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  musicHeroTitle: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  musicHeroBadge: {
+    backgroundColor: 'rgba(0, 229, 255, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+  },
+  musicHeroBadgeText: {
+    color: '#00e5ff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  musicHeroSub: {
+    color: '#aaaaaa',
+    fontSize: 11,
+    marginTop: 2,
   },
   // ── Action Sheet Modal ──
   actionSheetBackdrop: {

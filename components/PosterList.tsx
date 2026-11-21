@@ -59,11 +59,15 @@ const PosterItem = ({
   posterWidth,
   posterHeight,
   spacing,
+  showTitle = false,
+  showYear = false,
 }: {
   item: PosterItemData;
   posterWidth: number;
   posterHeight: number;
   spacing: number;
+  showTitle?: boolean;
+  showYear?: boolean;
 }) => {
   const [imgError, setImgError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
@@ -142,10 +146,12 @@ const PosterItem = ({
 
 
       </View>
-      <Text numberOfLines={2} style={[styles.posterTitle, { width: posterWidth }]}>
-        {item.name}
-      </Text>
-      {item.year ? <Text style={styles.posterYear}>{item.year}</Text> : null}
+      {showTitle && (
+        <Text numberOfLines={2} style={[styles.posterTitle, { width: posterWidth }]}>
+          {item.name}
+        </Text>
+      )}
+      {showYear && item.year ? <Text style={styles.posterYear}>{item.year}</Text> : null}
     </Pressable>
   );
 };
@@ -156,15 +162,23 @@ const SkeletonPoster = ({
   posterWidth,
   posterHeight,
   spacing,
+  showTitle = false,
+  showYear = false,
 }: {
   posterWidth: number;
   posterHeight: number;
   spacing: number;
+  showTitle?: boolean;
+  showYear?: boolean;
 }) => (
   <RNView style={[styles.posterContainer, { width: posterWidth, marginRight: spacing }]}>
     <RNView style={[styles.posterImage, styles.skeletonPoster, { width: posterWidth, height: posterHeight }]} />
-    <RNView style={[styles.skeletonText, { width: posterWidth * 0.85, marginTop: 10 }]} />
-    <RNView style={[styles.skeletonText, { width: posterWidth * 0.5, marginTop: 6, height: 12 }]} />
+    {showTitle && (
+      <RNView style={[styles.skeletonText, { width: posterWidth * 0.85, marginTop: 10 }]} />
+    )}
+    {showYear && (
+      <RNView style={[styles.skeletonText, { width: posterWidth * 0.5, marginTop: 6, height: 12 }]} />
+    )}
   </RNView>
 );
 
@@ -178,6 +192,8 @@ interface PosterListProps {
   category: Category;
   loading?: boolean;
   hideSeeAll?: boolean;
+  showTitle?: boolean;
+  showYear?: boolean;
   onSeeAll?: (category: Category, title: string, language: Language) => void;
 }
 
@@ -189,6 +205,8 @@ const PosterList = ({
   category,
   loading = false,
   hideSeeAll = false,
+  showTitle = false,
+  showYear = false,
   onSeeAll,
 }: PosterListProps) => {
   const { width, height } = useWindowDimensions();
@@ -252,7 +270,13 @@ const PosterList = ({
           data={[1, 2, 3, 4, 5]}
           horizontal
           renderItem={() => (
-            <SkeletonPoster posterWidth={posterWidth} posterHeight={posterHeight} spacing={spacing} />
+            <SkeletonPoster
+              posterWidth={posterWidth}
+              posterHeight={posterHeight}
+              spacing={spacing}
+              showTitle={showTitle}
+              showYear={showYear}
+            />
           )}
           keyExtractor={(_, index) => `skeleton-${index}`}
           showsHorizontalScrollIndicator={false}
@@ -285,6 +309,8 @@ const PosterList = ({
             posterWidth={posterWidth}
             posterHeight={posterHeight}
             spacing={spacing}
+            showTitle={showTitle}
+            showYear={showYear}
           />
         )}
         keyExtractor={(item, index) => `${item.guid}-${index}`}
@@ -335,7 +361,7 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   posterContainer: {
-    marginBottom: 10,
+    marginBottom: 6,
   },
   posterPressed: {
     opacity: 0.7,
