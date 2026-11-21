@@ -32,7 +32,7 @@ import { StorageKeys, storageService } from '@/utils/StorageService';
 
 const { width } = Dimensions.get('window');
 
-export type ScreenFitMode = 'cover' | 'stretch' | 'contain';
+export type ScreenFitMode = 'cover' | 'stretch' | 'contain' | 'hero';
 
 export interface FeedbackPillData {
   label: string;
@@ -317,7 +317,7 @@ function parseVttToCues(vttText: string): SubtitleCue[] {
   return cues;
 }
 
-function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'cover', pipEnabled: boolean = true, isLooping: boolean = false, initialCCOn: boolean = false): string {
+function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'hero', pipEnabled: boolean = true, isLooping: boolean = false, initialCCOn: boolean = false): string {
   const topOffset = 10;
   const initialFitCss = fitMode === 'contain' ? 'contain' : fitMode === 'stretch' ? 'fill' : 'cover';
   return `
@@ -1738,7 +1738,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const effectiveTopInset = Math.max(topInset || 0, Platform.OS === 'ios' ? 44 : 24);
 
   const [showControls, setShowControls] = useState(false);
-  const [videoResizeMode, setVideoResizeMode] = useState<ScreenFitMode>(screenFitMode || 'cover');
+  const [videoResizeMode, setVideoResizeMode] = useState<ScreenFitMode>(screenFitMode || 'hero');
   const [feedbackPill, setFeedbackPill] = useState<FeedbackPillData | null>(null);
   const feedbackTimerRef = useRef<any>(null);
   const isFullScreenRef = useRef(isFullScreen);
@@ -1949,7 +1949,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [webQuality, setWebQuality] = useState('Auto');
   const [webSpeed, setWebSpeed] = useState(1.0);
   const [webLoop, setWebLoop] = useState(false);
-  const [webResizeMode, setWebResizeMode] = useState<ScreenFitMode>(screenFitMode || 'cover');
+  const [webResizeMode, setWebResizeMode] = useState<ScreenFitMode>(screenFitMode || 'hero');
   const [modalSliderPos, setModalSliderPos] = useState<number | null>(null);
 
   const isWebActive = (useWebFallback || (playbackError && !streamUrl)) && !!videoId;
@@ -2429,6 +2429,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const cycleScreenFitMode = useCallback((current: ScreenFitMode): ScreenFitMode => {
     switch (current) {
       case 'cover':
+        return 'hero';
+      case 'hero':
         return 'contain';
       case 'contain':
         return 'stretch';
@@ -2445,6 +2447,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       }
       setVideoResizeMode(next);
       setWebResizeMode(next);
+      try {
+        storageService.setItem('@youtube_screen_fit_mode', next);
+      } catch (_) {}
       onScreenFitChange?.(next);
 
       if (isWebActive) {
@@ -2485,6 +2490,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       } else if (next === 'contain') {
         label = 'Original (Fit)';
         icon = 'contract-outline';
+      } else if (next === 'hero') {
+        label = 'Hero Banner';
+        icon = 'film-outline';
       }
       setFeedbackPill({ label, icon, mode: next });
       feedbackTimerRef.current = setTimeout(() => {
@@ -2755,9 +2763,18 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     [effectiveTopInset, videoResizeMode, isPipEnabled, effectiveLoop, isCCOn]
   );
 
+  const isHeroMode = effectiveResizeMode === 'hero' && !isFullScreen;
+  const heroHeight = Math.round((width * 9 / 16) + effectiveTopInset);
+
   return (
     <View
-      style={isFullScreen ? styles.containerFullScreen : styles.container}
+      style={[
+        isFullScreen
+          ? styles.containerFullScreen
+          : isHeroMode
+          ? [styles.containerHero, { height: heroHeight, width: '100%', maxWidth: '100%' }]
+          : styles.container,
+      ]}
       {...panResponder.panHandlers}
     >
       {isWebActive ? (
@@ -3138,9 +3155,16 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       {/* Controls Overlay (native player only) */}
       {showControls && (
         <View style={[styles.controlsOverlay, isFullScreen && styles.controlsOverlayFullScreen]} pointerEvents="box-none">
-          {/* Top Bar: Clean YouTube Icons (CC, Settings) */}
-          <View style={styles.topBar}>
-            <View style={{ width: 38, height: 38 }} />
+          {/* Top Bar: Back button on left, PiP + CC + Settings on right */}
+          <View style={[styles.topBar, isHeroMode && { paddingTop: Platform.OS === 'ios' ? 42 : 24 }]}>
+            <TouchableOpacity
+              style={styles.topBackBtn}
+              onPress={onMinimize}
+              activeOpacity={0.7}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Ionicons name="arrow-back" size={22} color="#ffffff" />
+            </TouchableOpacity>
 
             <View style={styles.topBarRight}>
               {/* Picture-in-Picture Button */}
@@ -3231,7 +3255,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       {/* Center Playback Controls: Real YouTube Circular Controls - ALWAYS Perfectly Centered */}
       {showControls && (
         <View
-          style={styles.centerControls}
+          style={[
+            styles.centerControls,
+            isHeroMode && { paddingTop: effectiveTopInset },
+          ]}
           pointerEvents="box-none"
         >
           {/* Previous Track / Skip Backward */}
@@ -3347,20 +3374,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         </View>
       )}
 
-      {/* Go Back Left Arrow Icon: In front of the inline player at left corner, only when controls are active */}
-      {showControls && (
-        <TouchableOpacity
-          style={[
-            styles.floatingBackBtn,
-            { top: isFullScreen ? 16 : 12, left: 12 },
-          ]}
-          onPress={onMinimize}
-          activeOpacity={0.7}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Ionicons name="arrow-back" size={22} color="#ffffff" />
-        </TouchableOpacity>
-      )}
+
 
       {/* Native Floating "Skip Ad" Button (Active in both Inline & Fullscreen, always topmost) */}
       {isAdPlaying && (
@@ -3570,7 +3584,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                           : undefined,
                       ]}
                     >
-                      {effectiveResizeMode === 'cover'
+                      {effectiveResizeMode === 'hero'
+                        ? 'Hero Banner'
+                        : effectiveResizeMode === 'cover'
                         ? 'Fit to Screen (Normal)'
                         : effectiveResizeMode === 'stretch'
                         ? 'Stretch to Screen'
@@ -3762,6 +3778,13 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
                 <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
                   {[
+                    {
+                      id: 'hero' as ScreenFitMode,
+                      title: 'Hero Banner (Dynamic Island Fill)',
+                      desc: 'Extends video to the very top covering iPhone Dynamic Island & status bar',
+                      icon: 'film-outline' as const,
+                      color: '#FF0000',
+                    },
                     {
                       id: 'cover' as ScreenFitMode,
                       title: 'Fit to Screen (Normal Mode)',
@@ -3983,10 +4006,26 @@ const styles = StyleSheet.create({
   },
   container: {
     width: '100%',
+    maxWidth: '100%',
     aspectRatio: 16 / 9,
     backgroundColor: '#000000',
     position: 'relative',
     overflow: 'hidden',
+  },
+  containerHero: {
+    width: '100%',
+    maxWidth: '100%',
+    backgroundColor: '#000000',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  topBackBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   containerFullScreen: {
     position: 'absolute',
@@ -4191,6 +4230,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     width: '100%',
+    maxWidth: '100%',
     height: '100%',
     flexDirection: 'row',
     justifyContent: 'center',

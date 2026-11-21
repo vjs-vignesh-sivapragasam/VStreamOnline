@@ -210,6 +210,38 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
     );
   };
 
+  // Clear YouTube Watch History
+  const handleClearYouTubeHistory = () => {
+    Alert.alert(
+      'Clear YouTube Watch History?',
+      `Are you sure you want to remove all ${stats?.youtubeHistoryCount || 0} watched videos from your history?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear History',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setActionInProgress('youtube_history');
+              if (await isHapticsSupported()) {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              }
+              await storageCleanupService.clearYouTubeHistory();
+              await loadStats();
+              if (await isHapticsSupported()) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              }
+            } catch (err) {
+              console.warn('[StorageCleanupCard] Error clearing YouTube history:', err);
+            } finally {
+              setActionInProgress(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // 5. Deep Clean Everything
   const handleClearEverything = () => {
     Alert.alert(
@@ -403,6 +435,35 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
           </View>
           {actionInProgress === 'mylist' ? (
             <ActivityIndicator size="small" color="#af52de" />
+          ) : (
+            <View style={styles.actionPill}>
+              <Text style={styles.actionPillText}>Clear</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <View style={styles.listDivider} />
+
+                {/* YouTube Watch History */}
+        <TouchableOpacity
+          style={styles.listItem}
+          onPress={handleClearYouTubeHistory}
+          disabled={actionInProgress !== null}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.itemIcon, { backgroundColor: '#ff00001C' }]}>
+            <Ionicons name="time" size={18} color="#FF0000" />
+          </View>
+          <View style={styles.itemContent}>
+            <Text style={styles.itemTitle}>YouTube Watch History</Text>
+            <Text style={styles.itemSub}>
+              {(stats?.youtubeHistoryCount || 0) > 0
+                ? `${stats?.youtubeHistoryCount} watched videos`
+                : 'Empty'}
+            </Text>
+          </View>
+          {actionInProgress === 'youtube_history' ? (
+            <ActivityIndicator size="small" color="#FF0000" />
           ) : (
             <View style={styles.actionPill}>
               <Text style={styles.actionPillText}>Clear</Text>

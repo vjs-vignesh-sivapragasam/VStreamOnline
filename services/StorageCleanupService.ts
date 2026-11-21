@@ -2,6 +2,7 @@ import { Paths, Directory, File } from 'expo-file-system';
 import { downloadService } from '@/services/DownloadService';
 import { myListService } from '@/services/MyListService';
 import { youTubeListService } from '@/services/YouTubeListService';
+import { youTubeHistoryService } from '@/services/YouTubeHistoryService';
 import { tmdbService } from '@/services/TmdbService';
 
 export interface StorageStats {
@@ -13,6 +14,7 @@ export interface StorageStats {
   cacheBytes: number;
   tamilmvMyListCount: number;
   youtubeMyListCount: number;
+  youtubeHistoryCount: number;
   totalStorageUsedBytes: number;
 }
 
@@ -73,6 +75,7 @@ class StorageCleanupService {
 
     const tamilmvMyList = myListService.getMyList();
     const youtubeMyList = youTubeListService.getSavedList();
+    const youtubeHistory = youTubeHistoryService.getLocalHistory();
 
     const totalDownloadsBytes = tamilmvDownloadsBytes + youtubeDownloadsBytes;
     const totalStorageUsedBytes = totalDownloadsBytes + cacheBytes;
@@ -86,6 +89,7 @@ class StorageCleanupService {
       cacheBytes,
       tamilmvMyListCount: tamilmvMyList.length,
       youtubeMyListCount: youtubeMyList.length,
+      youtubeHistoryCount: youtubeHistory.length,
       totalStorageUsedBytes,
     };
   }
@@ -117,6 +121,11 @@ class StorageCleanupService {
   // Clear TamilMV downloads
   async clearTamilMVDownloads(): Promise<void> {
     await downloadService.clearTamilMVDownloads();
+  }
+
+  // Clear YouTube Watch History
+  async clearYouTubeHistory(): Promise<void> {
+    await youTubeHistoryService.clearHistory();
   }
 
   // Clear YouTube downloads
@@ -156,6 +165,7 @@ class StorageCleanupService {
       this.clearAllDownloads(),
       this.clearCache(),
       this.clearAllMyLists(),
+      this.clearYouTubeHistory(),
     ]);
 
     return { freedBytes };

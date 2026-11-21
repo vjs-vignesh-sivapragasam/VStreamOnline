@@ -191,6 +191,35 @@ export default function YouTubeSettingsScreen() {
     setIsPlaylistModalVisible(true);
   };
 
+  const handleClearHistory = () => {
+    Alert.alert(
+      'Clear Watch History?',
+      'This will remove all videos and Shorts from your watch history.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear History',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (await isHapticsSupported()) {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              }
+              await youTubeHistoryService.clearHistory();
+              setHistoryList([]);
+              setActivePlaylistVideos([]);
+              if (await isHapticsSupported()) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              }
+            } catch (err) {
+              console.warn('[youtubeSettings] Clear history error:', err);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleHistoryMenuPress = (item: YouTubeHistoryItem) => {
     setSelectedHistoryItem(item);
     setIsHistoryActionSheetVisible(true);
@@ -547,6 +576,18 @@ export default function YouTubeSettingsScreen() {
             )}
             <Ionicons name="chevron-forward" size={18} color="#ffffff" style={{ marginLeft: 4 }} />
           </TouchableOpacity>
+
+          {historyList.length > 0 && (
+            <TouchableOpacity
+              style={styles.clearHistoryHeaderBtn}
+              onPress={handleClearHistory}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="trash-outline" size={16} color="#ff453a" />
+              <Text style={styles.clearHistoryHeaderText}>Clear</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {historyList.length === 0 ? (
@@ -1109,6 +1150,19 @@ export default function YouTubeSettingsScreen() {
                 <Text style={styles.playlistModalTitle}>{activePlaylistTitle}</Text>
                 <Text style={styles.playlistModalCount}>{activePlaylistVideos.length} items</Text>
               </View>
+
+              {activePlaylistTitle === 'Watch History' && activePlaylistVideos.length > 0 && (
+                <TouchableOpacity
+                  style={styles.playlistModalClearBtn}
+                  onPress={handleClearHistory}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={17} color="#ff453a" />
+                  <Text style={styles.playlistModalClearText}>Clear All</Text>
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity
                 style={styles.playlistModalCloseBtn}
                 onPress={() => setIsPlaylistModalVisible(false)}
@@ -1376,9 +1430,45 @@ const styles = StyleSheet.create({
   },
   // ── History Section ──
   sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     marginTop: 20,
     marginBottom: 12,
+  },
+  clearHistoryHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 69, 58, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.25)',
+  },
+  clearHistoryHeaderText: {
+    color: '#ff453a',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  playlistModalClearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 69, 58, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 58, 0.25)',
+    marginRight: 10,
+  },
+  playlistModalClearText: {
+    color: '#ff453a',
+    fontSize: 12,
+    fontWeight: '600',
   },
   sectionTitleRow: {
     flexDirection: 'row',

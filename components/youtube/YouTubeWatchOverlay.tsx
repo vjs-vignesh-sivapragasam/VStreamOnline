@@ -269,7 +269,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [activeDownloadItem, setActiveDownloadItem] = useState<YouTubeVideoItem | null>(null);
   const insets = useSafeAreaInsets();
-  const [screenFitMode, setScreenFitMode] = useState<ScreenFitMode>('cover');
+  const [screenFitMode, setScreenFitMode] = useState<ScreenFitMode>('hero');
   const [modalVideoDetails, setModalVideoDetails] = useState<YouTubeVideoDetails | null>(null);
   const [activeDownload, setActiveDownload] = useState<DownloadItem | null>(null);
 
@@ -630,7 +630,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
         pointerEvents={isMinimized ? 'none' : 'auto'}
       >
         {!isMinimized && <StatusBar style="light" hidden={isFullScreen} />}
-        <View style={isFullScreen ? styles.safeAreaFullScreen : [styles.safeArea, { paddingTop: insets.top }]}>
+        <View style={isFullScreen ? styles.safeAreaFullScreen : [styles.safeArea, { paddingTop: screenFitMode === 'hero' ? 0 : insets.top }]}>
           {/* Top Video Player: in fullscreen it covers edge-to-edge completely */}
           <View style={isFullScreen ? styles.fullScreenPlayerContainer : styles.playerContainer}>
           <YouTubeInlinePlayer
@@ -1259,6 +1259,8 @@ const styles = StyleSheet.create({
   },
   playerContainer: {
     width: '100%',
+    maxWidth: '100%',
+    overflow: 'hidden',
   },
   fullScreenPlayerContainer: {
     position: 'absolute',
