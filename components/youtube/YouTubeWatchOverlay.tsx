@@ -654,7 +654,7 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             onPause={pauseVideo}
             onMinimize={isFullScreen ? () => handleFullScreen(false) : handleGoBackPrevious}
             onSwipeExit={isFullScreen ? () => handleFullScreen(false) : handleGoBackPrevious}
-            onFullScreen={() => handleFullScreen()}
+            onFullScreen={(forced) => handleFullScreen(forced)}
             onSeek={seekTo}
             onClearSeekTarget={clearSeekTarget}
             onProgress={updateProgress}
@@ -1254,7 +1254,7 @@ const styles = StyleSheet.create({
     zIndex: 99999,
   },
   hiddenOverlay: {
-    opacity: 0,
+    opacity: 0.001,
     zIndex: -1,
   },
   playerContainer: {

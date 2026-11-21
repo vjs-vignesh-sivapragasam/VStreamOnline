@@ -15,6 +15,7 @@ import {
   AppState,
   AppStateStatus,
   Switch,
+  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Video, { VideoRef, ResizeMode, SelectedTrackType } from 'react-native-video';
@@ -67,7 +68,7 @@ export interface YouTubeInlinePlayerProps {
   onPlay?: () => void;
   onPause?: () => void;
   onMinimize: () => void;
-  onFullScreen: () => void;
+  onFullScreen: (forced?: boolean) => void;
   onSeek: (seconds: number) => void;
   onClearSeekTarget: () => void;
   onProgress: (currentTime: number, duration: number) => void;
@@ -1120,9 +1121,9 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
 
         // DELIBERATE SWIPE ONLY (70ms to 550ms flick duration)
         // Normal taps (movement < 20px) or slow drags will NEVER trigger fullscreen!
-        if (dTime < 550 && dTime > 70) {
+        if (dTime < 750 && dTime > 40) {
           // 1. Vertical swipe up -> Fullscreen (requires at least 55px upward flick and clear vertical dominance)
-          if (dY < -55 && absY > absX * 1.5) {
+          if (dY < -35 && absY > absX * 1.2) {
             if (window.ReactNativeWebView) {
               window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'SWIPE_UP_FULLSCREEN'
@@ -1132,7 +1133,7 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'c
           }
 
           // 2. Vertical swipe down -> Minimize / exit fullscreen (requires at least 55px downward flick)
-          if (dY > 55 && absY > absX * 1.5) {
+          if (dY > 35 && absY > absX * 1.2) {
             if (window.ReactNativeWebView) {
               window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'SWIPE_DOWN_MINIMIZE'
@@ -1740,6 +1741,72 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const [videoResizeMode, setVideoResizeMode] = useState<ScreenFitMode>(screenFitMode || 'cover');
   const [feedbackPill, setFeedbackPill] = useState<FeedbackPillData | null>(null);
   const feedbackTimerRef = useRef<any>(null);
+  const isFullScreenRef = useRef(isFullScreen);
+  useEffect(() => {
+    isFullScreenRef.current = isFullScreen;
+  }, [isFullScreen]);
+
+  const triggerFeedbackPill = useCallback((label: string, icon: keyof typeof Ionicons.glyphMap) => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    setFeedbackPill({ label, icon });
+    feedbackTimerRef.current = setTimeout(() => {
+      setFeedbackPill(null);
+    }, 1500);
+  }, []);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          if (isSlidingRef.current) return false;
+          const { dx, dy } = gestureState;
+          return Math.abs(dy) > 20 && Math.abs(dy) > Math.abs(dx) * 1.3;
+        },
+        onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+          if (isSlidingRef.current) return false;
+          const { dx, dy } = gestureState;
+          return Math.abs(dy) > 20 && Math.abs(dy) > Math.abs(dx) * 1.3;
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (isSlidingRef.current) return;
+          const { dx, dy } = gestureState;
+          const absX = Math.abs(dx);
+          const absY = Math.abs(dy);
+
+          // Calibrated vertical swipe gesture (at least 35px vertical travel)
+          if (absY > 35 && absY > absX * 1.2) {
+            if (dy < 0) {
+              // ⬆️ Swipe Up: Enter Fullscreen
+              if (!isFullScreenRef.current) {
+                if (isHapticsSupported()) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                }
+                triggerFeedbackPill('Full screen', 'scan-outline');
+                onFullScreen(true);
+              }
+            } else {
+              // ⬇️ Swipe Down: Exit Fullscreen back to normal mode
+              if (isFullScreenRef.current) {
+                if (isHapticsSupported()) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                }
+                triggerFeedbackPill('Exit full screen', 'contract-outline');
+                onFullScreen(false);
+              } else {
+                // In normal inline mode, swipe down minimizes the player
+                if (isHapticsSupported()) {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }
+                onMinimize();
+              }
+            }
+          }
+        },
+      }),
+    [onFullScreen, onMinimize, triggerFeedbackPill]
+  );
   const isSlidingRef = useRef(false);
   const [isSliding, setIsSliding] = useState(false);
   const [sliderPos, setSliderPos] = useState(0);
@@ -1870,6 +1937,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   });
 
   const isPipEnabled = propPipEnabled !== undefined ? propPipEnabled : internalPipEnabled;
+  const [isPipActive, setIsPipActive] = useState<boolean>(false);
+  const videoRef = useRef<VideoRef>(null);
+  const ksRef = useRef<KSPlayerRef>(null);
+  const webViewRef = useRef<any>(null);
 
   // Web player state for fallback mode
   const [webCurrentTime, setWebCurrentTime] = useState(0);
@@ -1911,23 +1982,31 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
       if (nextState === 'background' || nextState === 'inactive') {
-        if (isPipEnabled && effectiveIsPlaying && isWebActive && webViewRef.current) {
-          webViewRef.current.injectJavaScript(`
-            (function() {
-              if (window.__agyPipEnabled === false) return;
-              try {
-                var v = document.querySelector('video');
-                if (v && !v.paused) {
-                  if (document.pictureInPictureEnabled && !document.pictureInPictureElement) {
-                    v.requestPictureInPicture().catch(function(){});
-                  } else if (v.webkitSetPresentationMode) {
-                    v.webkitSetPresentationMode('picture-in-picture');
+        if (isPipEnabled && effectiveIsPlaying) {
+          if (isWebActive && webViewRef.current) {
+            webViewRef.current.injectJavaScript(`
+              (function() {
+                if (window.__agyPipEnabled === false) return;
+                try {
+                  var v = document.querySelector('video');
+                  if (v && !v.paused) {
+                    if (v.webkitSetPresentationMode) {
+                      v.webkitSetPresentationMode('picture-in-picture');
+                    } else if (document.pictureInPictureEnabled && !document.pictureInPictureElement) {
+                      v.requestPictureInPicture().catch(function(){});
+                    }
                   }
-                }
-              } catch(e) {}
-            })();
-            true;
-          `);
+                } catch(e) {}
+              })();
+              true;
+            `);
+          } else if (videoRef.current) {
+            try {
+              videoRef.current.enterPictureInPicture();
+            } catch (e) {
+              console.warn('[YouTubeInlinePlayer] Auto-PiP enterPictureInPicture error:', e);
+            }
+          }
         }
       }
     });
@@ -2141,6 +2220,50 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     }
   }, [isWebActive, onToggleLoop]);
 
+  const handleTriggerPiP = useCallback(async () => {
+    try {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+    } catch (_) {}
+
+    if (!isPipEnabled) {
+      setInternalPipEnabled(true);
+      try {
+        storageService.setItem(StorageKeys.YOUTUBE_PIP_ENABLED_KEY, 'true');
+      } catch (e) {}
+      onTogglePip?.(true);
+    }
+
+    if (isWebActive && webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        (function() {
+          try {
+            var v = document.querySelector('video');
+            if (v) {
+              if (v.webkitSetPresentationMode) {
+                v.webkitSetPresentationMode('picture-in-picture');
+              } else if (document.pictureInPictureEnabled && !document.pictureInPictureElement) {
+                v.requestPictureInPicture().catch(function(){});
+              }
+            }
+          } catch(e) {}
+        })();
+        true;
+      `);
+    } else if (videoRef.current) {
+      try {
+        if (isPipActive) {
+          videoRef.current.exitPictureInPicture();
+        } else {
+          videoRef.current.enterPictureInPicture();
+        }
+      } catch (e) {
+        console.warn('[YouTubeInlinePlayer] PiP toggle error:', e);
+      }
+    }
+  }, [isPipEnabled, isWebActive, isPipActive, onTogglePip]);
+
   const handleTogglePipFromModal = useCallback(async (explicitValue?: boolean) => {
     const nextVal = explicitValue !== undefined ? explicitValue : !isPipEnabled;
     try {
@@ -2157,16 +2280,54 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     }
     onTogglePip?.(nextVal);
 
-    if (isWebActive && webViewRef.current) {
-      webViewRef.current.injectJavaScript(`
-        (function() {
-          window.__agyPipEnabled = ${nextVal};
-          if (!${nextVal} && document.pictureInPictureElement) {
-            document.exitPictureInPicture().catch(function(){});
-          }
-        })();
-        true;
-      `);
+    if (nextVal) {
+      if (isWebActive && webViewRef.current) {
+        webViewRef.current.injectJavaScript(`
+          (function() {
+            window.__agyPipEnabled = true;
+            try {
+              var v = document.querySelector('video');
+              if (v) {
+                if (v.webkitSetPresentationMode) {
+                  v.webkitSetPresentationMode('picture-in-picture');
+                } else if (document.pictureInPictureEnabled && !document.pictureInPictureElement) {
+                  v.requestPictureInPicture().catch(function(){});
+                }
+              }
+            } catch(e) {}
+          })();
+          true;
+        `);
+      } else if (videoRef.current) {
+        try {
+          videoRef.current.enterPictureInPicture();
+        } catch (e) {
+          console.warn('[YouTubeInlinePlayer] enterPictureInPicture error:', e);
+        }
+      }
+    } else {
+      if (isWebActive && webViewRef.current) {
+        webViewRef.current.injectJavaScript(`
+          (function() {
+            window.__agyPipEnabled = false;
+            try {
+              if (document.pictureInPictureElement) {
+                document.exitPictureInPicture().catch(function(){});
+              } else {
+                var v = document.querySelector('video');
+                if (v && v.webkitSetPresentationMode) {
+                  v.webkitSetPresentationMode('inline');
+                }
+              }
+            } catch(e) {}
+          })();
+          true;
+        `);
+      } else if (videoRef.current) {
+        try {
+          videoRef.current.exitPictureInPicture();
+        } catch (e) {}
+      }
     }
   }, [isPipEnabled, isWebActive, onTogglePip]);
 
@@ -2186,9 +2347,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   }, [streamUrl]);
 
   const hideTimerRef = useRef<any>(null);
-  const videoRef = useRef<VideoRef>(null);
-  const ksRef = useRef<KSPlayerRef>(null);
-  const webViewRef = useRef<any>(null);
   const isPlayingRef = useRef(isPlaying);
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -2600,6 +2758,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   return (
     <View
       style={isFullScreen ? styles.containerFullScreen : styles.container}
+      {...panResponder.panHandlers}
     >
       {isWebActive ? (
         <WebView
@@ -2672,7 +2831,15 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               if (!data || typeof data !== 'object') return;
               if (data.type === 'GO_BACK') {
                 onMinimize();
-              } else if (data.type === 'SWIPE_UP_FULLSCREEN' || data.type === 'TOGGLE_FULLSCREEN') {
+              } else if (data.type === 'SWIPE_UP_FULLSCREEN') {
+                if (!isFullScreenRef.current) {
+                  if (isHapticsSupported()) {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  }
+                  triggerFeedbackPill('Full screen', 'scan-outline');
+                  onFullScreen(true);
+                }
+              } else if (data.type === 'TOGGLE_FULLSCREEN') {
                 if (isHapticsSupported()) {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }
@@ -2699,6 +2866,14 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   onProgress(cTime, dTime > 0 ? dTime : effectiveDuration);
                 }
               } else if (data.type === 'SWIPE_DOWN_MINIMIZE') {
+                if (isFullScreenRef.current) {
+                  if (isHapticsSupported()) {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  }
+                  triggerFeedbackPill('Exit full screen', 'contract-outline');
+                  onFullScreen(false);
+                  return;
+                }
                 onMinimize();
               } else if (data.type === 'SWIPE_EXIT') {
                 if (onSwipeExit) {
@@ -2796,6 +2971,16 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             playInBackground={true}
             playWhenInactive={true}
             enterPictureInPictureOnLeave={isPipEnabled}
+            allowsExternalPlayback={true}
+            preventsDisplaySleepDuringVideoPlayback={true}
+            onPictureInPictureStatusChanged={(e) => {
+              console.log('[YouTubeInlinePlayer] 📺 PiP status changed:', e.isActive);
+              setIsPipActive(e.isActive);
+            }}
+            onRestoreUserInterfaceForPictureInPictureStop={() => {
+              console.log('[YouTubeInlinePlayer] 🔄 PiP stop restore requested');
+              videoRef.current?.restoreUserInterfaceForPictureInPictureStopCompleted(true);
+            }}
             ignoreSilentSwitch="ignore"
             progressUpdateInterval={250}
             onProgress={(e) => {
@@ -2958,6 +3143,21 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             <View style={{ width: 38, height: 38 }} />
 
             <View style={styles.topBarRight}>
+              {/* Picture-in-Picture Button */}
+              <TouchableOpacity
+                style={styles.topIconBtn}
+                onPress={handleTriggerPiP}
+                activeOpacity={0.7}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                accessibilityLabel="Picture in Picture"
+              >
+                <Ionicons
+                  name="copy-outline"
+                  size={20}
+                  color={isPipActive ? '#535aff' : '#ffffff'}
+                />
+              </TouchableOpacity>
+
               {/* Closed Captions (CC) Icon */}
               <TouchableOpacity
                 style={styles.topIconBtn}
