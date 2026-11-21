@@ -7,6 +7,7 @@ export interface ActiveYouTubeVideo {
   id: string;
   title: string;
   channel: string;
+  channelId?: string;
   thumbnail: string;
   duration?: string;
   views?: string;

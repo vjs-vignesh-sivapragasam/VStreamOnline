@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Paths, Directory, File } from 'expo-file-system';
 import { downloadService } from '@/services/DownloadService';
+import { storageCleanupService } from '@/services/StorageCleanupService';
 
 const DAILY_KEY_PREFIX = 'vstream_data_usage_daily_';
 const OVERALL_KEY = 'vstream_data_usage_overall_v1';
@@ -194,14 +195,8 @@ class DataConsumptionService {
       }
     }
 
-    // 2. Calculate Cache Bytes
-    let cacheBytes = 0;
-    try {
-      const cacheDir = new Directory(Paths.cache);
-      cacheBytes = this.calculateDirectorySize(cacheDir);
-    } catch {
-      cacheBytes = 0;
-    }
+    // 2. Calculate Cache Bytes (instant, zero-lag from shared cache)
+    const cacheBytes = storageCleanupService.getFastCacheBytes();
 
     // 3. Today's Totals
     const todayStreamBytes = this.inMemoryTodayStreamBytes;

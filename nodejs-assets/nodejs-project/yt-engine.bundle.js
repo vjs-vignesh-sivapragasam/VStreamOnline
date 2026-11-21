@@ -38952,6 +38952,7 @@ function parseTvTile(tile) {
   const lines = t.metadata?.tileMetadataRenderer?.lines || [];
   const channel = lines[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.runs?.map((r) => r.text).join('') || 
                   lines[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.text?.simpleText || '';
+  const channelId = lines[0]?.lineRenderer?.items?.[0]?.lineItemRenderer?.navigationEndpoint?.browseEndpoint?.browseId || null;
   const line1Items = (lines[1]?.lineRenderer?.items || [])
     .map(i => i.lineItemRenderer?.text?.simpleText || i.lineItemRenderer?.text?.runs?.map(r=>r.text).join(''))
     .filter(t => t && t.trim() !== '•');
@@ -38961,7 +38962,7 @@ function parseTvTile(tile) {
                     (`https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
   const duration = t.header?.tileHeaderRenderer?.thumbnailOverlays?.find((o) => o?.thumbnailOverlayTimeStatusRenderer)?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || 
                    t.header?.tileHeaderRenderer?.thumbnailOverlays?.[0]?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || '';
-  return { id, title, channel, thumbnail, duration, views, published };
+  return { id, title, channel, channelId, thumbnail, duration, views, published };
 }
 
 function formatFeedVideos(feed) {
@@ -38970,6 +38971,7 @@ function formatFeedVideos(feed) {
     id: v.id || v.video_id,
     title: v.title?.text || v.title?.toString?.() || v.headline?.text || "",
     channel: v.author?.name || v.author?.toString?.() || (typeof v.author === "string" ? v.author : ""),
+    channelId: v.author?.id || v.channel_id || null,
     thumbnail: v.thumbnails?.slice(-1)[0]?.url || (Array.isArray(v.thumbnail) ? v.thumbnail.slice(-1)[0]?.url : (v.thumbnails?.[0]?.url || "")),
     duration: v.duration?.text || v.length_text?.text || "",
     views: v.short_view_count?.text || v.views?.text || v.view_count?.text || "",
@@ -39326,6 +39328,7 @@ var ytRequestHandler = async (req, res) => {
                 id: v.id,
                 title: v.title?.text || v.title?.toString?.() || "",
                 channel: v.author?.name || v.author?.toString?.() || "",
+        channelId: v.author?.id || v.channel_id || null,
                 thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
                 duration: v.duration?.text || "",
                 views: v.short_view_count?.text || v.views?.text || "",
@@ -39484,6 +39487,68 @@ var ytRequestHandler = async (req, res) => {
     }
     return;
   }
+  if (parsedUrl.pathname === "/yt/channel/subscribe") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        let channelId = parsedUrl.searchParams.get("channelId");
+        if (!channelId && body) {
+          try { const b = JSON.parse(body); channelId = b.channelId; } catch (_) {}
+        }
+        if (!channelId) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Missing channelId parameter" }));
+          return;
+        }
+        const yt = await getClient("WEB");
+        if (!yt.session.logged_in) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Not signed in to YouTube", authenticated: false }));
+          return;
+        }
+        const result = await yt.subscribe(channelId);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, subscribed: true, result }));
+      } catch (err) {
+        console.warn("[yt-server] Subscribe error:", err.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+  if (parsedUrl.pathname === "/yt/channel/unsubscribe") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        let channelId = parsedUrl.searchParams.get("channelId");
+        if (!channelId && body) {
+          try { const b = JSON.parse(body); channelId = b.channelId; } catch (_) {}
+        }
+        if (!channelId) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Missing channelId parameter" }));
+          return;
+        }
+        const yt = await getClient("WEB");
+        if (!yt.session.logged_in) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Not signed in to YouTube", authenticated: false }));
+          return;
+        }
+        const result = await yt.unsubscribe(channelId);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, subscribed: false, result }));
+      } catch (err) {
+        console.warn("[yt-server] Unsubscribe error:", err.message);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
   if (parsedUrl.pathname === "/yt/search") {
     const rawQ = parsedUrl.searchParams.get("q") || "trending";
     const q = (rawQ.toLowerCase() === "trending" || rawQ.toLowerCase() === "all") ? "new popular videos" : rawQ;
@@ -39584,6 +39649,7 @@ var ytRequestHandler = async (req, res) => {
         id: v,
         title: info2.basic_info?.title || "YouTube Video",
         channel: info2.basic_info?.author || "YouTube",
+        channelId: info2.basic_info?.channel_id || null,
         thumbnail: info2.basic_info?.thumbnail?.slice(-1)[0]?.url,
         duration: info2.basic_info?.duration,
         views: info2.basic_info?.view_count,

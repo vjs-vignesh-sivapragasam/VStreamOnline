@@ -7,6 +7,7 @@ export interface YouTubeVideoItem {
   id: string;
   title: string;
   channel: string;
+  channelId?: string;
   thumbnail: string;
   duration?: string;
   views?: string;
@@ -71,6 +72,7 @@ export interface YouTubeVideoDetails {
   id: string;
   title: string;
   channel: string;
+  channelId?: string;
   thumbnail: string;
   duration?: number;
   views?: number;
@@ -93,6 +95,7 @@ export interface YouTubeChannelSubscription {
   channelId: string;
   channelTitle: string;
   avatarUrl?: string;
+  subscriptionId?: string;
   subscribedAt: number;
 }
 
@@ -699,6 +702,7 @@ class YouTubeService {
               id: data.id || videoId,
               title: data.title || fallbackItem?.title || 'YouTube Video',
               channel: data.channel || fallbackItem?.channel || 'YouTube',
+              channelId: data.channelId || fallbackItem?.channelId,
               thumbnail: data.thumbnail || fallbackItem?.thumbnail || `https://i.ytimg.com/vi/${data.id || videoId}/hqdefault.jpg`,
               duration: data.duration,
               views: data.views,
@@ -812,6 +816,7 @@ class YouTubeService {
           id: data.videoId || videoId,
           title: data.title || fallbackItem?.title || 'YouTube Video',
           channel: data.author || fallbackItem?.channel || 'YouTube',
+          channelId: data.authorId || fallbackItem?.channelId,
           thumbnail: (data.videoThumbnails && data.videoThumbnails[0]?.url) || fallbackItem?.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
           duration: data.lengthSeconds,
           views: data.viewCount,
@@ -964,6 +969,7 @@ class YouTubeService {
       id: videoId,
       title,
       channel,
+      channelId: fallbackItem?.channelId,
       thumbnail,
       duration: liveStream?.duration,
       formats: {
@@ -1117,31 +1123,394 @@ class YouTubeService {
     }
   }
 
-  isSubscribed(channelId: string): boolean {
+  isSubscribed(channelIdentifier: string): boolean {
+    if (!channelIdentifier) return false;
     const subs = this.getSubscriptions();
-    return subs.some((s) => s.channelId === channelId);
+    const clean = channelIdentifier.trim().toLowerCase();
+    const cleanHandle = clean.startsWith('@') ? clean : `@${clean.replace(/\s+/g, '')}`;
+    return subs.some((s) => {
+      const sId = (s.channelId || '').trim().toLowerCase();
+      const sTitle = (s.channelTitle || '').trim().toLowerCase();
+      const sHandle = sTitle.startsWith('@') ? sTitle : `@${sTitle.replace(/\s+/g, '')}`;
+      return sId === clean || sTitle === clean || sHandle === cleanHandle;
+    });
+  }
+
+  getCachedSubscriptionId(channelId: string): string | undefined {
+    const subs = this.getSubscriptions();
+    const item = subs.find((s) => s.channelId === channelId);
+    return item?.subscriptionId;
+  }
+
+  saveLocalSubscription(channel: YouTubeChannelSubscription) {
+    const subs = this.getSubscriptions();
+    const cleanId = channel.channelId || channel.channelTitle;
+    const index = subs.findIndex((s) => s.channelId === cleanId || s.channelTitle === channel.channelTitle);
+    if (index >= 0) {
+      subs[index] = { ...subs[index], ...channel };
+    } else {
+      subs.unshift(channel);
+    }
+    storageService.setItem(YT_SUBSCRIPTIONS_KEY, JSON.stringify(subs));
+  }
+
+  removeLocalSubscription(channelIdentifier: string) {
+    if (!channelIdentifier) return;
+    const clean = channelIdentifier.trim().toLowerCase();
+    const subs = this.getSubscriptions().filter((s) => {
+      const sId = (s.channelId || '').trim().toLowerCase();
+      const sTitle = (s.channelTitle || '').trim().toLowerCase();
+      return sId !== clean && sTitle !== clean;
+    });
+    storageService.setItem(YT_SUBSCRIPTIONS_KEY, JSON.stringify(subs));
   }
 
   toggleSubscription(channel: { channelId: string; channelTitle: string; avatarUrl?: string }): boolean {
-    const subs = this.getSubscriptions();
-    const index = subs.findIndex((s) => s.channelId === channel.channelId);
-    let subscribed = false;
-
-    if (index >= 0) {
-      subs.splice(index, 1);
-      subscribed = false;
+    const subscribed = this.isSubscribed(channel.channelId || channel.channelTitle);
+    if (subscribed) {
+      this.removeLocalSubscription(channel.channelId || channel.channelTitle);
+      return false;
     } else {
-      subs.unshift({
+      this.saveLocalSubscription({
         channelId: channel.channelId,
         channelTitle: channel.channelTitle,
         avatarUrl: channel.avatarUrl,
         subscribedAt: Date.now(),
       });
-      subscribed = true;
+      return true;
+    }
+  }
+
+  /**
+   * Returns a valid Google OAuth access token, refreshing it if expired.
+   */
+  async getValidAccessToken(): Promise<string | null> {
+    const tokens = this.getOAuthTokens();
+    if (!tokens?.access_token) return null;
+
+    if (tokens.expires_at > Date.now() + 60000) {
+      return tokens.access_token;
     }
 
-    storageService.setItem(YT_SUBSCRIPTIONS_KEY, JSON.stringify(subs));
-    return subscribed;
+    if (tokens.refresh_token) {
+      try {
+        const refreshed = await this.refreshGoogleAccessToken();
+        if (refreshed) return refreshed;
+      } catch {}
+    }
+
+    return tokens.access_token || null;
+  }
+
+  /**
+   * Resolves the real YouTube channel ID (UC...) using multiple high-resilience strategies.
+   */
+  async resolveChannelId(videoId: string, channelNameOrHandle?: string): Promise<string | null> {
+    // 1. Direct UC ID check
+    if (channelNameOrHandle && channelNameOrHandle.startsWith('UC') && channelNameOrHandle.length === 24) {
+      return channelNameOrHandle;
+    }
+
+    // 2. Query Google YouTube Data API v3 if OAuth access token is active
+    const token = await this.getValidAccessToken();
+    if (token && videoId) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${encodeURIComponent(videoId)}`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const data = await res.json();
+          const chId = data.items?.[0]?.snippet?.channelId;
+          if (chId && chId.startsWith('UC')) return chId;
+        }
+      } catch {}
+    }
+
+    // 3. Query via channel handle if handle starts with @
+    if (token && channelNameOrHandle && channelNameOrHandle.startsWith('@')) {
+      try {
+        const cleanHandle = channelNameOrHandle.replace(/^@/, '');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(cleanHandle)}`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const data = await res.json();
+          const chId = data.items?.[0]?.id;
+          if (chId && chId.startsWith('UC')) return chId;
+        }
+      } catch {}
+    }
+
+    // 4. Query embedded local engine
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(600);
+      if (baseUrl && videoId) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${baseUrl}/yt/info?v=${encodeURIComponent(videoId)}`, {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.channelId && data.channelId.startsWith('UC')) return data.channelId;
+        }
+      }
+    } catch {}
+
+    // 5. Query public Invidious instance for video metadata authorId
+    if (videoId) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(`https://yt.chocolatemoo53.com/api/v1/videos/${encodeURIComponent(videoId)}`, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authorId && data.authorId.startsWith('UC')) return data.authorId;
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
+  /**
+   * Real-time verification of whether the user is subscribed to a channel on YouTube.
+   */
+  async checkSubscriptionStatus(
+    channelIdentifier: string,
+    videoId?: string
+  ): Promise<{ isSubscribed: boolean; subscriptionId?: string }> {
+    const isLocallySubscribed = this.isSubscribed(channelIdentifier);
+
+    // If not authenticated, rely on local state
+    const auth = this.getCachedAuthStatus();
+    if (!auth.authenticated) {
+      return { isSubscribed: isLocallySubscribed };
+    }
+
+    try {
+      const resolvedChannelId = await this.resolveChannelId(videoId || '', channelIdentifier);
+      if (!resolvedChannelId) {
+        return { isSubscribed: isLocallySubscribed };
+      }
+
+      const token = await this.getValidAccessToken();
+      if (token) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(
+          `https://www.googleapis.com/youtube/v3/subscriptions?part=id&mine=true&forChannelId=${encodeURIComponent(resolvedChannelId)}`,
+          {
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            signal: controller.signal,
+          }
+        ).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const data = await res.json();
+          const isSub = Array.isArray(data.items) && data.items.length > 0;
+          const subscriptionId = isSub ? data.items[0]?.id : undefined;
+
+          if (isSub) {
+            this.saveLocalSubscription({
+              channelId: resolvedChannelId,
+              channelTitle: channelIdentifier,
+              subscriptionId,
+              subscribedAt: Date.now(),
+            });
+          } else {
+            this.removeLocalSubscription(resolvedChannelId);
+          }
+
+          return { isSubscribed: isSub, subscriptionId };
+        }
+      }
+    } catch (err) {
+      console.warn('[YouTubeService] checkSubscriptionStatus error:', err);
+    }
+
+    return { isSubscribed: isLocallySubscribed };
+  }
+
+  /**
+   * Real subscription to a YouTube channel via Google YouTube Data API v3 and local engine.
+   */
+  async subscribeReal(params: {
+    channelId?: string;
+    channelTitle: string;
+    avatarUrl?: string;
+    videoId?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const auth = await this.getAuthStatus();
+    if (!auth.authenticated) {
+      return { success: false, error: 'NOT_AUTHENTICATED' };
+    }
+
+    const resolvedChannelId = await this.resolveChannelId(params.videoId || '', params.channelId || params.channelTitle);
+    if (!resolvedChannelId) {
+      return { success: false, error: 'Could not resolve channel ID' };
+    }
+
+    let subscriptionId: string | undefined;
+    let didSucceed = false;
+
+    // 1. Google YouTube Data API v3
+    const token = await this.getValidAccessToken();
+    if (token) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch('https://www.googleapis.com/youtube/v3/subscriptions?part=snippet', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            snippet: {
+              resourceId: {
+                kind: 'youtube#channel',
+                channelId: resolvedChannelId,
+              },
+            },
+          }),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const data = await res.json();
+          subscriptionId = data.id;
+          didSucceed = true;
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          const reason = errData?.error?.errors?.[0]?.reason;
+          if (reason === 'subscriptionDuplicate') {
+            didSucceed = true;
+          } else {
+            console.warn('[YouTubeService] Google API subscribe error:', errData);
+          }
+        }
+      } catch (err) {
+        console.warn('[YouTubeService] Google API subscribe request failed:', err);
+      }
+    }
+
+    // 2. Embedded engine sync
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(600);
+      if (baseUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(`${baseUrl}/yt/channel/subscribe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channelId: resolvedChannelId }),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+        if (res.ok) didSucceed = true;
+      }
+    } catch {}
+
+    if (didSucceed) {
+      this.saveLocalSubscription({
+        channelId: resolvedChannelId,
+        channelTitle: params.channelTitle,
+        avatarUrl: params.avatarUrl,
+        subscriptionId,
+        subscribedAt: Date.now(),
+      });
+      return { success: true };
+    }
+
+    return { success: false, error: 'Subscription request failed. Please check network or try signing in again.' };
+  }
+
+  /**
+   * Real unsubscription from a YouTube channel via Google YouTube Data API v3 and local engine.
+   */
+  async unsubscribeReal(params: {
+    channelId?: string;
+    channelTitle?: string;
+    videoId?: string;
+    subscriptionId?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const auth = await this.getAuthStatus();
+    if (!auth.authenticated) {
+      return { success: false, error: 'NOT_AUTHENTICATED' };
+    }
+
+    const resolvedChannelId = await this.resolveChannelId(params.videoId || '', params.channelId || params.channelTitle);
+    let didSucceed = false;
+
+    // 1. Google YouTube Data API v3
+    const token = await this.getValidAccessToken();
+    if (token && resolvedChannelId) {
+      try {
+        let subId = params.subscriptionId || this.getCachedSubscriptionId(resolvedChannelId);
+        if (!subId) {
+          const checkRes = await fetch(
+            `https://www.googleapis.com/youtube/v3/subscriptions?part=id&mine=true&forChannelId=${encodeURIComponent(resolvedChannelId)}`,
+            {
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+            }
+          );
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            subId = checkData.items?.[0]?.id;
+          }
+        }
+
+        if (subId) {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 5000);
+          const delRes = await fetch(`https://www.googleapis.com/youtube/v3/subscriptions?id=${encodeURIComponent(subId)}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+          }).finally(() => clearTimeout(timer));
+
+          if (delRes.status === 204 || delRes.ok) {
+            didSucceed = true;
+          }
+        }
+      } catch (err) {
+        console.warn('[YouTubeService] Google API unsubscribe error:', err);
+      }
+    }
+
+    // 2. Embedded engine sync
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(600);
+      if (baseUrl && resolvedChannelId) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(`${baseUrl}/yt/channel/unsubscribe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channelId: resolvedChannelId }),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+        if (res.ok) didSucceed = true;
+      }
+    } catch {}
+
+    // Always update local cache on unsubscribe
+    this.removeLocalSubscription(resolvedChannelId || params.channelId || params.channelTitle || '');
+    return { success: true };
   }
 
   private cachedAuthStatus: YouTubeAuthStatus | null = null;

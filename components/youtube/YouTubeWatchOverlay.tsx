@@ -28,10 +28,11 @@ import * as Clipboard from 'expo-clipboard';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { isHapticsSupported } from '@/utils/platform';
 import { useYouTubePlayer } from '@/contexts/YouTubePlayerContext';
-import { youTubeService, YouTubeVideoItem, YouTubeVideoDetails, YouTubeFormatOption, formatPublishedTime } from '@/services/YouTubeService';
+import { youTubeService, YouTubeVideoItem, YouTubeVideoDetails, YouTubeFormatOption, formatPublishedTime, YouTubeAuthStatus } from '@/services/YouTubeService';
 import { youTubeListService } from '@/services/YouTubeListService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { QualityPickerModal } from '@/components/youtube/QualityPickerModal';
+import { YouTubeAuthModal } from '@/components/youtube/YouTubeAuthModal';
 import { YouTubeInlinePlayer, ScreenFitMode } from '@/components/youtube/YouTubeInlinePlayer';
 import BottomSpacing from '@/components/BottomSpacing';
 
@@ -152,6 +153,9 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   const [isLiked, setIsLiked] = useState(false);
   const [isDisliked, setIsDisliked] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isSubscribing, setIsSubscribing] = useState(false);
+  const [isAuthModalVisible, setIsAuthModalVisible] = useState(false);
+  const [authStatus, setAuthStatus] = useState<YouTubeAuthStatus>(() => youTubeService.getCachedAuthStatus());
   const [isSaved, setIsSaved] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
@@ -341,25 +345,37 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   useEffect(() => {
     if (currentVideo) {
       setIsSaved(youTubeListService.isSaved(currentVideo.id));
-      setIsSubscribed(youTubeService.isSubscribed(currentVideo.channel));
+      const targetChannel = videoDetails?.channelId || currentVideo.channelId || currentVideo.channel;
+      setIsSubscribed(youTubeService.isSubscribed(targetChannel));
       setIsLiked(false);
       setIsDisliked(false);
       setDescriptionExpanded(false);
       setCommentsList(DEFAULT_COMMENTS);
       setActiveDownloadItem(null);
 
+      // Check real subscription status against YouTube API in background
+      let isMounted = true;
+      youTubeService.checkSubscriptionStatus(targetChannel, currentVideo.id).then((status) => {
+        if (isMounted && typeof status.isSubscribed === 'boolean') {
+          setIsSubscribed(status.isSubscribed);
+        }
+      }).catch(() => {});
+
       // Fetch related recommendations
       fetchRelated(currentVideo.channel || currentVideo.title);
       youTubeService
         .getAuthStatus()
         .then((st) => {
+          setAuthStatus(st);
           if (st.authenticated && st.user?.avatar) {
             setUserAvatar(st.user.avatar);
           }
         })
         .catch(() => {});
+
+      return () => { isMounted = false; };
     }
-  }, [currentVideo?.id]);
+  }, [currentVideo?.id, currentVideo?.channel, videoDetails?.channelId]);
 
   // Sync saved state in real-time with youTubeListService
   useEffect(() => {
@@ -450,17 +466,90 @@ const YouTubeWatchOverlayInner: React.FC = () => {
   }, [currentVideo]);
 
   const handleToggleSubscribe = useCallback(async () => {
-    if (!currentVideo) return;
+    if (!currentVideo || isSubscribing) return;
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    const subscribed = youTubeService.toggleSubscription({
-      channelId: currentVideo.channel,
-      channelTitle: currentVideo.channel,
-      avatarUrl: currentVideo.thumbnail,
-    });
-    setIsSubscribed(subscribed);
-  }, [currentVideo]);
+
+    const auth = await youTubeService.getAuthStatus();
+    if (!auth.authenticated) {
+      Alert.alert(
+        'Sign in to YouTube',
+        'Sign in with your Google account to subscribe to channels and sync subscriptions with YouTube.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Sign In',
+            onPress: () => {
+              setIsAuthModalVisible(true);
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    const targetChannelId = videoDetails?.channelId || currentVideo.channelId || currentVideo.channel;
+    const channelTitle = currentVideo.channel;
+
+    if (isSubscribed) {
+      Alert.alert(
+        'Unsubscribe',
+        `Unsubscribe from ${channelTitle}?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Unsubscribe',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                setIsSubscribing(true);
+                const res = await youTubeService.unsubscribeReal({
+                  channelId: targetChannelId,
+                  channelTitle,
+                  videoId: currentVideo.id,
+                });
+                if (res.success) {
+                  setIsSubscribed(false);
+                  if (await isHapticsSupported()) {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  }
+                }
+              } catch (e: any) {
+                Alert.alert('Error', e.message || 'Failed to unsubscribe');
+              } finally {
+                setIsSubscribing(false);
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      try {
+        setIsSubscribing(true);
+        const res = await youTubeService.subscribeReal({
+          channelId: targetChannelId,
+          channelTitle,
+          avatarUrl: currentVideo.thumbnail,
+          videoId: currentVideo.id,
+        });
+        if (res.success) {
+          setIsSubscribed(true);
+          if (await isHapticsSupported()) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }
+        } else if (res.error === 'NOT_AUTHENTICATED') {
+          setIsAuthModalVisible(true);
+        } else {
+          Alert.alert('Subscription Failed', res.error || 'Could not subscribe to channel');
+        }
+      } catch (e: any) {
+        Alert.alert('Error', e.message || 'Failed to subscribe');
+      } finally {
+        setIsSubscribing(false);
+      }
+    }
+  }, [currentVideo, videoDetails, isSubscribed, isSubscribing]);
 
   const handleDownloadFormat = useCallback(
     async (format: YouTubeFormatOption) => {
@@ -750,8 +839,11 @@ const YouTubeWatchOverlayInner: React.FC = () => {
                 style={[styles.subscribeButton, isSubscribed && styles.subscribedButton]}
                 onPress={handleToggleSubscribe}
                 activeOpacity={0.8}
+                disabled={isSubscribing}
               >
-                {isSubscribed ? (
+                {isSubscribing ? (
+                  <ActivityIndicator size="small" color={isSubscribed ? '#ffffff' : '#000000'} />
+                ) : isSubscribed ? (
                   <View style={styles.subscribedBellWrap}>
                     <Ionicons name="notifications" size={15} color="#ffffff" />
                     <Ionicons name="chevron-down" size={12} color="#ffffff" style={{ marginLeft: 3 }} />
@@ -1218,6 +1310,32 @@ const YouTubeWatchOverlayInner: React.FC = () => {
             </View>
           </Pressable>
         </Modal>
+
+        {/* Google / YouTube Auth Modal for One-Tap Real Sign-In */}
+        <YouTubeAuthModal
+          visible={isAuthModalVisible}
+          onClose={() => setIsAuthModalVisible(false)}
+          authStatus={authStatus}
+          onAuthChange={async (newStatus) => {
+            setAuthStatus(newStatus);
+            if (newStatus.authenticated && currentVideo) {
+              try {
+                setIsSubscribing(true);
+                const targetChannelId = videoDetails?.channelId || currentVideo.channelId || currentVideo.channel;
+                await youTubeService.subscribeReal({
+                  channelId: targetChannelId,
+                  channelTitle: currentVideo.channel,
+                  avatarUrl: currentVideo.thumbnail,
+                  videoId: currentVideo.id,
+                });
+                setIsSubscribed(true);
+              } catch (_) {}
+              finally {
+                setIsSubscribing(false);
+              }
+            }
+          }}
+        />
 
         {/* Floating Download Toast Pill */}
         {downloadToast && (

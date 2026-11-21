@@ -25,25 +25,24 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
   const [isLoading, setIsLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
-  const loadStats = useCallback(async () => {
+  const loadStats = useCallback(async (forceFresh = false) => {
     try {
       setIsLoading(true);
       const [storageData, consumptionData] = await Promise.all([
-        storageCleanupService.getStorageStats(),
+        storageCleanupService.getStorageStats(forceFresh),
         dataConsumptionService.getDataConsumptionStats(),
       ]);
       setStats(storageData);
       setDataStats(consumptionData);
-      onStatsChange?.();
     } catch (err) {
       console.warn('[StorageCleanupCard] Error loading stats:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [onStatsChange]);
+  }, []);
 
   useEffect(() => {
-    loadStats();
+    loadStats(false);
   }, [loadStats]);
 
   const triggerHaptic = async (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Medium) => {
@@ -74,7 +73,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
                   await triggerHaptic();
                   setActionInProgress('downloads');
                   await storageCleanupService.clearTamilMVDownloads();
-                  await loadStats();
+                  await loadStats(true); onStatsChange?.();
                   setActionInProgress(null);
                 },
               },
@@ -88,7 +87,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
                   await triggerHaptic();
                   setActionInProgress('downloads');
                   await storageCleanupService.clearYouTubeDownloads();
-                  await loadStats();
+                  await loadStats(true); onStatsChange?.();
                   setActionInProgress(null);
                 },
               },
@@ -101,7 +100,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
             await triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
             setActionInProgress('downloads');
             await storageCleanupService.clearAllDownloads();
-            await loadStats();
+            await loadStats(true); onStatsChange?.();
             setActionInProgress(null);
           },
         },
@@ -123,7 +122,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
             await triggerHaptic();
             setActionInProgress('cache');
             await storageCleanupService.clearCache();
-            await loadStats();
+            await loadStats(true); onStatsChange?.();
             setActionInProgress(null);
           },
         },
@@ -153,7 +152,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
                   await triggerHaptic();
                   setActionInProgress('mylist');
                   await storageCleanupService.clearTamilMVMyList();
-                  await loadStats();
+                  await loadStats(true); onStatsChange?.();
                   setActionInProgress(null);
                 },
               },
@@ -167,7 +166,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
                   await triggerHaptic();
                   setActionInProgress('mylist');
                   await storageCleanupService.clearYouTubeMyList();
-                  await loadStats();
+                  await loadStats(true); onStatsChange?.();
                   setActionInProgress(null);
                 },
               },
@@ -180,7 +179,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
             await triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
             setActionInProgress('mylist');
             await storageCleanupService.clearAllMyLists();
-            await loadStats();
+            await loadStats(true); onStatsChange?.();
             setActionInProgress(null);
           },
         },
@@ -202,7 +201,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
             await triggerHaptic();
             setActionInProgress('resetData');
             await dataConsumptionService.resetAll();
-            await loadStats();
+            await loadStats(true); onStatsChange?.();
             setActionInProgress(null);
           },
         },
@@ -227,7 +226,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               }
               await storageCleanupService.clearYouTubeHistory();
-              await loadStats();
+              await loadStats(true); onStatsChange?.();
               if (await isHapticsSupported()) {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               }
@@ -257,7 +256,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
             setActionInProgress('everything');
             await storageCleanupService.clearEverything();
             await dataConsumptionService.resetAll();
-            await loadStats();
+            await loadStats(true); onStatsChange?.();
             setActionInProgress(null);
           },
         },
@@ -296,7 +295,7 @@ export const StorageCleanupCard: React.FC<StorageCleanupCardProps> = ({ onStatsC
             </Text>
           </View>
           <TouchableOpacity
-            onPress={loadStats}
+            onPress={() => { triggerHaptic(Haptics.ImpactFeedbackStyle.Light); loadStats(true); onStatsChange?.(); }}
             disabled={isLoading}
             style={styles.refreshBtn}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

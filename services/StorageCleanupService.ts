@@ -19,6 +19,10 @@ export interface StorageStats {
 }
 
 class StorageCleanupService {
+  private cachedCacheBytes = 0;
+  private lastCacheScanTime = 0;
+  private isScanningCache = false;
+
   formatBytes(bytes: number): string {
     if (!bytes || bytes <= 0) return '0 B';
     if (bytes < 1024) return `${bytes} B`;
@@ -27,17 +31,24 @@ class StorageCleanupService {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
-  // Calculate size of a directory recursively
-  private calculateDirectorySize(dir: Directory): number {
+  getFastCacheBytes(): number {
+    return this.cachedCacheBytes;
+  }
+
+  // Non-blocking shallow directory size calculation with depth and entry bounds
+  private calculateDirectorySize(dir: Directory, depth = 0): number {
+    if (depth > 3) return 0;
     let size = 0;
     try {
       if (!dir.exists) return 0;
       const entries = dir.list();
-      for (const entry of entries) {
+      const limit = Math.min(entries.length, 150);
+      for (let i = 0; i < limit; i++) {
+        const entry = entries[i];
         if (entry instanceof File) {
           size += entry.size || 0;
         } else if (entry instanceof Directory) {
-          size += this.calculateDirectorySize(entry);
+          size += this.calculateDirectorySize(entry, depth + 1);
         }
       }
     } catch {
@@ -46,8 +57,33 @@ class StorageCleanupService {
     return size;
   }
 
-  // Get current storage consumption stats
-  async getStorageStats(): Promise<StorageStats> {
+  // Asynchronous cached cache scan (TTL: 45 seconds) to prevent main thread blocking
+  async getCacheBytes(forceFresh = false): Promise<number> {
+    const now = Date.now();
+    if (!forceFresh && this.lastCacheScanTime > 0 && now - this.lastCacheScanTime < 45000) {
+      return this.cachedCacheBytes;
+    }
+
+    if (this.isScanningCache) {
+      return this.cachedCacheBytes;
+    }
+
+    this.isScanningCache = true;
+    try {
+      await new Promise((r) => setTimeout(r, 0));
+      const cacheDir = new Directory(Paths.cache);
+      this.cachedCacheBytes = this.calculateDirectorySize(cacheDir);
+      this.lastCacheScanTime = Date.now();
+    } catch {
+      this.cachedCacheBytes = 0;
+    } finally {
+      this.isScanningCache = false;
+    }
+    return this.cachedCacheBytes;
+  }
+
+  // Get current storage consumption stats (instant response)
+  async getStorageStats(forceFreshCache = false): Promise<StorageStats> {
     const allDownloads = downloadService.getDownloads();
     const tamilmvDownloads = allDownloads.filter(
       (d) => !d.id.startsWith('yt_') && d.sourceType !== 'direct'
@@ -65,13 +101,7 @@ class StorageCleanupService {
       0
     );
 
-    let cacheBytes = 0;
-    try {
-      const cacheDir = new Directory(Paths.cache);
-      cacheBytes = this.calculateDirectorySize(cacheDir);
-    } catch {
-      cacheBytes = 0;
-    }
+    const cacheBytes = await this.getCacheBytes(forceFreshCache);
 
     const tamilmvMyList = myListService.getMyList();
     const youtubeMyList = youTubeListService.getSavedList();
@@ -113,6 +143,8 @@ class StorageCleanupService {
     }
 
     // Clear TMDB in-memory cache
+    this.cachedCacheBytes = 0;
+    this.lastCacheScanTime = Date.now();
     tmdbService.clearCache();
 
     return freedBytes;
@@ -167,6 +199,8 @@ class StorageCleanupService {
       this.clearAllMyLists(),
       this.clearYouTubeHistory(),
     ]);
+    this.cachedCacheBytes = 0;
+    this.lastCacheScanTime = Date.now();
 
     return { freedBytes };
   }

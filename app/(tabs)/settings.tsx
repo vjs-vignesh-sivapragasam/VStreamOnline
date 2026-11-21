@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, Pressable, View, ScrollView, Modal, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { StyleSheet, Pressable, View, ScrollView, Modal, TouchableOpacity, Dimensions, Platform } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { StatusBar, Text } from '@/components/Themed';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -14,12 +14,27 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeSelector } from '@/components/settings/ThemeSelector';
 import { StorageCleanupCard } from '@/components/settings/StorageCleanupCard';
 import { dataConsumptionService, DataConsumptionStats } from '@/services/DataConsumptionService';
+import { storageCleanupService } from '@/services/StorageCleanupService';
 import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
 import { isScreenKeepAwakeEnabled, isBackgroundAudioKeepAliveEnabled } from '@/utils/StremioKeepAliveManager';
 
-const SettingsScreen = () => {
+const { width } = Dimensions.get('window');
+
+interface SettingItemConfig {
+  title: string;
+  route?: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  iconColor?: string;
+  iconBg?: string;
+  subtitle?: string;
+  badgeText?: string;
+  badgeColor?: string;
+  onPress?: () => void;
+}
+
+export default function SettingsScreen() {
   const router = useRouter();
-  const appVersion = Constants.expoConfig?.version;
+  const appVersion = Constants.expoConfig?.version || '1.0.0';
   const { theme } = useTheme();
 
   // Modals for Theme Selection & Storage Cleanup
@@ -30,6 +45,7 @@ const SettingsScreen = () => {
   const [screenKeepAwake, setScreenKeepAwake] = useState(true);
   const [bgAudioKeepAlive, setBgAudioKeepAlive] = useState(false);
 
+  // Fast, non-blocking stats loader
   const loadDataStats = useCallback(async () => {
     try {
       const stats = await dataConsumptionService.getDataConsumptionStats();
@@ -48,273 +64,349 @@ const SettingsScreen = () => {
     }, [loadDataStats])
   );
 
-  useEffect(() => {
-    loadDataStats();
-  }, [loadDataStats, storageModalVisible]);
+  const triggerHaptic = async (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Light) => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(style);
+    }
+  };
 
-  const sourceList: {
-    title: string;
-    route: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    subtitle?: string;
-    badgeText?: string;
-    badgeColor?: string;
-  }[] = [
-    {
-      title: 'Connection & Movie Alerts',
-      route: '/settings/tamilmv',
-      icon: 'globe-outline',
-      subtitle: 'Mirror domain & push notification alerts',
-      badgeText: notifEnabled ? 'Alerts On' : undefined,
-      badgeColor: '#30d158',
-    },
-  ];
+  const navigateTo = async (route: string) => {
+    await triggerHaptic();
+    router.push(route as any);
+  };
 
-  const integrationList: {
-    title: string;
-    route: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    subtitle?: string;
-    badgeText?: string;
-    badgeColor?: string;
-  }[] = [
-    {
-      title: 'Server',
-      route: '/settings/stremioserver',
-      icon: 'server-outline',
-      subtitle: screenKeepAwake
-        ? 'Streaming server & screen keep-awake active'
-        : 'Streaming server configuration',
-      badgeText: screenKeepAwake ? 'Keep Awake On' : undefined,
-      badgeColor: '#30d158',
-    },
-    { title: 'OpenSubtitles', route: '/settings/opensubtitles', icon: 'chatbox-ellipses-outline' },
-  ];
-
-  const generalList: { title: string; route: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-    { title: 'About Us', route: '/settings/about', icon: 'information-circle-outline' },
-  ];
-
+  // ── Setting Item Component with Ultra-Smooth Press State ──
   const SettingItem = ({
-    title,
-    icon,
-    subtitle,
-    badgeText,
-    badgeColor,
-    onPress,
+    item,
     isFirst = false,
     isLast = false,
   }: {
-    title: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    subtitle?: string;
-    badgeText?: string;
-    badgeColor?: string;
-    onPress: () => void;
+    item: SettingItemConfig;
     isFirst?: boolean;
     isLast?: boolean;
   }) => {
-    const [isPressed, setIsPressed] = useState(false);
-
     return (
       <Pressable
-        style={[
+        style={({ pressed }) => [
           styles.settingItem,
           {
-            backgroundColor: isPressed ? '#1a1a1a' : '#101010',
-            borderTopLeftRadius: isFirst ? 12 : 0,
-            borderTopRightRadius: isFirst ? 12 : 0,
-            borderBottomLeftRadius: isLast ? 12 : 0,
-            borderBottomRightRadius: isLast ? 12 : 0,
+            backgroundColor: pressed ? 'rgba(255, 255, 255, 0.08)' : 'rgba(25, 25, 28, 0.7)',
+            borderTopLeftRadius: isFirst ? 16 : 0,
+            borderTopRightRadius: isFirst ? 16 : 0,
+            borderBottomLeftRadius: isLast ? 16 : 0,
+            borderBottomRightRadius: isLast ? 16 : 0,
           },
         ]}
-        onPress={onPress}
-        onPressIn={() => setIsPressed(true)}
-        onPressOut={() => setIsPressed(false)}
+        onPress={item.onPress ? item.onPress : () => item.route && navigateTo(item.route)}
       >
         <View style={styles.leftContent}>
-          <View style={[styles.iconContainer, { backgroundColor: theme.iconBg }]}>
-            <Ionicons name={icon} size={22} color={theme.primary} />
+          <View
+            style={[
+              styles.iconContainer,
+              {
+                backgroundColor: item.iconBg || (item.iconColor ? item.iconColor + '18' : theme.iconBg || 'rgba(255,255,255,0.06)'),
+              },
+            ]}
+          >
+            <Ionicons name={item.icon} size={20} color={item.iconColor || theme.primary} />
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.settingText}>{title}</Text>
-            {subtitle ? <Text style={styles.settingSubtitle}>{subtitle}</Text> : null}
+          <View style={styles.itemTextContainer}>
+            <Text style={styles.settingText}>{item.title}</Text>
+            {item.subtitle ? <Text style={styles.settingSubtitle} numberOfLines={1}>{item.subtitle}</Text> : null}
           </View>
         </View>
+
         <View style={styles.rightContent}>
-          {badgeText ? (
+          {item.badgeText ? (
             <View
               style={[
                 styles.menuBadge,
                 {
-                  backgroundColor: (badgeColor || theme.primary) + '1A',
-                  borderColor: (badgeColor || theme.primary) + '44',
+                  backgroundColor: (item.badgeColor || theme.primary) + '1A',
+                  borderColor: (item.badgeColor || theme.primary) + '3A',
                 },
               ]}
             >
-              <View style={[styles.menuBadgeDot, { backgroundColor: badgeColor || theme.primary }]} />
-              <Text style={[styles.menuBadgeText, { color: badgeColor || theme.primary }]}>
-                {badgeText}
+              <View style={[styles.menuBadgeDot, { backgroundColor: item.badgeColor || theme.primary }]} />
+              <Text style={[styles.menuBadgeText, { color: item.badgeColor || theme.primary }]}>
+                {item.badgeText}
               </Text>
             </View>
           ) : null}
-          <MaterialIcons name="chevron-right" size={22} color="#6E6E73" />
+          <MaterialIcons name="chevron-right" size={20} color="#6E6E73" />
         </View>
+
         {!isLast && <View style={styles.separator} />}
       </Pressable>
     );
   };
 
-  const onSettingsItemPress = async (item: any) => {
-    if (await isHapticsSupported()) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    router.push({ pathname: item.route });
-  };
+  // ── Sections Configuration ──
+  const streamingItems: SettingItemConfig[] = [
+    {
+      title: 'Streaming Engine',
+      subtitle: screenKeepAwake ? 'Port 11470 • Screen keep-awake active' : 'Port 11470 • Embedded Node.js engine',
+      route: '/settings/stremioserver',
+      icon: 'server-outline',
+      iconColor: '#30d158',
+      badgeText: 'Active',
+      badgeColor: '#30d158',
+    },
+    {
+      title: 'YouTube Preferences',
+      subtitle: 'Hero banner fit, player quality & watch history',
+      route: '/youtubeSettings',
+      icon: 'logo-youtube',
+      iconColor: '#FF0000',
+    },
+    {
+      title: 'Movie Mirrors & Alerts',
+      subtitle: notifEnabled ? 'Mirror domain active • Push alerts enabled' : 'Mirror domain & push notification alerts',
+      route: '/settings/tamilmv',
+      icon: 'globe-outline',
+      iconColor: '#0a84ff',
+      badgeText: notifEnabled ? 'Alerts On' : undefined,
+      badgeColor: '#30d158',
+    },
+  ];
+
+  const metadataItems: SettingItemConfig[] = [
+    {
+      title: 'The Movie Database (TMDB)',
+      subtitle: 'Posters, descriptions, ratings & API setup',
+      route: '/settings/tmdb',
+      icon: 'film-outline',
+      iconColor: '#01b4e4',
+    },
+    {
+      title: 'OpenSubtitles',
+      subtitle: 'Multi-language subtitle search & auto-fetch',
+      route: '/settings/opensubtitles',
+      icon: 'chatbox-ellipses-outline',
+      iconColor: '#ffd60a',
+    },
+  ];
+
+  const storageItems: SettingItemConfig[] = [
+    {
+      title: 'Storage & Data Manager',
+      subtitle: dataStats
+        ? `${dataStats.todayFormatted} today • ${dataStats.overallFormatted} all-time`
+        : 'Manage downloads, app cache & cleanup',
+      icon: 'pie-chart-outline',
+      iconColor: '#bf5af2',
+      badgeText: dataStats?.todayFormatted || undefined,
+      badgeColor: '#bf5af2',
+      onPress: () => {
+        triggerHaptic();
+        setStorageModalVisible(true);
+      },
+    },
+  ];
+
+  const appearanceItems: SettingItemConfig[] = [
+    {
+      title: 'Theme & Accent Color',
+      subtitle: `${theme.displayName || theme.name} theme active`,
+      icon: 'color-palette-outline',
+      iconColor: theme.primary,
+      badgeText: theme.displayName || theme.name,
+      badgeColor: theme.primary,
+      onPress: () => {
+        triggerHaptic();
+        setThemeModalVisible(true);
+      },
+    },
+  ];
+
+  const supportItems: SettingItemConfig[] = [
+    {
+      title: 'Buy Me a Coffee',
+      subtitle: 'Support VPLEX development via UPI (GPay / PhonePe)',
+      route: '/settings/coffee',
+      icon: 'cafe-outline',
+      iconColor: '#FF9F0A',
+      badgeText: 'Support ❤️',
+      badgeColor: '#FF9F0A',
+    },
+    {
+      title: 'About VPLEX',
+      subtitle: `v${appVersion} • Open source streaming player`,
+      route: '/settings/about',
+      icon: 'information-circle-outline',
+      iconColor: '#8E8E93',
+    },
+  ];
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar />
       <BlurGradientBackground />
-      <ScrollView contentContainerStyle={styles.scrollViewContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollViewContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── 1. Modern Header Title ──────────────────────────────── */}
         <View style={styles.headerContainer}>
-          <Text style={styles.headerTitle}>Settings</Text>
-        </View>
-
-        {/* Appearance & Theme Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader}>APPEARANCE</Text>
-          <View style={styles.settingsGroup}>
-            <SettingItem
-              title="Theme Selection"
-              icon="color-palette-outline"
-              badgeText={theme.displayName || theme.name}
-              badgeColor={theme.primary}
-              onPress={async () => {
-                if (await isHapticsSupported()) {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
-                setThemeModalVisible(true);
-              }}
-              isFirst={true}
-              isLast={true}
-            />
+          <View>
+            <Text style={styles.headerTitle}>Settings</Text>
+            <Text style={styles.headerSubtitle}>Preferences, streaming engine & storage</Text>
+          </View>
+          <View style={[styles.headerVersionPill, { borderColor: theme.primary + '33' }]}>
+            <View style={[styles.headerVersionDot, { backgroundColor: theme.primary }]} />
+            <Text style={[styles.headerVersionText, { color: theme.primary }]}>v{appVersion}</Text>
           </View>
         </View>
 
-        {/* Storage & Data Section */}
+        {/* ── 2. Quick Stat Tiles (Engine, Data & Theme) ───────────── */}
+        <View style={styles.quickStatsRow}>
+          {/* Tile 1: Streaming Server */}
+          <TouchableOpacity
+            style={styles.quickStatTile}
+            activeOpacity={0.7}
+            onPress={() => navigateTo('/settings/stremioserver')}
+          >
+            <View style={styles.statTileHeader}>
+              <View style={[styles.statTileIcon, { backgroundColor: '#30d1581A' }]}>
+                <Ionicons name="server" size={14} color="#30d158" />
+              </View>
+              <View style={styles.statLiveBadge}>
+                <View style={styles.statLiveDot} />
+                <Text style={styles.statLiveText}>Online</Text>
+              </View>
+            </View>
+            <Text style={styles.statTileValue}>Port 11470</Text>
+            <Text style={styles.statTileLabel}>Streaming Server</Text>
+          </TouchableOpacity>
+
+          {/* Tile 2: Today's Data (Zero-lag tap to Storage modal) */}
+          <TouchableOpacity
+            style={styles.quickStatTile}
+            activeOpacity={0.7}
+            onPress={() => {
+              triggerHaptic();
+              setStorageModalVisible(true);
+            }}
+          >
+            <View style={styles.statTileHeader}>
+              <View style={[styles.statTileIcon, { backgroundColor: '#bf5af21A' }]}>
+                <Ionicons name="cloud-download" size={14} color="#bf5af2" />
+              </View>
+              <Ionicons name="chevron-forward" size={12} color="#8E8E93" />
+            </View>
+            <Text style={styles.statTileValue} numberOfLines={1}>
+              {dataStats?.todayFormatted || '0 B'}
+            </Text>
+            <Text style={styles.statTileLabel}>Data Today</Text>
+          </TouchableOpacity>
+
+          {/* Tile 3: Active Theme */}
+          <TouchableOpacity
+            style={styles.quickStatTile}
+            activeOpacity={0.7}
+            onPress={() => {
+              triggerHaptic();
+              setThemeModalVisible(true);
+            }}
+          >
+            <View style={styles.statTileHeader}>
+              <View style={[styles.statTileIcon, { backgroundColor: theme.primary + '1A' }]}>
+                <Ionicons name="color-palette" size={14} color={theme.primary} />
+              </View>
+              <View style={[styles.themeSwatchSmall, { backgroundColor: theme.primary }]} />
+            </View>
+            <Text style={[styles.statTileValue, { color: theme.primaryLight || theme.primary }]} numberOfLines={1}>
+              {theme.displayName || theme.name}
+            </Text>
+            <Text style={styles.statTileLabel}>Accent Theme</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── 3. Streaming & Playback Section ─────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>STREAMING & PLAYBACK</Text>
+          <View style={styles.settingsGroup}>
+            {streamingItems.map((item, index) => (
+              <SettingItem
+                key={item.title}
+                item={item}
+                isFirst={index === 0}
+                isLast={index === streamingItems.length - 1}
+              />
+            ))}
+          </View>
+        </View>
+
+        {/* ── 4. Storage & Performance (Zero Lag) ──────────────────── */}
         <View style={styles.section}>
           <Text style={styles.sectionHeader}>STORAGE & DATA</Text>
           <View style={styles.settingsGroup}>
-            <SettingItem
-              title="Storage & Data"
-              icon="pie-chart-outline"
-              subtitle={
-                dataStats
-                  ? `${dataStats.todayFormatted} today • ${dataStats.overallFormatted} total`
-                  : 'Manage storage & clear cache'
-              }
-              badgeText={dataStats ? dataStats.todayFormatted : undefined}
-              badgeColor="#30d158"
-              onPress={async () => {
-                if (await isHapticsSupported()) {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }
-                setStorageModalVisible(true);
-              }}
-              isFirst={true}
-              isLast={true}
-            />
+            {storageItems.map((item, index) => (
+              <SettingItem
+                key={item.title}
+                item={item}
+                isFirst={index === 0}
+                isLast={index === storageItems.length - 1}
+              />
+            ))}
           </View>
         </View>
 
-        {/* Content Sources Section */}
-        {sourceList.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionHeader}>CONNECTION</Text>
-            <View style={styles.settingsGroup}>
-              {sourceList.map((item, index) => (
-                <SettingItem
-                  key={index}
-                  title={item.title}
-                  icon={item.icon}
-                  subtitle={item.subtitle}
-                  badgeText={item.badgeText}
-                  badgeColor={item.badgeColor}
-                  onPress={() => onSettingsItemPress(item)}
-                  isFirst={index === 0}
-                  isLast={index === sourceList.length - 1}
-                />
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Integrations Section */}
-        {integrationList.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionHeader}>INTEGRATIONS</Text>
-            <View style={styles.settingsGroup}>
-              {integrationList.map((item, index) => (
-                <SettingItem
-                  key={index}
-                  title={item.title}
-                  icon={item.icon}
-                  subtitle={item.subtitle}
-                  badgeText={item.badgeText}
-                  badgeColor={item.badgeColor}
-                  onPress={() => onSettingsItemPress(item)}
-                  isFirst={index === 0}
-                  isLast={index === integrationList.length - 1}
-                />
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Support & Development Section */}
+        {/* ── 5. Metadata & Subtitles Section ─────────────────────── */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>SUPPORT & DEVELOPMENT</Text>
+          <Text style={styles.sectionHeader}>METADATA & SUBTITLES</Text>
           <View style={styles.settingsGroup}>
-            <SettingItem
-              title="Buy Me a Coffee"
-              icon="cafe-outline"
-              subtitle="Support VPLEX development via UPI (GPay / PhonePe)"
-              badgeText="Support ❤️"
-              badgeColor="#FF9F0A"
-              onPress={() => onSettingsItemPress({ route: '/settings/coffee' })}
-              isFirst={true}
-              isLast={true}
-            />
+            {metadataItems.map((item, index) => (
+              <SettingItem
+                key={item.title}
+                item={item}
+                isFirst={index === 0}
+                isLast={index === metadataItems.length - 1}
+              />
+            ))}
           </View>
         </View>
 
-        {/* General / About Section */}
-        {generalList.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionHeader}>ABOUT & INFO</Text>
-            <View style={styles.settingsGroup}>
-              {generalList.map((item, index) => (
-                <SettingItem
-                  key={index}
-                  title={item.title}
-                  icon={item.icon}
-                  onPress={() => onSettingsItemPress(item)}
-                  isFirst={index === 0}
-                  isLast={index === generalList.length - 1}
-                />
-              ))}
-            </View>
+        {/* ── 6. Appearance & Customization Section ────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>APPEARANCE</Text>
+          <View style={styles.settingsGroup}>
+            {appearanceItems.map((item, index) => (
+              <SettingItem
+                key={item.title}
+                item={item}
+                isFirst={index === 0}
+                isLast={index === appearanceItems.length - 1}
+              />
+            ))}
           </View>
-        )}
+        </View>
 
+        {/* ── 7. Support & About Section ──────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>SUPPORT & ABOUT</Text>
+          <View style={styles.settingsGroup}>
+            {supportItems.map((item, index) => (
+              <SettingItem
+                key={item.title}
+                item={item}
+                isFirst={index === 0}
+                isLast={index === supportItems.length - 1}
+              />
+            ))}
+          </View>
+        </View>
+
+        {/* ── 8. Watermark Brand Footer ───────────────────────────── */}
         <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>Version {appVersion}</Text>
+          <Ionicons name="sparkles" size={14} color={theme.primary} style={{ opacity: 0.8 }} />
+          <Text style={styles.versionText}>VPLEX Stream • Version {appVersion}</Text>
         </View>
-        <BottomSpacing space={50} />
+
+        <BottomSpacing space={60} />
       </ScrollView>
 
-      {/* Theme Selection Popup Modal */}
+      {/* ── Theme Selection Popup Modal ────────────────────────────── */}
       <Modal
         visible={themeModalVisible}
         transparent={true}
@@ -323,21 +415,24 @@ const SettingsScreen = () => {
       >
         <View style={styles.modalBackdrop}>
           <Pressable style={styles.modalDismissArea} onPress={() => setThemeModalVisible(false)} />
-          <BlurView intensity={45} tint="dark" style={styles.popupSheet}>
+          <BlurView intensity={50} tint="dark" style={styles.popupSheet}>
             <View style={styles.modalDragHandle} />
             <View style={styles.popupHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={[styles.popupIconBox, { backgroundColor: theme.iconBg }]}>
+                <View style={[styles.popupIconBox, { backgroundColor: theme.primary + '20' }]}>
                   <Ionicons name="color-palette" size={20} color={theme.primary} />
                 </View>
-                <Text style={styles.popupTitle}>Theme Selection</Text>
+                <View>
+                  <Text style={styles.popupTitle}>Theme Selection</Text>
+                  <Text style={styles.popupSubtitle}>Personalize accent colors</Text>
+                </View>
               </View>
               <TouchableOpacity
                 onPress={() => setThemeModalVisible(false)}
                 style={styles.popupCloseButton}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Ionicons name="close" size={20} color="#ffffff" />
+                <Ionicons name="close" size={18} color="#ffffff" />
               </TouchableOpacity>
             </View>
             <ScrollView
@@ -351,30 +446,45 @@ const SettingsScreen = () => {
         </View>
       </Modal>
 
-      {/* Storage & Data Cleanup Popup Modal */}
+      {/* ── Storage & Data Cleanup Popup Modal (Zero-Lag) ──────────── */}
       <Modal
         visible={storageModalVisible}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setStorageModalVisible(false)}
+        onRequestClose={() => {
+          setStorageModalVisible(false);
+          loadDataStats();
+        }}
       >
         <View style={styles.modalBackdrop}>
-          <Pressable style={styles.modalDismissArea} onPress={() => setStorageModalVisible(false)} />
-          <BlurView intensity={45} tint="dark" style={styles.popupSheet}>
+          <Pressable
+            style={styles.modalDismissArea}
+            onPress={() => {
+              setStorageModalVisible(false);
+              loadDataStats();
+            }}
+          />
+          <BlurView intensity={50} tint="dark" style={styles.popupSheet}>
             <View style={styles.modalDragHandle} />
             <View style={styles.popupHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={[styles.popupIconBox, { backgroundColor: theme.iconBg }]}>
-                  <Ionicons name="server-outline" size={20} color={theme.primary} />
+                <View style={[styles.popupIconBox, { backgroundColor: '#bf5af220' }]}>
+                  <Ionicons name="pie-chart" size={20} color="#bf5af2" />
                 </View>
-                <Text style={styles.popupTitle}>Storage & Data Cleanup</Text>
+                <View>
+                  <Text style={styles.popupTitle}>Storage & Data Cleanup</Text>
+                  <Text style={styles.popupSubtitle}>Manage cache, history & downloads</Text>
+                </View>
               </View>
               <TouchableOpacity
-                onPress={() => setStorageModalVisible(false)}
+                onPress={() => {
+                  setStorageModalVisible(false);
+                  loadDataStats();
+                }}
                 style={styles.popupCloseButton}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Ionicons name="close" size={20} color="#ffffff" />
+                <Ionicons name="close" size={18} color="#ffffff" />
               </TouchableOpacity>
             </View>
             <ScrollView
@@ -389,7 +499,7 @@ const SettingsScreen = () => {
       </Modal>
     </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -399,177 +509,286 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     maxWidth: 780,
     width: '100%',
+    alignSelf: 'center',
   },
   headerContainer: {
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 24,
+    paddingBottom: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   headerTitle: {
-    fontSize: 34,
-    fontWeight: '700',
+    fontSize: 32,
+    fontWeight: '800',
     color: '#ffffff',
+    letterSpacing: -0.5,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  headerVersionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    gap: 6,
+  },
+  headerVersionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  headerVersionText: {
+    fontSize: 12,
+    fontWeight: '700',
     letterSpacing: 0.3,
   },
+
+  // ── Quick Stat Tiles ──────────────────────────────────────────────
+  quickStatsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 26,
+    gap: 10,
+  },
+  quickStatTile: {
+    flex: 1,
+    backgroundColor: 'rgba(25, 25, 28, 0.75)',
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  statTileHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statTileIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    gap: 4,
+  },
+  statLiveDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#30d158',
+  },
+  statLiveText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#30d158',
+  },
+  themeSwatchSmall: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#ffffff',
+  },
+  statTileValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.2,
+    marginBottom: 2,
+  },
+  statTileLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#8E8E93',
+  },
+
+  // ── Sections & Grouped Rows ───────────────────────────────────────
   section: {
-    marginBottom: 32,
+    marginBottom: 24,
   },
   sectionHeader: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '600',
     textTransform: 'uppercase',
     color: '#8E8E93',
-    marginBottom: 10,
-    marginLeft: 20,
-    marginRight: 20,
-    letterSpacing: 0.5,
+    marginBottom: 8,
+    marginHorizontal: 20,
+    letterSpacing: 0.6,
   },
   settingsGroup: {
     marginHorizontal: 16,
     overflow: 'hidden',
-    borderRadius: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
   },
   settingItem: {
     flexDirection: 'row',
-    paddingVertical: 14,
+    paddingVertical: 13,
     paddingHorizontal: 16,
     justifyContent: 'space-between',
     alignItems: 'center',
-    minHeight: 52,
+    minHeight: 56,
     position: 'relative',
   },
   leftContent: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    gap: 14,
   },
   iconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+  },
+  itemTextContainer: {
+    flex: 1,
   },
   settingText: {
-    fontSize: 17,
-    fontWeight: '400',
-    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ffffff',
     letterSpacing: -0.2,
   },
   settingSubtitle: {
     fontSize: 12,
     color: '#8E8E93',
     marginTop: 2,
-    letterSpacing: -0.1,
+    lineHeight: 16,
   },
   rightContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-  },
-  menuBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  menuBadgeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  menuBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: -0.1,
+    gap: 6,
+    marginLeft: 8,
   },
   separator: {
     position: 'absolute',
     bottom: 0,
-    left: 60,
-    right: 16,
+    right: 0,
+    left: 64,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
-  versionContainer: {
-    paddingVertical: 20,
+  menuBadge: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 5,
   },
-  versionText: {
-    fontSize: 13,
-    color: '#6E6E73',
-    fontWeight: '500',
-    letterSpacing: 0.2,
+  menuBadgeDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  menuBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
 
-  /* Bottom sheet popup styles */
+  // ── Footer ────────────────────────────────────────────────────────
+  versionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    gap: 6,
+  },
+  versionText: {
+    fontSize: 12,
+    color: '#8E8E93',
+    fontWeight: '500',
+  },
+
+  // ── Modals / Bottom Sheets ────────────────────────────────────────
   modalBackdrop: {
     flex: 1,
-    justifyContent: 'flex-end',
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'flex-end',
   },
   modalDismissArea: {
     flex: 1,
   },
   popupSheet: {
+    maxHeight: '88%',
     backgroundColor: 'rgba(18, 18, 22, 0.96)',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.12)',
-    paddingTop: 10,
-    paddingBottom: 36,
-    maxHeight: '85%',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
   },
   modalDragHandle: {
-    width: 38,
+    width: 36,
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
     borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
     alignSelf: 'center',
-    marginBottom: 12,
+    marginTop: 10,
+    marginBottom: 6,
   },
   popupHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    marginBottom: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
   popupIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    justifyContent: 'center',
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   popupTitle: {
-    color: '#ffffff',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    letterSpacing: 0.2,
+    color: '#ffffff',
+  },
+  popupSubtitle: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 1,
   },
   popupCloseButton: {
     width: 30,
     height: 30,
     borderRadius: 15,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   popupScroll: {
-    paddingHorizontal: 16,
+    flexGrow: 0,
   },
   popupScrollContent: {
-    paddingBottom: 24,
+    padding: 16,
+    paddingBottom: 40,
   },
 });
-
-export default SettingsScreen;
