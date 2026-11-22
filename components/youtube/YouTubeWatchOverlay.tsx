@@ -16,6 +16,7 @@ import {
   Pressable,
   PanResponder,
   ToastAndroid,
+  AppState,
   StatusBar as RNStatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -232,12 +233,13 @@ const YouTubeWatchOverlayInner: React.FC = () => {
     };
   }, []);
 
-  // Auto-detect physical device rotation to enter/exit fullscreen automatically
+  // Auto-detect physical device rotation to enter/exit fullscreen automatically (only when active)
   useEffect(() => {
     let sub: ScreenOrientation.Subscription | null = null;
     const setupListener = async () => {
       try {
         sub = ScreenOrientation.addOrientationChangeListener((evt) => {
+          if (AppState.currentState !== 'active') return;
           const o = evt.orientationInfo.orientation;
           const isLandscape =
             o === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
@@ -261,6 +263,20 @@ const YouTubeWatchOverlayInner: React.FC = () => {
       }
     };
   }, [isMinimized, currentVideo, handleFullScreen]);
+
+  // Sync orientation & status bar safely on unlock / return to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && currentVideo && !isMinimized) {
+        if (isFullScreenRef.current) {
+          ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+        } else {
+          ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [currentVideo, isMinimized]);
 
 
 

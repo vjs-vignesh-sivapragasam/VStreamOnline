@@ -41,8 +41,42 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { isHapticsSupported } from '@/utils/platform';
+import { storageService } from '@/utils/StorageService';
 
 const { width } = Dimensions.get('window');
+
+export function matchesLanguage(video: YouTubeVideoItem, languages: string[]): boolean {
+  if (!languages || languages.length === 0) return true;
+  const text = `${video.title || ''} ${video.channel || ''}`.toLowerCase();
+  for (const lang of languages) {
+    const l = lang.toLowerCase();
+    if (l === 'tamil') {
+      if (/[\u0B80-\u0BFF]/.test(video.title || '') || /[\u0B80-\u0BFF]/.test(video.channel || '')) return true;
+      if (/\b(tamil|kollywood|chennai|anirudh|vijay|ajith|suriya|dhanush|simbu|karthi|sivakarthikeyan|vadivelu|goundamani|sun\s*tv|vijay\s*tv|zee\s*tamil|kalaignar|polimer|puthiyathalaimurai|thanthi|news7|behindwoods|galatta|indiaglitz|cinema\s*vikatan|tamil\s*pokkisham)\b/i.test(text)) return true;
+    } else if (l === 'english') {
+      const hasIndianScript = /[\u0900-\u0D7F]/.test(video.title || '');
+      const hasIndianKeywords = /\b(hindi|telugu|malayalam|kannada|tollywood|mollywood|sandalwood|bollywood)\b/i.test(text);
+      if (!hasIndianScript && !hasIndianKeywords && /[a-zA-Z]/.test(video.title || '')) return true;
+      if (/\b(english|hollywood|bbc|cnn|trailer|official|teaser|song|music|gaming|podcast|news)\b/i.test(text)) return true;
+    } else if (l === 'hindi') {
+      if (/[\u0900-\u097F]/.test(video.title || '')) return true;
+      if (/\b(hindi|bollywood|t-series|zee|sony|aaj\s*tak)\b/i.test(text)) return true;
+    } else if (l === 'telugu') {
+      if (/[\u0C00-\u0C7F]/.test(video.title || '')) return true;
+      if (/\b(telugu|tollywood)\b/i.test(text)) return true;
+    } else if (l === 'malayalam') {
+      if (/[\u0D00-\u0D7F]/.test(video.title || '')) return true;
+      if (/\b(malayalam|mollywood)\b/i.test(text)) return true;
+    } else if (l === 'kannada') {
+      if (/[\u0C80-\u0CFF]/.test(video.title || '')) return true;
+      if (/\b(kannada|sandalwood)\b/i.test(text)) return true;
+    } else {
+      if (text.includes(l)) return true;
+    }
+  }
+  return false;
+}
+
 
 const CATEGORY_CHIPS = [
   'All',
@@ -273,10 +307,11 @@ export default function YouTubeScreen() {
     }
     setSearchQuery('');
     setIsSearchOpen(false);
-    setSelectedCategory('All');
+    const targetCat = youTubeService.getCachedAuthStatus().authenticated ? 'Home' : 'All';
+    setSelectedCategory(targetCat);
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     setRefreshing(true);
-    fetchVideos('All', true);
+    fetchVideos(targetCat, true);
   }, []);
 
 
@@ -308,8 +343,20 @@ export default function YouTubeScreen() {
   // Header Filter Modal state:
   // "in the filters always selected lastest vidoe at top, language selection - tamil, english by default select"
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
-  const [sortBy, setSortBy] = useState<'latest' | 'relevance' | 'views'>('latest');
-  const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState<'latest' | 'relevance' | 'views'>(() => {
+    try {
+      const raw = storageService.getItem('yt_sort_by');
+      if (raw) return raw as any;
+    } catch {}
+    return 'latest';
+  });
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(() => {
+    try {
+      const raw = storageService.getItem('yt_selected_languages');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return ['Tamil', 'English'];
+  });
 
   // Download Toast State
   const [downloadToast, setDownloadToast] = useState<string | null>(null);
@@ -416,7 +463,7 @@ export default function YouTubeScreen() {
       try {
         const status = await youTubeService.getAuthStatus(4000);
         setAuthStatus((prev) => {
-          if (prev.authenticated !== status.authenticated || prev.user?.name !== status.user?.name) {
+          if (prev.authenticated !== status.authenticated || prev.user?.name !== status.user?.name || prev.user?.avatar !== status.user?.avatar) {
             if (status.authenticated && selectedCategory === 'All') {
               setSelectedCategory('Home');
               fetchVideos('Home', true);
@@ -462,7 +509,7 @@ export default function YouTubeScreen() {
   // Dynamic Category Chips reflecting Google Account feeds
   const dynamicCategoryChips = useMemo(() => {
     if (authStatus.authenticated) {
-      return ['Home', 'Subscriptions', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
+      return ['Home', 'Subscriptions', ...CATEGORY_CHIPS.filter((c) => c !== 'All' && c !== 'Home')];
     }
     return ['All', ...CATEGORY_CHIPS.filter((c) => c !== 'All')];
   }, [authStatus.authenticated]);
@@ -488,7 +535,7 @@ export default function YouTubeScreen() {
         return;
       }
 
-      if (target === 'Home') {
+      if (target === 'Recommended' || target === 'Home') {
         result = await youTubeService.getHomeFeed();
       } else if (target === 'Subscriptions') {
         result = await youTubeService.getSubscriptionsFeed();
@@ -518,10 +565,52 @@ export default function YouTubeScreen() {
           }
         }
 
-        // Apply language preferences to general / broad categories
-        if ((target === 'All' || target === 'Trending' || target === 'Trailers') && selectedLanguages.length > 0) {
-          const langKeywords = selectedLanguages.map((l) => l.toLowerCase()).join(' ');
-          resolvedQuery = `${resolvedQuery} ${langKeywords}`;
+        // Apply language preferences intelligently across categories
+        if (selectedLanguages.length > 0) {
+          const hasTamil = selectedLanguages.includes('Tamil');
+          const isTamilOnly = selectedLanguages.length === 1 && hasTamil;
+
+          if (target === 'All' || target === 'Trending') {
+            if (isTamilOnly) {
+              resolvedQuery = 'tamil trending viral';
+            } else if (hasTamil) {
+              resolvedQuery = 'trending tamil videos';
+            } else {
+              resolvedQuery = `${selectedLanguages[0].toLowerCase()} trending`;
+            }
+          } else if (target === 'Music') {
+            if (hasTamil) {
+              resolvedQuery = 'latest tamil trending songs';
+            } else {
+              resolvedQuery = `${selectedLanguages[0].toLowerCase()} hit songs trending`;
+            }
+          } else if (target === 'Trailers') {
+            if (hasTamil) {
+              resolvedQuery = 'latest official tamil trailers';
+            } else {
+              resolvedQuery = `latest ${selectedLanguages[0].toLowerCase()} trailers`;
+            }
+          } else if (target === 'News') {
+            if (hasTamil) {
+              resolvedQuery = 'tamil breaking news live today';
+            } else {
+              resolvedQuery = `${selectedLanguages[0].toLowerCase()} breaking news live`;
+            }
+          } else if (target === 'Comedy') {
+            if (hasTamil) {
+              resolvedQuery = 'trending tamil comedy scenes';
+            } else {
+              resolvedQuery = `${selectedLanguages[0].toLowerCase()} comedy videos`;
+            }
+          } else if (target === 'Podcasts') {
+            if (hasTamil) {
+              resolvedQuery = 'tamil podcasts popular';
+            }
+          } else if (searchQuery.trim()) {
+            if (isTamilOnly && !searchQuery.toLowerCase().includes('tamil')) {
+              resolvedQuery = `${searchQuery.trim()} tamil`;
+            }
+          }
         }
 
         result = await youTubeService.searchWithContinuation(resolvedQuery, sp);
@@ -532,12 +621,21 @@ export default function YouTubeScreen() {
       const allFetched = (result.videos || []).filter(
         (v) => !v.isShort && !v.title?.toLowerCase().includes('#short')
       );
-      seenIdsRef.current = new Set(allFetched.map((v) => v.id));
+
+      // Prioritize and reorder videos matching selected languages
+      let processedVideos = allFetched;
+      if (selectedLanguages.length > 0) {
+        const matching = allFetched.filter((v) => matchesLanguage(v, selectedLanguages));
+        const nonMatching = allFetched.filter((v) => !matchesLanguage(v, selectedLanguages));
+        processedVideos = [...matching, ...nonMatching];
+      }
+
+      seenIdsRef.current = new Set(processedVideos.map((v) => v.id));
       continuationTokenRef.current = result.continuationToken;
       apiKeyRef.current = result.apiKey;
 
-      setVideos(allFetched);
-      setHasMore(!!result.continuationToken && allFetched.length > 0);
+      setVideos(processedVideos);
+      setHasMore(!!result.continuationToken && processedVideos.length > 0);
     } catch (err: any) {
       console.warn('[YouTubeScreen] Error fetching videos:', err);
       setLoadMoreError(err?.message || 'Failed to load videos. Tap to retry.');
@@ -570,7 +668,7 @@ export default function YouTubeScreen() {
 
       try {
         let continuationResult: YouTubeSearchResult;
-        if (activeQueryRef.current === 'Home') {
+        if (activeQueryRef.current === 'Recommended' || activeQueryRef.current === 'Home') {
           continuationResult = await youTubeService.getHomeFeed(token);
         } else if (activeQueryRef.current === 'Subscriptions') {
           continuationResult = await youTubeService.getSubscriptionsFeed(token);
@@ -888,7 +986,7 @@ export default function YouTubeScreen() {
     if (isLoadingMore) {
       return (
         <View style={styles.footerContainer}>
-          <ActivityIndicator size="small" color="#FF0000" />
+          <ActivityIndicator size="small" color={theme.primary} />
           <Text style={styles.footerLoadingText}>Loading more videos...</Text>
         </View>
       );
@@ -1068,7 +1166,7 @@ export default function YouTubeScreen() {
               <TouchableOpacity
                 style={[
                   styles.chipButton,
-                  isSelected && styles.chipButtonSelected,
+                  isSelected && [styles.chipButtonSelected, { backgroundColor: theme.primary }],
                 ]}
                 onPress={() => {
                   setSearchQuery('');
@@ -1076,7 +1174,7 @@ export default function YouTubeScreen() {
                 }}
                 activeOpacity={0.8}
               >
-                {item === 'Home' && (
+                {(item === 'Home' || item === 'Recommended') && (
                   <Ionicons
                     name="sparkles"
                     size={13}
@@ -1088,7 +1186,7 @@ export default function YouTubeScreen() {
                   <Ionicons
                     name="radio"
                     size={13}
-                    color={isSelected ? '#000000' : '#FF0000'}
+                    color={isSelected ? '#000000' : theme.primary}
                     style={{ marginRight: 5 }}
                   />
                 )}
@@ -1117,7 +1215,7 @@ export default function YouTubeScreen() {
                   />
                 )}
                 <Text
-                  style={[styles.chipText, isSelected && styles.chipTextSelected]}
+                  style={[styles.chipText, isSelected && [styles.chipTextSelected, { color: '#000000' }]]}
                   numberOfLines={1}
                 >
                   {item}
@@ -1131,27 +1229,39 @@ export default function YouTubeScreen() {
       {/* Videos List Feed */}
       {isLoading && !refreshing ? (
         <View style={styles.loadingFeedContainer}>
-          <ActivityIndicator size="large" color="#FF0000" />
+          <ActivityIndicator size="large" color={theme.primary} />
           <Text style={styles.loadingFeedText}>Loading videos...</Text>
         </View>
       ) : videos.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons
-            name={loadMoreError ? 'alert-circle-outline' : 'film-outline'}
+            name={
+              loadMoreError
+                ? 'alert-circle-outline'
+                : selectedCategory === 'Subscriptions'
+                ? 'albums-outline'
+                : 'film-outline'
+            }
             size={56}
-            color={loadMoreError ? '#ff4444' : '#444444'}
+            color={loadMoreError ? '#ff4444' : selectedCategory === 'Subscriptions' ? theme.primary : '#444444'}
           />
           <Text style={styles.emptyTitle}>
-            {loadMoreError ? 'Could not load videos' : 'No videos found'}
+            {loadMoreError
+              ? 'Could not load videos'
+              : selectedCategory === 'Subscriptions'
+              ? 'No Subscriptions Yet'
+              : 'No videos found'}
           </Text>
           <Text style={styles.emptySubtitle}>
             {loadMoreError
               ? loadMoreError
+              : selectedCategory === 'Subscriptions'
+              ? 'Videos from your subscribed channels will appear here once you subscribe to channels with your Google account.'
               : 'Try searching for a different keyword or category.'}
           </Text>
           {loadMoreError && (
             <TouchableOpacity
-              style={styles.emptyRetryBtn}
+              style={[styles.emptyRetryBtn, { backgroundColor: theme.primary }]}
               onPress={() => fetchVideos(searchQuery.trim() || selectedCategory)}
               activeOpacity={0.7}
             >
@@ -1181,8 +1291,8 @@ export default function YouTubeScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
-              tintColor="#FF0000"
-              colors={['#FF0000']}
+              tintColor={theme.primary}
+              colors={[theme.primary]}
             />
           }
         />
@@ -1330,7 +1440,11 @@ export default function YouTubeScreen() {
             fetchVideos('All', true);
           }
         }}
-        onSelectFeed={(feed) => setSelectedCategory(feed)}
+        onSelectFeed={(feed) => {
+          const target = feed === 'Recommended' ? 'Home' : feed;
+          setSelectedCategory(target);
+          fetchVideos(target, true);
+        }}
       />
 
       {/* Search & Feed Filter Settings Modal */}
@@ -1444,16 +1558,24 @@ export default function YouTubeScreen() {
                 style={styles.filterResetBtn}
                 onPress={() => {
                   setSortBy('latest');
-                  setSelectedLanguages([]);
+                  setSelectedLanguages(['Tamil', 'English']);
+                  try {
+                    storageService.setItem('yt_sort_by', 'latest');
+                    storageService.setItem('yt_selected_languages', JSON.stringify(['Tamil', 'English']));
+                  } catch {}
                 }}
                 activeOpacity={0.7}
               >
-                <Text style={styles.filterResetBtnText}>Clear All</Text>
+                <Text style={styles.filterResetBtnText}>Reset</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.filterApplyBtn, { backgroundColor: theme.primary }]}
                 onPress={() => {
+                  try {
+                    storageService.setItem('yt_sort_by', sortBy);
+                    storageService.setItem('yt_selected_languages', JSON.stringify(selectedLanguages));
+                  } catch {}
                   setIsFilterModalVisible(false);
                   fetchVideos(searchQuery.trim() || selectedCategory, true);
                 }}

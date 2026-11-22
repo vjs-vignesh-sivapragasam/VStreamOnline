@@ -146,7 +146,7 @@ export const GOOGLE_OAUTH_CLIENT_ID = '861556708454-d6dlm3lh05idd8npek18k6be8ba3
 export const GOOGLE_OAUTH_CLIENT_SECRET = 'SboVhoG9s0rNafixCSGGKXAT';
 export const GOOGLE_OAUTH_DEVICE_CODE_URL = 'https://www.youtube.com/o/oauth2/device/code';
 export const GOOGLE_OAUTH_TOKEN_URL = 'https://www.youtube.com/o/oauth2/token';
-export const GOOGLE_OAUTH_SCOPES = 'http://gdata.youtube.com https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube-paid-content';
+export const GOOGLE_OAUTH_SCOPES = 'http://gdata.youtube.com https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube-paid-content https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email email profile openid';
 export const YT_OAUTH_TOKENS_KEY = 'yt_oauth_tokens';
 
 const YT_SUBSCRIPTIONS_KEY = 'yt_local_subscriptions';
@@ -278,12 +278,16 @@ class YouTubeService {
       return this.activeBaseUrl;
     }
 
+    if (Platform.OS !== 'web') {
+      ensureEmbeddedServerRunning().catch(() => {});
+    }
+
     const candidates = getEngineCandidates();
 
     // Ping candidates concurrently for instant pickup (<50ms) instead of sequential blocking
-    const pingCandidate = async (url: string): Promise<string> => {
+    const pingCandidate = async (url: string, waitMs: number): Promise<string> => {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const timer = setTimeout(() => controller.abort(), waitMs);
       try {
         const res = await fetch(`${url}/yt/ping`, {
           signal: controller.signal,
@@ -296,13 +300,23 @@ class YouTubeService {
     };
 
     try {
-      const fastestUrl = await Promise.any(candidates.map((c) => pingCandidate(c)));
+      const fastestUrl = await Promise.any(candidates.map((c) => pingCandidate(c, timeoutMs)));
       this.activeBaseUrl = fastestUrl;
       this.lastPingTime = now;
       console.log(`[YouTubeService] ⚡ Connected to fastest engine at ${fastestUrl}`);
       return fastestUrl;
     } catch {
-      // All pings timed out or failed
+      // First round failed: if on mobile, wait briefly for nodejs-mobile to boot and retry
+      if (Platform.OS !== 'web') {
+        try {
+          await new Promise((r) => setTimeout(r, 600));
+          const loopbacks = candidates.filter((c) => c.includes('127.0.0.1') || c.includes('localhost') || c.includes('10.0.2.2'));
+          const recovered = await Promise.any(loopbacks.map((c) => pingCandidate(c, 2500)));
+          this.activeBaseUrl = recovered;
+          this.lastPingTime = Date.now();
+          return recovered;
+        } catch {}
+      }
     }
 
     this.activeBaseUrl = null;
@@ -1713,19 +1727,40 @@ class YouTubeService {
   }
 
   /**
-   * Fetches real user channel name, handle/email, and high-res avatar from Google API.
+   * Fetches real user channel name, handle/email, and high-res avatar.
+   * Priority: Local Innertube session -> Google UserInfo -> YouTube Data API -> TokenInfo -> fallback.
    */
   async fetchGoogleUserProfile(accessToken: string): Promise<YouTubeUserProfile> {
+    // 0. If local engine has authenticated session, read real Innertube profile
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(600);
+      if (baseUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 1200);
+        const res = await fetch(`${baseUrl}/yt/auth/status`, { signal: controller.signal }).finally(() => clearTimeout(timer));
+        if (res.ok) {
+          const st = await res.json();
+          if (st.authenticated && st.user && st.user.name && st.user.name !== 'YouTube User') {
+            return {
+              name: st.user.name,
+              email: st.user.email || undefined,
+              avatar: st.user.avatar || undefined,
+            };
+          }
+        }
+      }
+    } catch {}
+
     let name = 'YouTube User';
     let email = '';
     let avatar = '';
 
-    // 1. YouTube Channel Snippet
+    // 1. Google OAuth2 UserInfo API (OIDC standard: name, email, profile picture)
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000);
+      const timer = setTimeout(() => controller.abort(), 4000);
 
-      const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Accept: 'application/json',
@@ -1734,46 +1769,71 @@ class YouTubeService {
       }).finally(() => clearTimeout(timer));
 
       if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.items) && data.items.length > 0) {
-          const ch = data.items[0];
-          if (ch.snippet?.title) {
-            name = ch.snippet.title.trim();
-          }
-          if (ch.snippet?.customUrl) {
-            email = ch.snippet.customUrl;
-          }
-          const thumbs = ch.snippet?.thumbnails;
-          if (thumbs) {
-            avatar = thumbs.high?.url || thumbs.medium?.url || thumbs.default?.url || '';
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[YouTubeService] channel info fetch error:', err);
-    }
-
-    // 2. Tokeninfo for email
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 4000);
-
-      const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`, {
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timer));
-
-      if (res.ok) {
         const info = await res.json();
-        if (info.email && !email.includes('@')) {
-          email = info.email;
-        }
-        if (name === 'YouTube User' && info.email) {
-          name = info.email.split('@')[0];
-        }
+        if (info.name) name = info.name.trim();
+        if (info.email) email = info.email.trim();
+        if (info.picture) avatar = info.picture;
       }
     } catch {}
 
-    if (!avatar) {
+    // 2. YouTube Channel Snippet (for custom channel URL / avatar if not yet found)
+    if (name === 'YouTube User' || !avatar) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+
+        const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+          },
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.items) && data.items.length > 0) {
+            const ch = data.items[0];
+            if (ch.snippet?.title && name === 'YouTube User') {
+              name = ch.snippet.title.trim();
+            }
+            if (ch.snippet?.customUrl && !email) {
+              email = ch.snippet.customUrl;
+            }
+            const thumbs = ch.snippet?.thumbnails;
+            if (thumbs && !avatar) {
+              avatar = thumbs.high?.url || thumbs.medium?.url || thumbs.default?.url || '';
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[YouTubeService] channel info fetch error:', err);
+      }
+    }
+
+    // 3. Tokeninfo for email
+    if (!email || name === 'YouTube User') {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+
+        const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`, {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+
+        if (res.ok) {
+          const info = await res.json();
+          if (info.email && !email.includes('@')) {
+            email = info.email;
+          }
+          if (name === 'YouTube User' && info.email) {
+            name = info.email.split('@')[0];
+          }
+        }
+      } catch {}
+    }
+
+    if (!avatar && name) {
       avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FF0000&color=fff`;
     }
 
@@ -1789,6 +1849,22 @@ class YouTubeService {
    */
   async completeGoogleSSO(tokens: YouTubeOAuthTokens): Promise<YouTubeAuthStatus> {
     this.setOAuthTokens(tokens);
+
+    // Sync credentials to local engine so Innertube acquires session immediately
+    try {
+      const baseUrl = await this.resolveActiveBaseUrl(800);
+      if (baseUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        await fetch(`${baseUrl}/yt/auth/set-credentials`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tokens),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+      }
+    } catch {}
+
     const profile = await this.fetchGoogleUserProfile(tokens.access_token);
     const newStatus: YouTubeAuthStatus = {
       authenticated: true,
@@ -1816,8 +1892,37 @@ class YouTubeService {
 
   async getAuthStatus(timeoutMs = 1500): Promise<YouTubeAuthStatus> {
     try {
+      // 1. Check local backend engine first: Innertube session has real user profile
+      const baseUrl = await this.resolveActiveBaseUrl(Math.min(timeoutMs, 800));
+      if (baseUrl) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 1200);
+          const res = await fetch(`${baseUrl}/yt/auth/status`, {
+            signal: controller.signal,
+          }).finally(() => clearTimeout(timer));
+
+          if (res.ok) {
+            const status: YouTubeAuthStatus = await res.json();
+            if (status.authenticated && status.user && status.user.name && status.user.name !== 'YouTube User') {
+              this.setCachedAuthStatus(status);
+              return status;
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Check cached auth status (only return immediately if it has real user profile)
       const cached = this.getCachedAuthStatus();
-      if (cached.authenticated) {
+      const hasRealUser =
+        cached.authenticated &&
+        cached.user &&
+        cached.user.name &&
+        cached.user.name !== 'YouTube User' &&
+        !cached.user.avatar?.includes('ui-avatars.com') &&
+        cached.user.email;
+
+      if (hasRealUser) {
         // Refresh token if near expiration (< 5 min)
         const tokens = this.getOAuthTokens();
         if (tokens?.refresh_token && tokens.expires_at - Date.now() < 300000) {
@@ -1826,41 +1931,48 @@ class YouTubeService {
         return cached;
       }
 
-      // Check stored tokens if cache was cleared
+      // 3. Check stored tokens if available
       const tokens = this.getOAuthTokens();
       if (tokens?.access_token) {
-        if (tokens.expires_at > Date.now()) {
-          const profile = await this.fetchGoogleUserProfile(tokens.access_token);
-          const status: YouTubeAuthStatus = { authenticated: true, user: profile };
-          this.setCachedAuthStatus(status);
-          return status;
-        } else if (tokens.refresh_token) {
+        let activeToken = tokens.access_token;
+        if (tokens.expires_at <= Date.now() && tokens.refresh_token) {
           const refreshedToken = await this.refreshGoogleAccessToken();
           if (refreshedToken) {
-            const profile = await this.fetchGoogleUserProfile(refreshedToken);
-            const status: YouTubeAuthStatus = { authenticated: true, user: profile };
-            this.setCachedAuthStatus(status);
-            return status;
+            activeToken = refreshedToken;
           }
         }
+
+        // Try syncing tokens with backend engine if available
+        if (baseUrl) {
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 2000);
+            await fetch(`${baseUrl}/yt/auth/set-credentials`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(tokens),
+              signal: controller.signal,
+            }).finally(() => clearTimeout(timer));
+
+            const res = await fetch(`${baseUrl}/yt/auth/status`);
+            if (res.ok) {
+              const status: YouTubeAuthStatus = await res.json();
+              if (status.authenticated && status.user && status.user.name && status.user.name !== 'YouTube User') {
+                this.setCachedAuthStatus(status);
+                return status;
+              }
+            }
+          } catch {}
+        }
+
+        const profile = await this.fetchGoogleUserProfile(activeToken);
+        const status: YouTubeAuthStatus = { authenticated: true, user: profile };
+        this.setCachedAuthStatus(status);
+        return status;
       }
 
-      // If a local engine is running, check if it has session
-      const baseUrl = await this.resolveActiveBaseUrl(Math.min(timeoutMs, 600));
-      if (baseUrl) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 1000);
-        const res = await fetch(`${baseUrl}/yt/auth/status`, {
-          signal: controller.signal,
-        }).finally(() => clearTimeout(timer));
-
-        if (res.ok) {
-          const status = await res.json();
-          if (status.authenticated) {
-            this.setCachedAuthStatus(status);
-            return status;
-          }
-        }
+      if (cached.authenticated) {
+        return cached;
       }
 
       return { authenticated: false };
@@ -1922,83 +2034,328 @@ class YouTubeService {
 
   // ── Authenticated Real YouTube Feeds ───────────────────────────────────────
 
-  async getHomeFeed(continuationToken?: string, timeoutMs = 8000): Promise<YouTubeSearchResult> {
+  /**
+   * Fetches the user's authentic subscribed channels directly from Google OAuth API.
+   */
+  async fetchGoogleAccountSubscriptions(accessToken: string): Promise<YouTubeChannelSubscription[]> {
     try {
-      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
-      if (!baseUrl) return { videos: [] };
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const url = continuationToken
-        ? `${baseUrl}/yt/feed/home?continuation=${encodeURIComponent(continuationToken)}`
-        : `${baseUrl}/yt/feed/home`;
-      const res = await fetch(url, {
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timer));
+      const timer = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(
+        'https://www.googleapis.com/youtube/v3/subscriptions?part=snippet&mine=true&maxResults=50',
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+          },
+          signal: controller.signal,
+        }
+      ).finally(() => clearTimeout(timer));
 
       if (res.ok) {
         const data = await res.json();
-        const clean = (data.results || []).filter(
-          (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
-        );
-        return { videos: clean, continuationToken: data.continuationToken };
+        const subs: YouTubeChannelSubscription[] = (data.items || [])
+          .map((item: any) => ({
+            channelId: item.snippet?.resourceId?.channelId || item.id,
+            channelTitle: item.snippet?.title || 'Channel',
+            avatarUrl: item.snippet?.thumbnails?.default?.url || item.snippet?.thumbnails?.medium?.url || '',
+            subscriptionId: item.id,
+          }))
+          .filter((s: YouTubeChannelSubscription) => s.channelId && s.channelId.startsWith('UC'));
+
+        subs.forEach((s) => this.saveLocalSubscription(s));
+        return subs;
       }
-      return { videos: [] };
+    } catch (e) {
+      console.warn('[YouTubeService] fetchGoogleAccountSubscriptions error:', e);
+    }
+    return [];
+  }
+
+  /**
+   * Fetches latest videos from user's subscribed channels (via uploads playlists or direct search).
+   */
+  async fetchSubscribedChannelsVideos(
+    subscriptions: YouTubeChannelSubscription[],
+    accessToken?: string | null
+  ): Promise<YouTubeVideoItem[]> {
+    if (!subscriptions || subscriptions.length === 0) return [];
+
+    // Take up to 10 channels for fast responsive feed loading
+    const targetChannels = subscriptions.slice(0, 10);
+    const channelFetches = targetChannels.map(async (sub) => {
+      // 1. Try Google API playlistItems for exact channel uploads playlist
+      if (accessToken && sub.channelId && sub.channelId.startsWith('UC')) {
+        const uploadsPlaylistId = 'UU' + sub.channelId.substring(2);
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 4000);
+          const pRes = await fetch(
+            `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${encodeURIComponent(
+              uploadsPlaylistId
+            )}&maxResults=5`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+              signal: controller.signal,
+            }
+          ).finally(() => clearTimeout(timer));
+
+          if (pRes.ok) {
+            const pData = await pRes.json();
+            const items = (pData.items || []).map((it: any) => {
+              const sn = it.snippet;
+              const vid = sn?.resourceId?.videoId;
+              if (!vid) return null;
+              const thumbs = sn?.thumbnails;
+              return {
+                id: vid,
+                title: sn?.title || '',
+                channel: sn?.channelTitle || sub.channelTitle,
+                channelId: sn?.channelId || sub.channelId,
+                thumbnail: thumbs?.maxres?.url || thumbs?.high?.url || thumbs?.medium?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
+                duration: '',
+                views: '',
+                published: sn?.publishedAt ? new Date(sn.publishedAt).toLocaleDateString() : '',
+              } as YouTubeVideoItem;
+            }).filter(Boolean);
+
+            if (items.length > 0) return items;
+          }
+        } catch {}
+      }
+
+      // 2. Fallback to Innertube search for channel's latest uploads
+      try {
+        const searchQ = sub.channelTitle || sub.channelId;
+        const res = await this.searchWithContinuation(searchQ);
+        return res.videos.slice(0, 4).map((v) => ({
+          ...v,
+          channel: sub.channelTitle || v.channel,
+          channelId: sub.channelId || v.channelId,
+        }));
+      } catch {
+        return [];
+      }
+    });
+
+    const results = await Promise.all(channelFetches);
+    const merged: YouTubeVideoItem[] = [];
+    const seen = new Set<string>();
+
+    let maxLen = 0;
+    for (const r of results) if (r.length > maxLen) maxLen = r.length;
+    for (let i = 0; i < maxLen; i++) {
+      for (const list of results) {
+        if (list[i] && !seen.has(list[i].id)) {
+          seen.add(list[i].id);
+          merged.push(list[i]);
+        }
+      }
+    }
+
+    return merged;
+  }
+
+  async getHomeFeed(continuationToken?: string, timeoutMs = 8000): Promise<YouTubeSearchResult> {
+    try {
+      const accessToken = await this.getValidAccessToken();
+      const baseUrl = await this.resolveActiveBaseUrl(Math.min(timeoutMs, 2500));
+      if (baseUrl) {
+        const tokens = this.getOAuthTokens();
+        const headers: Record<string, string> = {};
+        if (accessToken) {
+          headers['Authorization'] = `Bearer ${accessToken}`;
+          headers['x-youtube-token'] = JSON.stringify(tokens || { access_token: accessToken });
+        }
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const url = continuationToken
+          ? `${baseUrl}/yt/feed/home?continuation=${encodeURIComponent(continuationToken)}`
+          : `${baseUrl}/yt/feed/home`;
+
+        try {
+          const res = await fetch(url, { headers, signal: controller.signal }).finally(() => clearTimeout(timer));
+          if (res.ok) {
+            const data = await res.json();
+            const clean = (data.results || []).filter(
+              (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
+            );
+            if (clean.length > 0) {
+              return { videos: clean, continuationToken: data.continuationToken };
+            }
+          }
+        } catch (engineErr) {
+          console.warn('[YouTubeService] Local engine getHomeFeed error:', engineErr);
+        }
+      }
+
+      // If user is logged in, query Google Home Activities API
+      if (accessToken) {
+        try {
+          const actRes = await fetch(
+            'https://www.googleapis.com/youtube/v3/activities?part=snippet,contentDetails&home=true&maxResults=25',
+            {
+              headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+            }
+          );
+          if (actRes.ok) {
+            const actData = await actRes.json();
+            const actVideos: YouTubeVideoItem[] = (actData.items || [])
+              .map((it: any) => {
+                const vid = it.contentDetails?.upload?.videoId || it.contentDetails?.recommendation?.resourceId?.videoId;
+                if (!vid) return null;
+                const sn = it.snippet;
+                const thumbs = sn?.thumbnails;
+                return {
+                  id: vid,
+                  title: sn?.title || '',
+                  channel: sn?.channelTitle || '',
+                  channelId: sn?.channelId || null,
+                  thumbnail: thumbs?.maxres?.url || thumbs?.high?.url || thumbs?.medium?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
+                  duration: '',
+                  views: '',
+                  published: sn?.publishedAt ? new Date(sn.publishedAt).toLocaleDateString() : '',
+                };
+              })
+              .filter(Boolean);
+            if (actVideos.length > 0) {
+              return { videos: actVideos };
+            }
+          }
+        } catch {}
+      }
     } catch (err: any) {
       console.warn('[YouTubeService] getHomeFeed error:', err);
-      return { videos: [] };
     }
+
+    // High-speed resilient regional fallback tailored to Indian / Tamil / English viewers (never random other country videos)
+    try {
+      const subs = this.getSubscriptions();
+      if (subs.length > 0) {
+        const subVideos = await this.fetchSubscribedChannelsVideos(subs.slice(0, 5));
+        if (subVideos.length >= 8) {
+          return { videos: subVideos };
+        }
+      }
+
+      const webResult = await this.searchWithContinuation('trending videos in india tamil english cinema news entertainment');
+      if (webResult.videos.length > 0) {
+        return webResult;
+      }
+    } catch {}
+
+    return { videos: [] };
   }
 
   async getSubscriptionsFeed(continuationToken?: string, timeoutMs = 8000): Promise<YouTubeSearchResult> {
     try {
-      const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
-      if (!baseUrl) return { videos: [] };
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const url = continuationToken
-        ? `${baseUrl}/yt/feed/subscriptions?continuation=${encodeURIComponent(continuationToken)}`
-        : `${baseUrl}/yt/feed/subscriptions`;
-      const res = await fetch(url, {
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timer));
+      const accessToken = await this.getValidAccessToken();
 
-      if (res.ok) {
-        const data = await res.json();
-        const clean = (data.results || []).filter(
-          (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
-        );
-        return { videos: clean, continuationToken: data.continuationToken };
+      // 1. Sync Google Account subscribed channels if access token is active
+      if (accessToken) {
+        await this.fetchGoogleAccountSubscriptions(accessToken).catch(() => []);
       }
-      return { videos: [] };
+
+      // 2. Query local engine subscriptions feed
+      const baseUrl = await this.resolveActiveBaseUrl(Math.min(timeoutMs, 2500));
+      if (baseUrl) {
+        const tokens = this.getOAuthTokens();
+        const headers: Record<string, string> = {};
+        if (accessToken) {
+          headers['Authorization'] = `Bearer ${accessToken}`;
+          headers['x-youtube-token'] = JSON.stringify(tokens || { access_token: accessToken });
+        }
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const url = continuationToken
+          ? `${baseUrl}/yt/feed/subscriptions?continuation=${encodeURIComponent(continuationToken)}`
+          : `${baseUrl}/yt/feed/subscriptions`;
+
+        try {
+          const res = await fetch(url, { headers, signal: controller.signal }).finally(() => clearTimeout(timer));
+          if (res.ok) {
+            const data = await res.json();
+            const clean = (data.results || []).filter(
+              (v: any) => !v.isShort && !v.title?.toLowerCase().includes('#short')
+            );
+            if (clean.length > 0) {
+              return { videos: clean, continuationToken: data.continuationToken };
+            }
+          }
+        } catch (engineErr) {
+          console.warn('[YouTubeService] Local engine getSubscriptionsFeed error:', engineErr);
+        }
+      }
+
+      // 3. Fetch latest videos directly from subscribed channels (Google synced + local)
+      const currentSubs = this.getSubscriptions();
+      if (currentSubs.length > 0) {
+        const subVideos = await this.fetchSubscribedChannelsVideos(currentSubs, accessToken);
+        if (subVideos.length > 0) {
+          return { videos: subVideos };
+        }
+      }
     } catch (err: any) {
       console.warn('[YouTubeService] getSubscriptionsFeed error:', err);
-      return { videos: [] };
     }
+
+    // DO NOT return random viral videos for Subscriptions.
+    // Return empty list so user sees clean "No Subscribed Videos" state.
+    return { videos: [] };
   }
 
   async getHistoryFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {
     try {
       const baseUrl = await this.resolveActiveBaseUrl(timeoutMs);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(`${baseUrl}/yt/feed/history`, {
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timer));
+      if (baseUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(`${baseUrl}/yt/feed/history`, {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
 
-      if (res.ok) {
-        const data = await res.json();
-        const items = (data.results || []).map((v: any) => ({
-          ...v,
-          isShort: v.isShort ?? (v.title?.toLowerCase().includes('#short') || (v.duration && v.duration.startsWith('0:') && parseInt(v.duration.split(':')[1] || '99') <= 60)),
-          watchProgress: v.watchProgress ?? (v.percent_duration_watched ?? (v.percentDurationWatched ?? 0)),
-        }));
-        return { videos: items };
+        if (res.ok) {
+          const data = await res.json();
+          const items = (data.results || []).map((v: any) => ({
+            ...v,
+            isShort: v.isShort ?? (v.title?.toLowerCase().includes('#short') || (v.duration && v.duration.startsWith('0:') && parseInt(v.duration.split(':')[1] || '99') <= 60)),
+            watchProgress: v.watchProgress ?? (v.percent_duration_watched ?? (v.percentDurationWatched ?? 0)),
+          }));
+          if (items.length > 0) {
+            return { videos: items };
+          }
+        }
       }
-      return { videos: [] };
     } catch (err: any) {
       console.warn('[YouTubeService] getHistoryFeed error:', err);
-      return { videos: [] };
     }
+
+    // Local history fallback
+    try {
+      const raw = storageService.getItem('youtube_watch_history_v1');
+      if (raw) {
+        const localHistory = JSON.parse(raw);
+        if (Array.isArray(localHistory) && localHistory.length > 0) {
+          return {
+            videos: localHistory.map((h: any) => ({
+              id: h.id,
+              title: h.title,
+              channel: h.channel,
+              thumbnail: h.thumbnail,
+              duration: h.duration,
+              views: h.views,
+              published: h.published,
+              watchProgress: h.watchProgress || 0,
+              watchedAt: h.watchedAt,
+            })),
+          };
+        }
+      }
+    } catch {}
+
+    return { videos: [] };
   }
 
   async getLikedVideosFeed(timeoutMs = 6000): Promise<YouTubeSearchResult> {

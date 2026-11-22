@@ -17,6 +17,7 @@ import { dataConsumptionService, DataConsumptionStats } from '@/services/DataCon
 import { storageCleanupService } from '@/services/StorageCleanupService';
 import { tamilMVNotificationService } from '@/services/TamilMVNotificationService';
 import { isScreenKeepAwakeEnabled, isBackgroundAudioKeepAliveEnabled } from '@/utils/StremioKeepAliveManager';
+import { addonService } from '@/services/AddonService';
 
 const { width } = Dimensions.get('window');
 
@@ -44,6 +45,7 @@ export default function SettingsScreen() {
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [screenKeepAwake, setScreenKeepAwake] = useState(true);
   const [bgAudioKeepAlive, setBgAudioKeepAlive] = useState(false);
+  const [addonsCount, setAddonsCount] = useState(() => addonService.getEnabledAddons().length);
 
   // Fast, non-blocking stats loader
   const loadDataStats = useCallback(async () => {
@@ -60,6 +62,7 @@ export default function SettingsScreen() {
       setNotifEnabled(tamilMVNotificationService.isNotificationsEnabled());
       setScreenKeepAwake(isScreenKeepAwakeEnabled());
       setBgAudioKeepAlive(isBackgroundAudioKeepAliveEnabled());
+      setAddonsCount(addonService.getEnabledAddons().length);
       loadDataStats();
     }, [loadDataStats])
   );
@@ -151,6 +154,15 @@ export default function SettingsScreen() {
       iconColor: '#30d158',
       badgeText: 'Active',
       badgeColor: '#30d158',
+    },
+    {
+      title: 'Stremio Addons',
+      subtitle: addonsCount > 0 ? `${addonsCount} active • Catalogs, torrent streams & community plugins` : 'Install Cinemeta, Torrentio & community plugins',
+      route: '/settings/addons',
+      icon: 'extension-puzzle-outline',
+      iconColor: '#ff2d55',
+      badgeText: addonsCount > 0 ? `${addonsCount} Active` : undefined,
+      badgeColor: '#ff2d55',
     },
     {
       title: 'YouTube Preferences',

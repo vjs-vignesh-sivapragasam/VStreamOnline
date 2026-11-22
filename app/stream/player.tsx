@@ -369,10 +369,10 @@ const MediaPlayerScreen: React.FC = () => {
         };
         setIsTorrent(true);
         const client = stremioClient ?? new StreamingServerClient(server.serverUrl);
-        finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, stream.fileIdx ?? -1, client, magnetUrl);
+        const validFileIdx = (stream.fileIdx !== undefined && stream.fileIdx >= 0) ? stream.fileIdx : 0;
+        finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, validFileIdx, client, magnetUrl);
 
-        const fileIdx = stream.fileIdx ?? -1;
-        startTorrentStatsPolling(client, infoHash!, fileIdx);
+        startTorrentStatsPolling(client, infoHash!, validFileIdx);
       } else {
         if (!stream.url) return;
         setIsTorrent(false);

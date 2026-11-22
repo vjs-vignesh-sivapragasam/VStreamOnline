@@ -330,6 +330,14 @@ function RootLayoutNav() {
                 headerBackground: InvisibleHeaderBackground,
               }}
             />
+            <Stack.Screen
+              name="settings/addons"
+              options={{
+                headerShown: false,
+                headerTransparent: true,
+                headerBackground: InvisibleHeaderBackground,
+              }}
+            />
           </Stack>
           <PlayerSelectionModal />
           <YouTubeWatchOverlay />

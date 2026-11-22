@@ -33,7 +33,7 @@ interface YouTubeAuthModalProps {
   onClose: () => void;
   authStatus: YouTubeAuthStatus;
   onAuthChange: (status: YouTubeAuthStatus) => void;
-  onSelectFeed?: (feed: 'Home' | 'Subscriptions' | 'History') => void;
+  onSelectFeed?: (feed: 'Recommended' | 'Home' | 'Subscriptions' | 'History') => void;
 }
 
 const { width, height } = Dimensions.get('window');
@@ -408,7 +408,7 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
           {/* Loading Bar */}
           {webLoading && (
             <View style={styles.webLoadingBar}>
-              <ActivityIndicator size="small" color="#FF0000" />
+              <ActivityIndicator size="small" color={theme.primary} />
             </View>
           )}
 
@@ -509,11 +509,11 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
                     }}
                     activeOpacity={0.7}
                   >
-                    <View style={[styles.shortcutIconBox, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
-                      <Ionicons name="sparkles" size={16} color="#FF0000" />
+                    <View style={[styles.shortcutIconBox, { backgroundColor: `${theme.primary}25` }]}>
+                      <Ionicons name="sparkles" size={16} color={theme.primary} />
                     </View>
                     <View style={styles.shortcutTextBox}>
-                      <Text style={styles.shortcutTitle}>Personalized Feed</Text>
+                      <Text style={styles.shortcutTitle}>Home (Personalized Feed)</Text>
                       <Text style={styles.shortcutDesc}>Your algorithmic YouTube recommendations</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={16} color="#6E6E73" />
@@ -527,8 +527,8 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
                     }}
                     activeOpacity={0.7}
                   >
-                    <View style={[styles.shortcutIconBox, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
-                      <Ionicons name="albums-outline" size={16} color="#FF0000" />
+                    <View style={[styles.shortcutIconBox, { backgroundColor: `${theme.primary}25` }]}>
+                      <Ionicons name="albums-outline" size={16} color={theme.primary} />
                     </View>
                     <View style={styles.shortcutTextBox}>
                       <Text style={styles.shortcutTitle}>Subscriptions</Text>
@@ -545,8 +545,8 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
                     }}
                     activeOpacity={0.7}
                   >
-                    <View style={[styles.shortcutIconBox, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
-                      <Ionicons name="time-outline" size={16} color="#FF0000" />
+                    <View style={[styles.shortcutIconBox, { backgroundColor: `${theme.primary}25` }]}>
+                      <Ionicons name="time-outline" size={16} color={theme.primary} />
                     </View>
                     <View style={styles.shortcutTextBox}>
                       <Text style={styles.shortcutTitle}>Watch History</Text>
@@ -744,7 +744,7 @@ export const YouTubeAuthModal: React.FC<YouTubeAuthModalProps> = ({
                   </View>
 
                   <TouchableOpacity
-                    style={[styles.primarySignInBtn, { backgroundColor: '#FF0000' }]}
+                    style={[styles.primarySignInBtn, { backgroundColor: theme.primary }]}
                     onPress={handleQuickEmailSubmit}
                     disabled={isSubmittingEmail}
                     activeOpacity={0.8}

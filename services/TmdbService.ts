@@ -17,7 +17,30 @@ export interface TmdbMovieItem {
   voteAverage?: number;
 }
 
+export interface TmdbEpisode {
+  id: number;
+  episodeNumber: number;
+  seasonNumber: number;
+  name: string;
+  overview: string;
+  stillPath: string | null;
+  stillUrl: string | null;
+  airDate: string;
+  voteAverage: number;
+  runtime?: number;
+}
+
+export interface TmdbSeason {
+  id: number;
+  seasonNumber: number;
+  name: string;
+  episodeCount: number;
+  posterPath: string | null;
+  airDate: string;
+}
+
 export interface TmdbDetails {
+  imdbId?: string | null;
   id: number;
   title: string;
   originalTitle?: string;
@@ -42,6 +65,10 @@ export interface TmdbDetails {
   cast: TmdbCastMember[];
   recommended: TmdbMovieItem[];
   similar: TmdbMovieItem[];
+  mediaType?: 'movie' | 'tv';
+  seasons?: TmdbSeason[];
+  numberOfSeasons?: number;
+  numberOfEpisodes?: number;
 }
 
 const DEFAULT_TMDB_API_KEY = 'a07e22bc18f5cb106bfe4cc1f83ad8ed';
@@ -372,7 +399,7 @@ class TmdbService {
       }
 
       // 2. Fetch full details with append_to_response=credits,videos,recommendations,similar
-      const detailEndpoint = `${TMDB_BASE_URL}/${matchedMediaType}/${matchedId}?api_key=${apiKey}&append_to_response=credits,videos,recommendations,similar,release_dates,content_ratings`;
+      const detailEndpoint = `${TMDB_BASE_URL}/${matchedMediaType}/${matchedId}?api_key=${apiKey}&append_to_response=credits,videos,recommendations,similar,release_dates,content_ratings,external_ids`;
       const detailRes = await fetch(detailEndpoint);
       if (!detailRes.ok) {
         return null;
@@ -552,6 +579,7 @@ class TmdbService {
 
       const result: TmdbDetails = {
         id: d.id,
+        imdbId: d.external_ids?.imdb_id || d.imdb_id || null,
         title: d.title || d.name || query,
         originalTitle: d.original_title || d.original_name,
         overview: d.overview || '',
@@ -575,6 +603,21 @@ class TmdbService {
         cast,
         recommended,
         similar,
+        mediaType: matchedMediaType as 'movie' | 'tv',
+        numberOfSeasons: d.number_of_seasons,
+        numberOfEpisodes: d.number_of_episodes,
+        seasons: Array.isArray(d.seasons)
+          ? d.seasons
+              .filter((s: any) => s.season_number > 0)
+              .map((s: any) => ({
+                id: s.id,
+                seasonNumber: s.season_number,
+                name: s.name || `Season ${s.season_number}`,
+                episodeCount: s.episode_count || 0,
+                posterPath: s.poster_path ? `${TMDB_IMAGE_BASE}/w500${s.poster_path}` : null,
+                airDate: s.air_date ? formatReleaseDate(s.air_date) : '',
+              }))
+          : undefined,
       };
 
       this.inMemoryCache.set(cacheKey, result);
@@ -617,6 +660,31 @@ class TmdbService {
       }
     } catch {}
     await Linking.openURL(searchWebUrl);
+  }
+
+  public async getTvSeasonEpisodes(tvId: number, seasonNumber: number): Promise<TmdbEpisode[]> {
+    const apiKey = this.getApiKey();
+    try {
+      const url = `${TMDB_BASE_URL}/tv/${tvId}/season/${seasonNumber}?api_key=${apiKey}&language=en-US`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.episodes || []).map((ep: any) => ({
+        id: ep.id,
+        episodeNumber: ep.episode_number,
+        seasonNumber: ep.season_number,
+        name: ep.name || `Episode ${ep.episode_number}`,
+        overview: ep.overview || '',
+        stillPath: ep.still_path,
+        stillUrl: ep.still_path ? `${TMDB_IMAGE_BASE}/w500${ep.still_path}` : null,
+        airDate: ep.air_date ? formatReleaseDate(ep.air_date) : '',
+        voteAverage: ep.vote_average || 0,
+        runtime: ep.runtime,
+      }));
+    } catch (e) {
+      console.warn('[TmdbService] Error fetching TV season episodes:', e);
+      return [];
+    }
   }
 }
 

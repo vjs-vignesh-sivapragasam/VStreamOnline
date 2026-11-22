@@ -38900,20 +38900,36 @@ function setupAuthListeners(client) {
 
 async function restoreAuthIfAvailable(client) {
   try {
-    if (fs.existsSync(authCredentialsFile)) {
-      const raw = fs.readFileSync(authCredentialsFile, "utf8");
+    const candidates = [
+      authCredentialsFile,
+      path.join(process.cwd(), "stremio-data", "yt_oauth_credentials.json"),
+      path.join(process.cwd(), "yt_oauth_credentials.json"),
+      path.join(__dirname, "stremio-data", "yt_oauth_credentials.json"),
+      path.join(__dirname, "yt_oauth_credentials.json")
+    ];
+    let credFilePath = null;
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        credFilePath = c;
+        break;
+      }
+    }
+    if (credFilePath) {
+      const raw = fs.readFileSync(credFilePath, "utf8");
       const creds = JSON.parse(raw);
       if (creds && (creds.access_token || creds.refresh_token)) {
-        console.log("[yt-server] Restoring saved YouTube OAuth credentials...");
+        console.log("[yt-server] Restoring saved YouTube OAuth credentials from " + credFilePath + "...");
         await client.session.signIn(creds);
         console.log("[yt-server] Restored OAuth credentials! Logged in:", client.session.logged_in);
         try {
           const acc = await client.account.getInfo();
           const item = acc?.contents?.contents?.[0] || (Array.isArray(acc?.contents) ? acc.contents[0] : acc?.contents);
+          const rawPhoto = item?.account_photo?.slice(-1)[0]?.url || item?.account_photo?.[0]?.url || "";
+          const resolvedPhoto = rawPhoto ? (rawPhoto.startsWith("//") ? "https:" + rawPhoto : rawPhoto) : "";
           cachedUserProfile = {
             name: item?.account_name?.text || item?.account_name?.toString?.() || "YouTube User",
             email: item?.account_byline?.text || item?.account_byline?.toString?.() || "",
-            avatar: item?.account_photo?.slice(-1)[0]?.url || item?.account_photo?.[0]?.url || ""
+            avatar: resolvedPhoto
           };
         } catch (_) {}
       }
@@ -39139,18 +39155,63 @@ var ytRequestHandler = async (req, res) => {
     res.end(JSON.stringify({ status: "ok", time: Date.now() }));
     return;
   }
+  if (parsedUrl.pathname === "/yt/auth/set-credentials" && req.method === "POST") {
+    try {
+      let body = "";
+      req.on("data", chunk => { body += chunk; });
+      req.on("end", async () => {
+        try {
+          const creds = JSON.parse(body);
+          if (creds && (creds.access_token || creds.refresh_token)) {
+            try {
+              fs.writeFileSync(authCredentialsFile, JSON.stringify(creds, null, 2), "utf8");
+              fs.writeFileSync(path.join(process.cwd(), "stremio-data", "yt_oauth_credentials.json"), JSON.stringify(creds, null, 2), "utf8");
+              fs.writeFileSync(path.join(process.cwd(), "yt_oauth_credentials.json"), JSON.stringify(creds, null, 2), "utf8");
+            } catch (_) {}
+            const yt = await getClient("WEB");
+            await yt.session.signIn(creds);
+            try {
+              const acc = await yt.account.getInfo();
+              const item = acc?.contents?.contents?.[0] || (Array.isArray(acc?.contents) ? acc.contents[0] : acc?.contents);
+              const rawPhoto = item?.account_photo?.slice(-1)[0]?.url || item?.account_photo?.[0]?.url || "";
+              const resolvedPhoto = rawPhoto ? (rawPhoto.startsWith("//") ? "https:" + rawPhoto : rawPhoto) : "";
+              cachedUserProfile = {
+                name: item?.account_name?.text || item?.account_name?.toString?.() || "YouTube User",
+                email: item?.account_byline?.text || item?.account_byline?.toString?.() || "",
+                avatar: resolvedPhoto
+              };
+            } catch (_) {}
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: true, authenticated: true, user: cachedUserProfile }));
+            return;
+          }
+        } catch (e) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      });
+      return;
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+      return;
+    }
+  }
   if (parsedUrl.pathname === "/yt/auth/status") {
     try {
       const yt = await getClient("WEB");
       const isLoggedIn = !!yt.session.logged_in;
-      if (isLoggedIn && !cachedUserProfile) {
+      if (isLoggedIn && (!cachedUserProfile || cachedUserProfile.name === "YouTube User" || !cachedUserProfile.avatar)) {
         try {
           const acc = await yt.account.getInfo();
           const item = acc?.contents?.contents?.[0] || (Array.isArray(acc?.contents) ? acc.contents[0] : acc?.contents);
+          const rawPhoto = item?.account_photo?.slice(-1)[0]?.url || item?.account_photo?.[0]?.url || "";
+          const resolvedPhoto = rawPhoto ? (rawPhoto.startsWith("//") ? "https:" + rawPhoto : rawPhoto) : "";
           cachedUserProfile = {
             name: item?.account_name?.text || item?.account_name?.toString?.() || "YouTube User",
             email: item?.account_byline?.text || item?.account_byline?.toString?.() || "",
-            avatar: item?.account_photo?.slice(-1)[0]?.url || item?.account_photo?.[0]?.url || ""
+            avatar: resolvedPhoto
           };
         } catch (_) {}
       }
@@ -39238,6 +39299,17 @@ var ytRequestHandler = async (req, res) => {
   if (parsedUrl.pathname === "/yt/feed/home") {
     try {
       const yt = await getClient("WEB");
+      if (!yt.session.logged_in) {
+        const tokenH = req.headers["x-youtube-token"];
+        if (tokenH) {
+          try {
+            const creds = JSON.parse(tokenH);
+            if (creds && (creds.access_token || creds.refresh_token)) {
+              await yt.session.signIn(creds);
+            }
+          } catch (_) {}
+        }
+      }
       let videos = [];
       let nextToken = null;
       const seenIds = new Set();
@@ -39257,70 +39329,55 @@ var ytRequestHandler = async (req, res) => {
 
       if (yt.session.logged_in) {
         try {
-          if (page === 1) {
-            try {
-              const what = await yt.session.actions.execute('/browse', { browseId: 'FEwhat_to_watch', client: 'TV' });
-              const whatTiles = extractTvTiles(what.data);
-              for (const tile of whatTiles) {
-                const parsed = parseTvTile(tile);
-                if (parsed) addVideo(parsed);
-              }
-            } catch (_) {}
-          }
-
-          const subs = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', client: 'TV' });
-          if (page === 1) {
-            const subTiles = extractTvTiles(subs.data);
-            for (const tile of subTiles) {
-              const parsed = parseTvTile(tile);
-              if (parsed) addVideo(parsed);
-            }
-          }
-
-          const tabs = subs.data?.contents?.tvBrowseRenderer?.content?.tvSecondaryNavRenderer?.sections?.[0]?.tvSecondaryNavSectionRenderer?.tabs || [];
-          const validTabs = tabs.slice(1).filter(t => t.tabRenderer?.endpoint?.browseEndpoint?.params && t.tabRenderer?.title !== 'A-Z');
-
-          const BATCH_SIZE = 5;
-          const startIdx = (page - 1) * BATCH_SIZE;
-          const endIdx = startIdx + BATCH_SIZE;
-          const currentTabs = validTabs.slice(startIdx, endIdx);
-
-          if (endIdx < validTabs.length) {
-            nextToken = `page:${page + 1}`;
-          }
-
-          if (currentTabs.length > 0) {
-            const channelFetches = currentTabs.map(async (tab) => {
-              try {
-                const params = tab.tabRenderer.endpoint.browseEndpoint.params;
-                const chRes = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', params, client: 'TV' });
-                const tiles = extractTvTiles(chRes.data);
-                return tiles.map(parseTvTile).filter(Boolean);
-              } catch (_) {
-                return [];
-              }
-            });
-
-            const channelResults = await Promise.all(channelFetches);
-            let maxLen = 0;
-            for (const list of channelResults) {
-              if (list.length > maxLen) maxLen = list.length;
-            }
-            for (let i = 0; i < maxLen; i++) {
-              for (const list of channelResults) {
-                if (list[i]) addVideo(list[i]);
+          // Native Innertube Home Feed (FEwhat_to_watch for authenticated user session)
+          const homeFeed = await yt.getHomeFeed();
+          if (homeFeed && homeFeed.videos) {
+            for (const v of homeFeed.videos) {
+              if (v && v.id) {
+                addVideo({
+                  id: v.id,
+                  title: v.title?.text || v.title?.toString?.() || "",
+                  channel: v.author?.name || v.author?.toString?.() || "",
+                  channelId: v.author?.id || v.channel_id || null,
+                  thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+                  duration: v.duration?.text || "",
+                  views: v.short_view_count?.text || v.views?.text || "",
+                  published: v.published?.text || ""
+                });
               }
             }
+          }
+          if (homeFeed?.has_continuation && homeFeed.continuation_token) {
+            nextToken = homeFeed.continuation_token;
           }
         } catch (e) {
-          console.warn("[yt-server] Personalized home error:", e.message);
+          console.warn("[yt-server] yt.getHomeFeed error, trying web browse:", e.message);
+          try {
+            const what = await yt.session.actions.execute('/browse', { browseId: 'FEwhat_to_watch' });
+            const items = what.data?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.richGridRenderer?.contents || [];
+            for (const item of items) {
+              const rItem = item.richItemRenderer?.content?.videoRenderer;
+              if (rItem && rItem.videoId) {
+                addVideo({
+                  id: rItem.videoId,
+                  title: rItem.title?.runs?.[0]?.text || "",
+                  channel: rItem.ownerText?.runs?.[0]?.text || "",
+                  channelId: rItem.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || null,
+                  thumbnail: rItem.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${rItem.videoId}/hqdefault.jpg`,
+                  duration: rItem.lengthText?.simpleText || "",
+                  views: rItem.shortViewCountText?.simpleText || "",
+                  published: rItem.publishedTimeText?.simpleText || ""
+                });
+              }
+            }
+          } catch (_) {}
         }
       }
 
       if (videos.length === 0) {
         try {
           const guest = await getClient("GUEST");
-          const searchResult = await guest.search("trending popular new videos");
+          const searchResult = await guest.search("trending videos in india tamil english news cinema");
           const list = searchResult.videos || [];
           for (const v of list) {
             if (v && v.id) {
@@ -39356,6 +39413,17 @@ var ytRequestHandler = async (req, res) => {
     try {
       const yt = await getClient("WEB");
       if (!yt.session.logged_in) {
+        const tokenH = req.headers["x-youtube-token"];
+        if (tokenH) {
+          try {
+            const creds = JSON.parse(tokenH);
+            if (creds && (creds.access_token || creds.refresh_token)) {
+              await yt.session.signIn(creds);
+            }
+          } catch (_) {}
+        }
+      }
+      if (!yt.session.logged_in) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "You must be signed in to view your subscriptions.", authenticated: false, results: [] }));
         return;
@@ -39378,48 +39446,48 @@ var ytRequestHandler = async (req, res) => {
       }
 
       try {
-        const subs = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', client: 'TV' });
-        if (page === 1) {
-          const subTiles = extractTvTiles(subs.data);
-          for (const tile of subTiles) {
-            const parsed = parseTvTile(tile);
-            if (parsed) addVideo(parsed);
-          }
-        }
-
-        const tabs = subs.data?.contents?.tvBrowseRenderer?.content?.tvSecondaryNavRenderer?.sections?.[0]?.tvSecondaryNavSectionRenderer?.tabs || [];
-        const validTabs = tabs.slice(1).filter(t => t.tabRenderer?.endpoint?.browseEndpoint?.params && t.tabRenderer?.title !== 'A-Z');
-
-        const BATCH_SIZE = 6;
-        const startIdx = (page - 1) * BATCH_SIZE;
-        const endIdx = startIdx + BATCH_SIZE;
-        const currentTabs = validTabs.slice(startIdx, endIdx);
-
-        if (endIdx < validTabs.length) {
-          nextToken = `page:${page + 1}`;
-        }
-
-        if (currentTabs.length > 0) {
-          const channelFetches = currentTabs.map(async (tab) => {
-            try {
-              const params = tab.tabRenderer.endpoint.browseEndpoint.params;
-              const chRes = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions', params, client: 'TV' });
-              const tiles = extractTvTiles(chRes.data);
-              return tiles.map(parseTvTile).filter(Boolean);
-            } catch (_) {
-              return [];
-            }
-          });
-
-          const channelResults = await Promise.all(channelFetches);
-          for (const list of channelResults) {
-            for (const v of list) {
-              addVideo(v);
+        // Native Innertube Subscriptions Feed (FEsubscriptions for authenticated session)
+        const subFeed = await yt.getSubscriptionsFeed();
+        if (subFeed && subFeed.videos && subFeed.videos.length > 0) {
+          for (const v of subFeed.videos) {
+            if (v && v.id) {
+              addVideo({
+                id: v.id,
+                title: v.title?.text || v.title?.toString?.() || "",
+                channel: v.author?.name || v.author?.toString?.() || "",
+                channelId: v.author?.id || v.channel_id || null,
+                thumbnail: v.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+                duration: v.duration?.text || "",
+                views: v.short_view_count?.text || v.views?.text || "",
+                published: v.published?.text || ""
+              });
             }
           }
         }
-      } catch (subErr) {
-        console.warn("[yt-server] Subscriptions TV browse error:", subErr.message);
+      } catch (nativeSubErr) {
+        console.warn("[yt-server] Native getSubscriptionsFeed error, trying web browse:", nativeSubErr.message);
+        try {
+          const subs = await yt.session.actions.execute('/browse', { browseId: 'FEsubscriptions' });
+          const items = subs.data?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+          for (const section of items) {
+            const vItems = section.itemSectionRenderer?.contents?.[0]?.shelfRenderer?.content?.gridRenderer?.items || [];
+            for (const item of vItems) {
+              const rItem = item.gridVideoRenderer;
+              if (rItem && rItem.videoId) {
+                addVideo({
+                  id: rItem.videoId,
+                  title: rItem.title?.runs?.[0]?.text || "",
+                  channel: rItem.shortBylineText?.runs?.[0]?.text || "",
+                  channelId: rItem.shortBylineText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || null,
+                  thumbnail: rItem.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${rItem.videoId}/hqdefault.jpg`,
+                  duration: rItem.thumbnailOverlays?.[0]?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || "",
+                  views: rItem.shortViewCountText?.simpleText || "",
+                  published: rItem.publishedTimeText?.simpleText || ""
+                });
+              }
+            }
+          }
+        } catch (_) {}
       }
 
       res.writeHead(200, { "Content-Type": "application/json" });

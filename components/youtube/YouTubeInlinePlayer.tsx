@@ -12,17 +12,19 @@ import {
   ScrollView,
   Linking,
   Dimensions,
+  useWindowDimensions,
   AppState,
   AppStateStatus,
   Switch,
   PanResponder,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Video, { VideoRef, ResizeMode, SelectedTrackType } from 'react-native-video';
 import Slider from '@react-native-assets/slider';
 import * as Haptics from 'expo-haptics';
 import { isHapticsSupported } from '@/utils/platform';
-import { useKeepAwake } from 'expo-keep-awake';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import KSPlayerView, { isKSPlayerAvailable, KSPlayerRef } from '@/components/ksplayer/KSPlayerView';
 import { isRCTVideoAvailable } from '@/components/nativeplayer';
 import { WebView } from 'react-native-webview';
@@ -1159,20 +1161,23 @@ function getInjectedCleanPlayerJs(topInset?: number, fitMode: ScreenFitMode = 'h
     window.addEventListener('touchstart', onTouchStartCapture, { capture: true, passive: true });
     window.addEventListener('touchend', onTouchEndCapture, { capture: true, passive: true });
 
-    // Auto Picture-in-Picture trigger when user leaves the app or browser minimizes
+    // Handle visibility changes safely without invoking illegal PiP during screen lock
     document.addEventListener('visibilitychange', function() {
       if (document.hidden) {
-        if (window.__agyPipEnabled === false) return;
-        var v = document.querySelector('video');
-        if (v && !v.paused) {
-          try {
-            if (document.pictureInPictureEnabled && !document.pictureInPictureElement) {
-              v.requestPictureInPicture().catch(function(){});
-            } else if (v.webkitSetPresentationMode) {
-              v.webkitSetPresentationMode('picture-in-picture');
+        // Device locked or app moved to background: keep session alive, do not force presentation mode
+      } else {
+        // Device unlocked or foregrounded: safely resume video if it was playing and not user-paused
+        try {
+          var v = document.querySelector('video');
+          if (v && v.paused && !window._agyUserPaused) {
+            var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+            if (player && typeof player.playVideo === 'function') {
+              try { player.playVideo(); } catch(e) {}
+            } else {
+              v.play().catch(function(){});
             }
-          } catch(e) {}
-        }
+          }
+        } catch(e) {}
       }
     });
 
@@ -1734,14 +1739,54 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   isFullScreen = false,
   captionTracks,
 }) => {
-  useKeepAwake('YOUTUBE_PLAYER_PLAYBACK');
   const effectiveTopInset = Math.max(topInset || 0, Platform.OS === 'ios' ? 44 : 24);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [deviceOrientation, setDeviceOrientation] = useState<'portrait' | 'landscape'>(() => {
+    const dim = Dimensions.get('window');
+    return isFullScreen || dim.width > dim.height ? 'landscape' : 'portrait';
+  });
+
+  useEffect(() => {
+    const updateOrientation = () => {
+      const dim = Dimensions.get('window');
+      const screenDim = Dimensions.get('screen');
+      const isL = isFullScreen || dim.width > dim.height || screenDim.width > screenDim.height;
+      setDeviceOrientation(isL ? 'landscape' : 'portrait');
+    };
+    updateOrientation();
+    const sub = Dimensions.addEventListener('change', updateOrientation);
+    return () => sub?.remove();
+  }, [isFullScreen]);
+
+  const isLandscapeLayout = Boolean(
+    isFullScreen ||
+    windowWidth > windowHeight ||
+    deviceOrientation === 'landscape' ||
+    Dimensions.get('window').width > Dimensions.get('window').height ||
+    Dimensions.get('screen').width > Dimensions.get('screen').height
+  );
 
   const [showControls, setShowControls] = useState(false);
   const [videoResizeMode, setVideoResizeMode] = useState<ScreenFitMode>(screenFitMode || 'hero');
   const [feedbackPill, setFeedbackPill] = useState<FeedbackPillData | null>(null);
   const feedbackTimerRef = useRef<any>(null);
   const isFullScreenRef = useRef(isFullScreen);
+
+  const videoRef = useRef<VideoRef>(null);
+  const ksRef = useRef<KSPlayerRef>(null);
+  const webViewRef = useRef<any>(null);
+
+  // Safe helper to inject JavaScript into WebView with defensive null checks and error handling
+  const safeInjectJS = useCallback((js: string) => {
+    try {
+      if (webViewRef.current) {
+        webViewRef.current.injectJavaScript(js);
+      }
+    } catch (err) {
+      console.warn('[YouTubeInlinePlayer] safeInjectJS error:', err);
+    }
+  }, []);
   useEffect(() => {
     isFullScreenRef.current = isFullScreen;
   }, [isFullScreen]);
@@ -1882,11 +1927,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       })();
       true;
     `;
-    webViewRef.current?.injectJavaScript(skipJs);
+    safeInjectJS(skipJs);
     setTimeout(() => {
       setIsAdPlaying(false);
     }, 400);
-  }, []);
+  }, [safeInjectJS]);
 
   // Seamless auto-fallback: if direct stream fails (e.g. 403 or engine starting), immediately play via web player
   
@@ -1938,9 +1983,6 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   const isPipEnabled = propPipEnabled !== undefined ? propPipEnabled : internalPipEnabled;
   const [isPipActive, setIsPipActive] = useState<boolean>(false);
-  const videoRef = useRef<VideoRef>(null);
-  const ksRef = useRef<KSPlayerRef>(null);
-  const webViewRef = useRef<any>(null);
 
   // Web player state for fallback mode
   const [webCurrentTime, setWebCurrentTime] = useState(0);
@@ -1958,9 +2000,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     if (screenFitMode) {
       setVideoResizeMode(screenFitMode);
       setWebResizeMode(screenFitMode);
-      if (isWebActive && webViewRef.current) {
+      if (isWebActive) {
         const fitCss = screenFitMode === 'contain' ? 'contain' : screenFitMode === 'stretch' ? 'fill' : 'cover';
-        webViewRef.current.injectJavaScript(`
+        safeInjectJS(`
           (function() {
             var v = document.querySelector('video');
             if (v) v.style.setProperty('object-fit', '${fitCss}', 'important');
@@ -1969,7 +2011,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         `);
       }
     }
-  }, [screenFitMode, isWebActive]);
+  }, [screenFitMode, isWebActive, safeInjectJS]);
   const effectiveCurrentTime = isWebActive ? (webCurrentTime || currentTime) : currentTime;
   const effectiveDuration = isWebActive ? (webDuration || duration) : duration;
   const effectiveIsPlaying = isWebActive ? webIsPlaying : isPlaying;
@@ -1978,22 +2020,58 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   const effectiveLoop = isWebActive ? webLoop : isLooping;
   const effectiveResizeMode = isWebActive ? webResizeMode : videoResizeMode;
 
-  // Auto Picture-in-Picture when app transitions to background / inactive
+  // Track app active state to manage keep-awake and prevent screen lock freezes
+  const isAppActiveRef = useRef<boolean>(AppState.currentState === 'active');
+  const wasPlayingBeforeLockRef = useRef<boolean>(effectiveIsPlaying);
+
+  // Dynamically manage keep-awake: only keep screen awake while actively playing in foreground
+  useEffect(() => {
+    if (effectiveIsPlaying && isAppActiveRef.current) {
+      activateKeepAwakeAsync('YOUTUBE_PLAYER_PLAYBACK').catch(() => {});
+    } else {
+      deactivateKeepAwake('YOUTUBE_PLAYER_PLAYBACK').catch(() => {});
+    }
+    return () => {
+      deactivateKeepAwake('YOUTUBE_PLAYER_PLAYBACK').catch(() => {});
+    };
+  }, [effectiveIsPlaying]);
+
+  // Clean lifecycle handling for screen lock / unlock without deadlocks or crashes
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      if (nextState === 'background' || nextState === 'inactive') {
-        if (isPipEnabled && effectiveIsPlaying) {
-          if (isWebActive && webViewRef.current) {
-            webViewRef.current.injectJavaScript(`
+      const isNowActive = nextState === 'active';
+      const prevActive = isAppActiveRef.current;
+      isAppActiveRef.current = isNowActive;
+
+      if (!isNowActive && prevActive) {
+        // Device locked or app backgrounded
+        console.log(`[YouTubeInlinePlayer] 📱 App transitioned to ${nextState} (screen lock or background)`);
+        wasPlayingBeforeLockRef.current = effectiveIsPlaying;
+        deactivateKeepAwake('YOUTUBE_PLAYER_PLAYBACK').catch(() => {});
+
+        // NOTE: We deliberately do NOT trigger PiP presentation here during screen lock!
+        // Calling webkitSetPresentationMode or enterPictureInPicture while device is locking causes
+        // WKWebView and AVKit to deadlock or crash the render process.
+      } else if (isNowActive && !prevActive) {
+        // Device unlocked or app foregrounded
+        console.log('[YouTubeInlinePlayer] 📱 App returned to active (screen unlocked)');
+        if (effectiveIsPlaying) {
+          activateKeepAwakeAsync('YOUTUBE_PLAYER_PLAYBACK').catch(() => {});
+        }
+
+        // Restore playback smoothly if it was playing before lock
+        if (wasPlayingBeforeLockRef.current) {
+          if (isWebActive) {
+            safeInjectJS(`
               (function() {
-                if (window.__agyPipEnabled === false) return;
                 try {
                   var v = document.querySelector('video');
-                  if (v && !v.paused) {
-                    if (v.webkitSetPresentationMode) {
-                      v.webkitSetPresentationMode('picture-in-picture');
-                    } else if (document.pictureInPictureEnabled && !document.pictureInPictureElement) {
-                      v.requestPictureInPicture().catch(function(){});
+                  if (v && v.paused && !window._agyUserPaused) {
+                    var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+                    if (p && typeof p.playVideo === 'function') {
+                      p.playVideo();
+                    } else {
+                      v.play().catch(function() {});
                     }
                   }
                 } catch(e) {}
@@ -2001,23 +2079,22 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               true;
             `);
           } else if (videoRef.current) {
-            try {
-              videoRef.current.enterPictureInPicture();
-            } catch (e) {
-              console.warn('[YouTubeInlinePlayer] Auto-PiP enterPictureInPicture error:', e);
+            if (!isPlaying && onPlay) {
+              onPlay();
             }
           }
         }
       }
     });
+
     return () => sub.remove();
-  }, [effectiveIsPlaying, isWebActive, isPipEnabled]);
+  }, [effectiveIsPlaying, isWebActive, isPlaying, onPlay, safeInjectJS]);
 
   // Modal seek & progress handlers
   const handleSeekFromModal = useCallback((targetSec: number) => {
     if (isWebActive) {
       setWebCurrentTime(targetSec);
-      webViewRef.current?.injectJavaScript(`
+      safeInjectJS(`
         (function() {
           var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
           var v = document.querySelector('video');
@@ -2033,7 +2110,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     } else {
       onSeek(targetSec);
     }
-  }, [isWebActive, effectiveDuration, onProgress, onSeek]);
+  }, [isWebActive, effectiveDuration, onProgress, onSeek, safeInjectJS]);
 
   // SponsorBlock integration: automatically skip creator-embedded sponsor shoutouts
   const [sponsorSegments, setSponsorSegments] = useState<SponsorSegment[]>([]);
@@ -2106,7 +2183,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       } else {
         if (onPause) onPause(); else onTogglePlay();
       }
-      webViewRef.current?.injectJavaScript(`
+      safeInjectJS(`
         (function() {
           var v = document.querySelector('video');
           var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
@@ -2136,7 +2213,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         if (onPlay) onPlay(); else onTogglePlay();
       }
     }
-  }, [isWebActive, effectiveIsPlaying, onPlay, onPause, onTogglePlay]);
+  }, [isWebActive, effectiveIsPlaying, onPlay, onPause, onTogglePlay, safeInjectJS]);
 
   const handleTogglePlayFromModal = handleTogglePlay;
 
@@ -2154,7 +2231,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
           'Auto': 'auto',
         };
         const targetQ = qMap[q] || 'auto';
-        webViewRef.current?.injectJavaScript(`
+        safeInjectJS(`
           (function() {
             try {
               var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
@@ -2176,12 +2253,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     } catch (err) {
       console.warn('[YouTubeInlinePlayer] Error changing quality:', err);
     }
-  }, [isWebActive, onChangeQuality]);
+  }, [isWebActive, onChangeQuality, safeInjectJS]);
 
   const handleSetSpeedFromModal = useCallback((speed: number) => {
     if (isWebActive) {
       setWebSpeed(speed);
-      webViewRef.current?.injectJavaScript(`
+      safeInjectJS(`
         (function() {
           var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
           var v = document.querySelector('video');
@@ -2199,13 +2276,13 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     } else {
       onSetPlaybackSpeed?.(speed);
     }
-  }, [isWebActive, onSetPlaybackSpeed]);
+  }, [isWebActive, onSetPlaybackSpeed, safeInjectJS]);
 
   const handleToggleLoopFromModal = useCallback(() => {
     if (isWebActive) {
       setWebLoop((prev) => {
         const next = !prev;
-        webViewRef.current?.injectJavaScript(`
+        safeInjectJS(`
           (function() {
             var v = document.querySelector('video');
             if (v) v.loop = ${next};
@@ -2235,8 +2312,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       onTogglePip?.(true);
     }
 
-    if (isWebActive && webViewRef.current) {
-      webViewRef.current.injectJavaScript(`
+    if (isWebActive) {
+      safeInjectJS(`
         (function() {
           try {
             var v = document.querySelector('video');
@@ -2262,7 +2339,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         console.warn('[YouTubeInlinePlayer] PiP toggle error:', e);
       }
     }
-  }, [isPipEnabled, isWebActive, isPipActive, onTogglePip]);
+  }, [isPipEnabled, isWebActive, isPipActive, onTogglePip, safeInjectJS]);
 
   const handleTogglePipFromModal = useCallback(async (explicitValue?: boolean) => {
     const nextVal = explicitValue !== undefined ? explicitValue : !isPipEnabled;
@@ -2281,8 +2358,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
     onTogglePip?.(nextVal);
 
     if (nextVal) {
-      if (isWebActive && webViewRef.current) {
-        webViewRef.current.injectJavaScript(`
+      if (isWebActive) {
+        safeInjectJS(`
           (function() {
             window.__agyPipEnabled = true;
             try {
@@ -2306,8 +2383,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         }
       }
     } else {
-      if (isWebActive && webViewRef.current) {
-        webViewRef.current.injectJavaScript(`
+      if (isWebActive) {
+        safeInjectJS(`
           (function() {
             window.__agyPipEnabled = false;
             try {
@@ -2329,7 +2406,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         } catch (e) {}
       }
     }
-  }, [isPipEnabled, isWebActive, onTogglePip]);
+  }, [isPipEnabled, isWebActive, onTogglePip, safeInjectJS]);
 
 
 
@@ -2354,10 +2431,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
   // Sync React Native isPlaying state down to the web player
   useEffect(() => {
-    if (isWebActive && webViewRef.current) {
+    if (isWebActive) {
       if (lastWebCommandPlayingRef.current === isPlaying) return;
       lastWebCommandPlayingRef.current = isPlaying;
-      webViewRef.current.injectJavaScript(`
+      safeInjectJS(`
         (function() {
           try {
             var v = document.querySelector('video');
@@ -2380,11 +2457,11 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         true;
       `);
     }
-  }, [isPlaying, isWebActive]);
+  }, [isPlaying, isWebActive, safeInjectJS]);
 
   // Sync MediaMetadata to system Lock Screen & Control Center
   useEffect(() => {
-    if (isWebActive && webViewRef.current && (title || channel || poster)) {
+    if (isWebActive && (title || channel || poster)) {
       const metaJs = `
         (function() {
           try {
@@ -2402,9 +2479,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         })();
         true;
       `;
-      webViewRef.current.injectJavaScript(metaJs);
+      safeInjectJS(metaJs);
     }
-  }, [title, channel, poster, isWebActive]);
+  }, [title, channel, poster, isWebActive, safeInjectJS]);
   // Initially hide controls when a new video stream loads
   useEffect(() => {
     setShowControls(false);
@@ -2454,7 +2531,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
       if (isWebActive) {
         const fitCss = next === 'contain' ? 'contain' : next === 'stretch' ? 'fill' : 'cover';
-        webViewRef.current?.injectJavaScript(`
+        safeInjectJS(`
           (function() {
             try {
               window.__agyDesiredFitMode = '${next}';
@@ -2565,8 +2642,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
   }, [captionTracks, videoId]);
 
   useEffect(() => {
-    if (isWebActive && webViewRef.current) {
-      webViewRef.current.injectJavaScript(`
+    if (isWebActive) {
+      safeInjectJS(`
         (function() {
           if (typeof window.__agySetCaptionsEnabled === 'function') {
             window.__agySetCaptionsEnabled(${isCCOn});
@@ -2575,7 +2652,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         true;
       `);
     }
-  }, [isCCOn, isWebActive, videoId]);
+  }, [isCCOn, isWebActive, videoId, safeInjectJS]);
 
   const handleToggleAutoplay = useCallback(async () => {
     if (await isHapticsSupported()) {
@@ -2612,8 +2689,8 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         setFeedbackPill(null);
       }, 1800);
 
-      if (isWebActive && webViewRef.current) {
-        webViewRef.current.injectJavaScript(`
+      if (isWebActive) {
+        safeInjectJS(`
           (function() {
             if (typeof window.__agySetCaptionsEnabled === 'function') {
               window.__agySetCaptionsEnabled(${next});
@@ -2626,7 +2703,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
       return next;
     });
     scheduleControlsHide();
-  }, [isWebActive, scheduleControlsHide]);
+  }, [isWebActive, scheduleControlsHide, safeInjectJS]);
 
   const handleToggleCCFromModal = useCallback(async () => {
     await handleToggleCC();
@@ -2693,10 +2770,10 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
 
   useEffect(() => {
-    if (isWebActive && webViewRef.current) {
+    if (isWebActive) {
       const currentMode = videoResizeMode || screenFitMode || 'cover';
       const fitCss = currentMode === 'contain' ? 'contain' : currentMode === 'stretch' ? 'fill' : 'cover';
-      webViewRef.current.injectJavaScript(`
+      safeInjectJS(`
         (function() {
           try {
             window.__agyDesiredFitMode = '${currentMode}';
@@ -2722,7 +2799,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         true;
       `);
     }
-  }, [isFullScreen, videoResizeMode, screenFitMode, isWebActive]);
+  }, [isFullScreen, videoResizeMode, screenFitMode, isWebActive, safeInjectJS]);
 
   const actualDuration = duration > 0 ? duration : (effectiveDuration > 0 ? effectiveDuration : 0);
   const actualCurrentTime = isWebActive ? (webCurrentTime || currentTime) : currentTime;
@@ -2808,10 +2885,19 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
               : 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
           }
-          onLoadProgress={({ nativeEvent }) => {
-            if (nativeEvent.progress > 0.7) {
-              webViewRef.current?.injectJavaScript(cleanPlayerJs);
-            }
+          onContentProcessDidTerminate={() => {
+            console.warn('[YouTubeInlinePlayer] ⚠️ WKWebView WebContent process terminated! Auto-reloading to restore playback...');
+            setIsBuffering(false);
+            try {
+              webViewRef.current?.reload();
+            } catch (err) {}
+          }}
+          onRenderProcessGone={() => {
+            console.warn('[YouTubeInlinePlayer] ⚠️ Android WebView render process gone! Auto-reloading...');
+            setIsBuffering(false);
+            try {
+              webViewRef.current?.reload();
+            } catch (err) {}
           }}
           onShouldStartLoadWithRequest={(request) => {
             const url = request.url.toLowerCase();
@@ -2833,7 +2919,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             setTimeout(() => {
               setShowPosterShield(false);
             }, 600);
-            webViewRef.current?.injectJavaScript(`
+            safeInjectJS(`
               (function() {
                 if (typeof window.__agySetCaptionsEnabled === 'function') {
                   window.__agySetCaptionsEnabled(${isCCOn});
@@ -2984,7 +3070,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             resizeMode={videoResizeMode === 'contain' ? 'contain' : videoResizeMode === 'stretch' ? 'stretch' : 'cover'}
             style={StyleSheet.absoluteFill}
             controls={false}
-            selectedTextTrack={isCCOn ? { type: SelectedTrackType.LANGUAGE, value: 'en' } : { type: SelectedTrackType.DISABLED }}
+            selectedTextTrack={{ type: SelectedTrackType.DISABLED }}
             playInBackground={true}
             playWhenInactive={true}
             enterPictureInPictureOnLeave={isPipEnabled}
@@ -2996,7 +3082,9 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
             }}
             onRestoreUserInterfaceForPictureInPictureStop={() => {
               console.log('[YouTubeInlinePlayer] 🔄 PiP stop restore requested');
-              videoRef.current?.restoreUserInterfaceForPictureInPictureStopCompleted(true);
+              try {
+                videoRef.current?.restoreUserInterfaceForPictureInPictureStopCompleted(true);
+              } catch (_) {}
             }}
             ignoreSilentSwitch="ignore"
             progressUpdateInterval={250}
@@ -3029,7 +3117,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               }
             }}
             onError={(e) => {
-              console.error('[YouTubeInlinePlayer] ❌ react-native-video onError fired:', JSON.stringify(e));
+              console.error('[YouTubeInlinePlayer] ❌ react-native-video onError fired:', e?.error?.errorString || e);
               setIsBuffering(false);
               if (isKSPlayerAvailable() && !useKSPlayer) {
                 console.log('[YouTubeInlinePlayer] 🔄 Falling back to KSPlayer...');
@@ -3392,25 +3480,56 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
         </TouchableOpacity>
       )}
 
-      {/* Player Settings Bottom Sheet Modal (Active in Both Web and Native Modes) */}
+      {/* Player Settings Bottom Sheet / Side Drawer Modal (Active in Both Web and Native Modes) */}
       <Modal
         visible={settingsModalVisible}
-        animationType="slide"
+        animationType={isLandscapeLayout ? 'fade' : 'slide'}
         transparent={true}
         onRequestClose={() => setSettingsModalVisible(false)}
         supportedOrientations={['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right']}
+        onOrientationChange={(evt) => {
+          const o = evt.nativeEvent.orientation;
+          setDeviceOrientation(o.startsWith('landscape') ? 'landscape' : 'portrait');
+        }}
         statusBarTranslucent={true}
       >
-        <Pressable
-          style={styles.settingsBackdrop}
-          onPress={() => setSettingsModalVisible(false)}
+        <View
+          style={[
+            styles.settingsBackdrop,
+            isLandscapeLayout && styles.settingsBackdropLandscape,
+          ]}
         >
-          <View style={styles.settingsSheet}>
-            <View style={styles.sheetHandle} />
+          {/* Backdrop Dismiss touchable */}
+          <Pressable
+            style={
+              isLandscapeLayout
+                ? styles.settingsBackdropDismissAreaLandscape
+                : styles.settingsBackdropDismissAreaPortrait
+            }
+            onPress={() => setSettingsModalVisible(false)}
+          />
+
+          <View
+            style={[
+              styles.settingsSheet,
+              isLandscapeLayout ? styles.settingsSheetLandscape : styles.settingsSheetPortrait,
+              isLandscapeLayout && {
+                width: Math.min(Math.max(windowWidth * 0.44, 320), 400),
+                paddingTop: Math.max(insets.top, 14),
+                paddingBottom: Math.max(insets.bottom, 16),
+                paddingRight: Math.max(insets.right, 16),
+              },
+              !isLandscapeLayout && {
+                paddingBottom: Math.max(insets.bottom, 24),
+              },
+            ]}
+          >
+            {/* Grab handle for portrait bottom sheet */}
+            {!isLandscapeLayout && <View style={styles.sheetHandle} />}
 
             {/* 1. Main Settings Menu */}
             {settingsSubView === 'main' && (
-              <View>
+              <View style={styles.subViewContainer}>
                 <View style={styles.settingsHeader}>
                   <View style={styles.settingsHeaderLeft}>
                     <Ionicons name="settings-sharp" size={18} color="#ffffff" style={{ marginRight: 8 }} />
@@ -3418,100 +3537,22 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   </View>
                   <TouchableOpacity
                     onPress={() => setSettingsModalVisible(false)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     style={styles.settingsCloseBtn}
                   >
                     <Ionicons name="close" size={20} color="rgba(255, 255, 255, 0.7)" />
                   </TouchableOpacity>
                 </View>
 
-                {/* Progress View Card */}
-                <View style={styles.settingsProgressCard}>
-                  <View style={styles.progressCardHeader}>
-                    <View style={styles.progressTimeWrap}>
-                      <Text style={styles.progressCurrentTime}>
-                        {formatTime(modalSliderPos !== null ? modalSliderPos * effectiveDuration : effectiveCurrentTime)}
-                      </Text>
-                      <Text style={styles.progressTimeDivider}>/</Text>
-                      <Text style={styles.progressTotalDuration}>
-                        {formatTime(effectiveDuration)}
-                      </Text>
-                    </View>
-                    {effectiveDuration > 0 ? (
-                      <Text style={styles.progressRemainingTime}>
-                        {formatRemainingTime(
-                          modalSliderPos !== null ? modalSliderPos * effectiveDuration : effectiveCurrentTime,
-                          effectiveDuration
-                        )}
-                      </Text>
-                    ) : null}
-                  </View>
-
-                  <View style={styles.sliderWrap}>
-                    <Slider
-                      style={styles.settingsModalSlider}
-                      minimumValue={0}
-                      maximumValue={1}
-                      value={
-                        effectiveDuration > 0
-                          ? modalSliderPos !== null
-                            ? modalSliderPos
-                            : Math.min(1, Math.max(0, effectiveCurrentTime / effectiveDuration))
-                          : 0
-                      }
-                      onValueChange={(val) => {
-                        setModalSliderPos(val);
-                      }}
-                      onSlidingComplete={(val) => {
-                        const targetSec = val * (effectiveDuration || 1);
-                        setModalSliderPos(null);
-                        handleSeekFromModal(targetSec);
-                      }}
-                      minimumTrackTintColor="#ff0000"
-                      maximumTrackTintColor="rgba(255, 255, 255, 0.2)"
-                      thumbTintColor="#ff0000"
-                      thumbSize={14}
-                      trackHeight={4}
-                    />
-                  </View>
-
-                  <View style={styles.progressActionsRow}>
-                    <TouchableOpacity
-                      style={styles.progressMiniBtn}
-                      onPress={() => handleSkipFromModal(-10)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="play-back" size={16} color="#ffffff" />
-                      <Text style={styles.progressMiniBtnText}>-10s</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.progressPlayPauseBtn}
-                      onPress={handleTogglePlayFromModal}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons
-                        name={effectiveIsPlaying ? 'pause' : 'play'}
-                        size={22}
-                        color="#ffffff"
-                        style={effectiveIsPlaying ? undefined : { marginLeft: 2 }}
-                      />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.progressMiniBtn}
-                      onPress={() => handleSkipFromModal(10)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="play-forward" size={16} color="#ffffff" />
-                      <Text style={styles.progressMiniBtnText}>+10s</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
                 <View style={styles.settingsDivider} />
 
-                {/* Quality Option */}
+                <ScrollView
+                  style={styles.settingsScroll}
+                  contentContainerStyle={styles.settingsScrollContent}
+                  showsVerticalScrollIndicator={false}
+                  bounces={false}
+                >
+                  {/* Quality Option */}
                 <TouchableOpacity
                   style={styles.settingsRow}
                   onPress={() => setSettingsSubView('quality')}
@@ -3550,7 +3591,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 {/* Screen Fit / Aspect Ratio Option */}
                 <TouchableOpacity
                   style={styles.settingsRow}
-                  onPress={handleToggleResizeModeFromModal}
+                  onPress={() => setSettingsSubView('screenfit')}
                   activeOpacity={0.7}
                 >
                   <View style={styles.settingsRowLeft}>
@@ -3583,24 +3624,17 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                           ? { color: '#30d158', fontWeight: '700' }
                           : undefined,
                       ]}
+                      numberOfLines={1}
                     >
                       {effectiveResizeMode === 'hero'
                         ? 'Hero Banner'
                         : effectiveResizeMode === 'cover'
-                        ? 'Fit to Screen (Normal)'
+                        ? 'Fit to Screen'
                         : effectiveResizeMode === 'stretch'
-                        ? 'Stretch to Screen'
+                        ? 'Stretch'
                         : 'Original (Fit)'}
                     </Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        setSettingsSubView('screenfit');
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={{ marginLeft: 6 }}
-                    >
-                      <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
-                    </TouchableOpacity>
+                    <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
                   </View>
                 </TouchableOpacity>
 
@@ -3645,20 +3679,28 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                   activeOpacity={0.7}
                 >
                   <View style={styles.settingsRowLeft}>
-                    <Ionicons name="repeat-outline" size={20} color="#ffffff" />
+                    <Ionicons name="repeat-outline" size={20} color={effectiveLoop ? '#535aff' : '#ffffff'} />
                     <Text style={styles.settingsRowLabel}>Loop video</Text>
                   </View>
                   <View style={styles.settingsRowRight}>
                     <Text style={[styles.settingsRowValue, effectiveLoop && { color: '#535aff', fontWeight: '700' }]}>
                       {effectiveLoop ? 'On' : 'Off'}
                     </Text>
+                    <Switch
+                      value={effectiveLoop}
+                      onValueChange={() => handleToggleLoopFromModal()}
+                      trackColor={{ false: '#3a3a3c', true: '#535aff' }}
+                      thumbColor="#ffffff"
+                      ios_backgroundColor="#3a3a3c"
+                      style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }], marginLeft: 4 }}
+                    />
                   </View>
                 </TouchableOpacity>
 
                 {/* Picture-in-Picture (PiP) Option */}
                 <TouchableOpacity
                   style={styles.settingsRow}
-                  onPress={() => handleTogglePipFromModal()}
+                  onPress={() => setSettingsSubView('pip')}
                   activeOpacity={0.7}
                 >
                   <View style={styles.settingsRowLeft}>
@@ -3686,40 +3728,43 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                       ios_backgroundColor="#3a3a3c"
                       style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }], marginLeft: 4 }}
                     />
-                    <TouchableOpacity
-                      onPress={() => {
-                        setSettingsSubView('pip');
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={{ marginLeft: 2 }}
-                    >
-                      <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" />
-                    </TouchableOpacity>
+                    <Ionicons name="chevron-forward" size={16} color="rgba(255, 255, 255, 0.45)" style={{ marginLeft: 2 }} />
                   </View>
                 </TouchableOpacity>
-              </View>
+              </ScrollView>
+            </View>
             )}
 
             {/* 2. Quality Sub-Menu */}
             {settingsSubView === 'quality' && (
-              <View>
+              <View style={styles.subViewContainer}>
                 <View style={styles.settingsSubHeader}>
                   <TouchableOpacity
                     style={styles.backButton}
                     onPress={() => setSettingsSubView('main')}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Ionicons name="arrow-back" size={20} color="#ffffff" />
                   </TouchableOpacity>
                   <View style={styles.subHeaderTitleWrap}>
-                    <Text style={styles.settingsTitle}>Quality for current video</Text>
+                    <Text style={styles.settingsTitle}>Quality</Text>
                     <Text style={styles.settingsSubTitle}>Applied immediately to player</Text>
                   </View>
+                  <TouchableOpacity
+                    onPress={() => setSettingsModalVisible(false)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    style={styles.settingsCloseBtn}
+                  >
+                    <Ionicons name="close" size={20} color="rgba(255, 255, 255, 0.7)" />
+                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.settingsDivider} />
 
-                <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  style={[styles.subOptionsScroll, isLandscapeLayout && styles.subOptionsScrollLandscape]}
+                  showsVerticalScrollIndicator={false}
+                >
                   {availableQualities.map((q) => {
                     const isSelected = effectiveQuality === q;
                     return (
@@ -3757,45 +3802,55 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               </View>
             )}
 
-            {/* 4. Screen Fit Sub-Menu */}
+            {/* 3. Screen Fit Sub-Menu */}
             {settingsSubView === 'screenfit' && (
-              <View>
+              <View style={styles.subViewContainer}>
                 <View style={styles.settingsSubHeader}>
                   <TouchableOpacity
                     style={styles.backButton}
                     onPress={() => setSettingsSubView('main')}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Ionicons name="arrow-back" size={20} color="#ffffff" />
                   </TouchableOpacity>
                   <View style={styles.subHeaderTitleWrap}>
-                    <Text style={styles.settingsTitle}>Screen fit & Aspect ratio</Text>
+                    <Text style={styles.settingsTitle}>Screen fit</Text>
                     <Text style={styles.settingsSubTitle}>Customize video framing and aspect ratio</Text>
                   </View>
+                  <TouchableOpacity
+                    onPress={() => setSettingsModalVisible(false)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    style={styles.settingsCloseBtn}
+                  >
+                    <Ionicons name="close" size={20} color="rgba(255, 255, 255, 0.7)" />
+                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.settingsDivider} />
 
-                <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  style={[styles.subOptionsScroll, isLandscapeLayout && styles.subOptionsScrollLandscape]}
+                  showsVerticalScrollIndicator={false}
+                >
                   {[
                     {
                       id: 'hero' as ScreenFitMode,
-                      title: 'Hero Banner (Dynamic Island Fill)',
-                      desc: 'Extends video to the very top covering iPhone Dynamic Island & status bar',
+                      title: 'Hero Banner (Fill Top)',
+                      desc: 'Extends video to the very top covering status bar',
                       icon: 'film-outline' as const,
                       color: '#FF0000',
                     },
                     {
                       id: 'cover' as ScreenFitMode,
-                      title: 'Fit to Screen (Normal Mode)',
-                      desc: 'Standard portrait view below mobile status bar & island',
+                      title: 'Fit to Screen (Normal)',
+                      desc: 'Standard view below mobile status bar & notch',
                       icon: 'expand-outline' as const,
                       color: '#535aff',
                     },
                     {
                       id: 'stretch' as ScreenFitMode,
-                      title: 'Stretch to Screen (Stretch)',
-                      desc: 'Stretches video to fill complete width and height without crop',
+                      title: 'Stretch to Screen',
+                      desc: 'Stretches video to fill complete width & height',
                       icon: 'scan-outline' as const,
                       color: '#30d158',
                     },
@@ -3840,25 +3895,36 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                 </ScrollView>
               </View>
             )}
-            {/* 3. Playback Speed Sub-Menu */}
+
+            {/* 4. Playback Speed Sub-Menu */}
             {settingsSubView === 'speed' && (
-              <View>
+              <View style={styles.subViewContainer}>
                 <View style={styles.settingsSubHeader}>
                   <TouchableOpacity
                     style={styles.backButton}
                     onPress={() => setSettingsSubView('main')}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Ionicons name="arrow-back" size={20} color="#ffffff" />
                   </TouchableOpacity>
                   <View style={styles.subHeaderTitleWrap}>
                     <Text style={styles.settingsTitle}>Playback speed</Text>
                   </View>
+                  <TouchableOpacity
+                    onPress={() => setSettingsModalVisible(false)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    style={styles.settingsCloseBtn}
+                  >
+                    <Ionicons name="close" size={20} color="rgba(255, 255, 255, 0.7)" />
+                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.settingsDivider} />
 
-                <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  style={[styles.subOptionsScroll, isLandscapeLayout && styles.subOptionsScrollLandscape]}
+                  showsVerticalScrollIndicator={false}
+                >
                   {SPEED_OPTIONS.map((s) => {
                     const isSelected = effectiveSpeed === s;
                     const label = s === 1.0 ? 'Normal (1x)' : `${s}x`;
@@ -3890,12 +3956,12 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
 
             {/* 5. Picture-in-Picture Sub-Menu */}
             {settingsSubView === 'pip' && (
-              <View>
+              <View style={styles.subViewContainer}>
                 <View style={styles.settingsSubHeader}>
                   <TouchableOpacity
                     style={styles.backButton}
                     onPress={() => setSettingsSubView('main')}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Ionicons name="arrow-back" size={20} color="#ffffff" />
                   </TouchableOpacity>
@@ -3903,11 +3969,21 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
                     <Text style={styles.settingsTitle}>Picture-in-Picture (PiP)</Text>
                     <Text style={styles.settingsSubTitle}>Continue watching in a floating mini player</Text>
                   </View>
+                  <TouchableOpacity
+                    onPress={() => setSettingsModalVisible(false)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    style={styles.settingsCloseBtn}
+                  >
+                    <Ionicons name="close" size={20} color="rgba(255, 255, 255, 0.7)" />
+                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.settingsDivider} />
 
-                <ScrollView style={styles.subOptionsScroll} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  style={[styles.subOptionsScroll, isLandscapeLayout && styles.subOptionsScrollLandscape]}
+                  showsVerticalScrollIndicator={false}
+                >
                   {[
                     {
                       enabled: true,
@@ -3958,7 +4034,7 @@ export const YouTubeInlinePlayer: React.FC<YouTubeInlinePlayerProps> = ({
               </View>
             )}
           </View>
-        </Pressable>
+        </View>
       </Modal>
     </View>
   );
@@ -4389,12 +4465,55 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
     justifyContent: 'flex-end',
   },
+  settingsBackdropLandscape: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+  },
+  settingsBackdropDismissAreaPortrait: {
+    flex: 1,
+    width: '100%',
+  },
+  settingsBackdropDismissAreaLandscape: {
+    flex: 1,
+    height: '100%',
+  },
   settingsSheet: {
     backgroundColor: '#1c1c1e',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    overflow: 'hidden',
+  },
+  settingsSheetPortrait: {
+    width: '100%',
+    maxHeight: '85%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     paddingHorizontal: 16,
-    paddingBottom: 28,
+  },
+  settingsSheetLandscape: {
+    height: '100%',
+    maxHeight: '100%',
+    backgroundColor: '#16161a',
+    borderTopLeftRadius: 18,
+    borderBottomLeftRadius: 18,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255, 255, 255, 0.1)',
+    paddingLeft: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: -6, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    elevation: 50,
+  },
+  settingsScroll: {
+    flex: 1,
+  },
+  settingsScrollContent: {
+    paddingBottom: 20,
+  },
+  subViewContainer: {
+    flex: 1,
   },
   sheetHandle: {
     width: 36,
@@ -4465,6 +4584,10 @@ const styles = StyleSheet.create({
   },
   subOptionsScroll: {
     maxHeight: 280,
+  },
+  subOptionsScrollLandscape: {
+    maxHeight: undefined,
+    flex: 1,
   },
   optionItemRow: {
     flexDirection: 'row',

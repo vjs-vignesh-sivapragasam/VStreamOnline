@@ -64,8 +64,9 @@ export class StreamingServerClient {
     return this.baseURL;
   }
 
-  async getStreamingURL(infoHash: string, fileIdx: number = -1, magnetUrl?: string): Promise<string> {
-    let directURL = `${this.baseURL}/${encodeURIComponent(infoHash)}/${fileIdx}`;
+  async getStreamingURL(infoHash: string, fileIdx: number = 0, magnetUrl?: string): Promise<string> {
+    const validIdx = fileIdx >= 0 ? fileIdx : 0;
+    let directURL = `${this.baseURL}/${encodeURIComponent(infoHash)}/${validIdx}`;
     const trackers = extractTrackersFromMagnet(magnetUrl);
     if (trackers.length > 0) {
       const qs = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
