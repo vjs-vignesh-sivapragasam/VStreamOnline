@@ -24,6 +24,7 @@ import {
   TorrentItem,
 } from '@/hooks/useTamilMv';
 import { tmdbService } from '@/services/TmdbService';
+import { addonService, AddonCatalogOption } from '@/services/AddonService';
 import { storageService } from '@/utils/StorageService';
 import { useLocalSearchParams, router } from 'expo-router';
 import { SvgXml } from 'react-native-svg';
@@ -509,6 +510,14 @@ const SearchScreen = () => {
   const [liveSearchResults, setLiveSearchResults] = useState<GroupedItem[]>([]);
   const [isSearchingLive, setIsSearchingLive]     = useState(false);
 
+  // ── Addon State ──
+  const [showAddons, setShowAddons]                 = useState(false);
+  const [addonMovies, setAddonMovies]               = useState<GroupedItem[]>([]);
+  const [isLoadingAddons, setIsLoadingAddons]       = useState(false);
+  const [availableCatalogs, setAvailableCatalogs]   = useState<AddonCatalogOption[]>([]);
+  const [selectedCatalogIdx, setSelectedCatalogIdx] = useState(0);
+  const [addonPage, setAddonPage]                   = useState(1);
+
   const searchTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { width } = useWindowDimensions();
@@ -560,6 +569,7 @@ const SearchScreen = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setShowRecentlyAdded(true);
+    setShowAddons(false);
     setSelectedOttId(null);
     setQuery('');
     setSelectedCategory('all');
@@ -581,6 +591,7 @@ const SearchScreen = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setShowRecentlyAdded(false);
+    setShowAddons(false);
     setSelectedCategory('all');
   }, []);
 
@@ -616,6 +627,78 @@ const SearchScreen = () => {
     }
   }, [params.query]);
 
+  const loadAddonCatalog = useCallback(async (catalogIdx = 0, page = 1) => {
+    setIsLoadingAddons(true);
+    try {
+      let catalogs = addonService.getAvailableCatalogs();
+      if (catalogs.length === 0) {
+        await addonService.installAddon('https://v3-cinemeta.strem.io/manifest.json', true);
+        await addonService.installAddon('https://torrentio.strem.fun/manifest.json', true);
+        catalogs = addonService.getAvailableCatalogs();
+      }
+      setAvailableCatalogs(catalogs);
+      if (catalogs.length > 0) {
+        const safeIdx = Math.min(catalogIdx, catalogs.length - 1);
+        const targetCat = catalogs[safeIdx];
+        const enabled = addonService.getEnabledAddons();
+        const addon = enabled.find((a) => a.transportUrl === targetCat.transportUrl);
+        if (addon) {
+          const skip = (page - 1) * 50;
+          const metas = await addonService.fetchCatalogMetas(
+            addon,
+            targetCat.type,
+            targetCat.catalogId,
+            skip
+          );
+          const grouped = metas.map((m) => addonService.metaToGroupedItem(m, targetCat.addonName));
+          setAddonMovies(grouped);
+        }
+      } else {
+        setAddonMovies([]);
+      }
+    } catch (e) {
+      console.warn('[Search] Failed to load addon catalog:', e);
+      setAddonMovies([]);
+    } finally {
+      setIsLoadingAddons(false);
+    }
+  }, []);
+
+  const handleAddonsPress = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setShowAddons(true);
+    setShowRecentlyAdded(false);
+    setSelectedCategory('all');
+    setAddonPage(1);
+    loadAddonCatalog(selectedCatalogIdx, 1);
+  }, [loadAddonCatalog, selectedCatalogIdx]);
+
+  const handleClearAddons = useCallback(async () => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setShowAddons(false);
+  }, []);
+
+  const handleCatalogSelect = useCallback(
+    (idx: number) => {
+      setSelectedCatalogIdx(idx);
+      setAddonPage(1);
+      loadAddonCatalog(idx, 1);
+    },
+    [loadAddonCatalog]
+  );
+
+  const handleAddonPageChange = useCallback(
+    (newPage: number) => {
+      setAddonPage(newPage);
+      loadAddonCatalog(selectedCatalogIdx, newPage);
+    },
+    [loadAddonCatalog, selectedCatalogIdx]
+  );
+
   // Live web search when user types query
   useEffect(() => {
     const q = query.trim();
@@ -632,8 +715,11 @@ const SearchScreen = () => {
     searchTimerRef.current = setTimeout(async () => {
       setIsSearchingLive(true);
       try {
-        const liveItems = await searchTamilMV(q, 'all');
-        setLiveSearchResults(liveItems);
+        const [liveItems, addonItems] = await Promise.all([
+          searchTamilMV(q, 'all').catch(() => []),
+          addonService.searchAllCatalogs(q).catch(() => []),
+        ]);
+        setLiveSearchResults([...liveItems, ...addonItems]);
       } catch {
         // Fallback
       } finally {
@@ -656,6 +742,7 @@ const SearchScreen = () => {
     setSelectedOttId(null);
     setLiveSearchResults([]);
     setSelectedCategory('all');
+    setShowAddons(false);
   }, []);
 
   const handleSearchTextChange = useCallback(
@@ -695,10 +782,11 @@ const SearchScreen = () => {
         infoHash: best.infoHash,
         poster: best.poster ?? '',
         year: group.year || (best.publishDate ? new Date(best.publishDate).getFullYear().toString() : ''),
-        type,
+        type: (group as any).type || type,
         publishDate: best.publishDate,
         allItems: JSON.stringify(group.items),
-        topicUrl: best.groupid,
+        topicUrl: best.groupid?.startsWith('http') ? best.groupid : undefined,
+        imdbId: (group as any).imdbId || (best.guid?.startsWith('tt') ? best.guid : undefined),
       },
     });
   }, []);
@@ -1358,6 +1446,160 @@ const SearchScreen = () => {
 
           <BottomSpacing space={60} />
         </ScrollView>
+      ) : showAddons ? (
+        /* 3. Addon Respective Movies View */
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          style={styles.contentContainer}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={isLoadingAddons}
+              onRefresh={() => loadAddonCatalog(selectedCatalogIdx, addonPage)}
+              tintColor={theme.primary}
+              colors={[theme.primary]}
+            />
+          }
+        >
+          <View style={styles.resultsGridSection}>
+            <View style={styles.resultsHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="extension-puzzle-outline" size={17} color={theme.primary} style={{ marginRight: 6 }} />
+                <Text style={styles.resultsCountText}>
+                  {availableCatalogs[selectedCatalogIdx]?.catalogName || 'Addon Movies'} ({addonMovies.length} Titles)
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={styles.addonSettingsIconBtn}
+                  onPress={() => router.push('/settings/addons' as any)}
+                  hitSlop={8}
+                >
+                  <Ionicons name="settings-outline" size={18} color="#8E8E93" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.clearIconButton}
+                  onPress={handleClearAddons}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle-outline" size={15} color="#ff453a" />
+                  <Text style={styles.clearIconText}>Clear</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Catalog Selector Chips */}
+            {availableCatalogs.length > 1 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.catalogPillsRow}
+              >
+                {availableCatalogs.map((cat, idx) => {
+                  const isSelected = selectedCatalogIdx === idx;
+                  return (
+                    <TouchableOpacity
+                      key={`${cat.transportUrl}-${cat.catalogId}-${idx}`}
+                      style={[
+                        styles.catalogPill,
+                        isSelected && [styles.catalogPillActive, { backgroundColor: theme.primary }],
+                      ]}
+                      onPress={() => handleCatalogSelect(idx)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.catalogPillText,
+                          isSelected && styles.catalogPillTextActive,
+                        ]}
+                      >
+                        {cat.addonName}: {cat.catalogName}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {/* Loading / Grid / Empty View */}
+            {isLoadingAddons && addonMovies.length === 0 ? (
+              <View style={styles.catalogLoadingContainer}>
+                <View style={[styles.loadingPulseCircle, { backgroundColor: theme.iconBg, borderColor: theme.indicator || theme.cardBorder }]}>
+                  <ActivityIndicator color={theme.primary} size="large" />
+                </View>
+                <Text style={styles.catalogLoadingTitle}>Loading Addon Movies</Text>
+                <Text style={styles.catalogLoadingText}>
+                  Fetching titles from {availableCatalogs[selectedCatalogIdx]?.addonName || 'installed addons'}…
+                </Text>
+              </View>
+            ) : addonMovies.length > 0 ? (
+              <View>
+                <View style={styles.gridWrap}>
+                  {addonMovies.map((group, index) => (
+                    <SearchMovieCard
+                      key={`addon-${group.name}-${group.year || ''}-${index}`}
+                      group={group}
+                      cardWidth={cardWidth}
+                      posterHeight={posterHeight}
+                      onPress={handleCardPress}
+                    />
+                  ))}
+                </View>
+
+                {/* Pagination Controls */}
+                <View style={styles.addonPaginationBar}>
+                  <TouchableOpacity
+                    style={[
+                      styles.addonPageButton,
+                      { borderColor: theme.cardBorder, backgroundColor: theme.iconBg },
+                      addonPage === 1 && { opacity: 0.4 },
+                    ]}
+                    onPress={() => handleAddonPageChange(Math.max(1, addonPage - 1))}
+                    disabled={addonPage === 1 || isLoadingAddons}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="chevron-back" size={16} color="#ffffff" style={{ marginRight: 4 }} />
+                    <Text style={[styles.addonPageButtonText, { color: '#ffffff' }]}>Previous</Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.addonPageIndicator}>Page {addonPage}</Text>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.addonPageButton,
+                      { borderColor: theme.cardBorder, backgroundColor: theme.iconBg },
+                      addonMovies.length < 20 && { opacity: 0.4 },
+                    ]}
+                    onPress={() => handleAddonPageChange(addonPage + 1)}
+                    disabled={addonMovies.length < 20 || isLoadingAddons}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.addonPageButtonText, { color: '#ffffff' }]}>Next</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#ffffff" style={{ marginLeft: 4 }} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.emptyStateContainer}>
+                <Ionicons name="extension-puzzle-outline" size={48} color="#8E8E93" />
+                <Text style={styles.emptyStateTitle}>No Addon Titles Found</Text>
+                <Text style={styles.emptyStateSubtitle}>
+                  Please check your installed addons in Settings or try a different catalog.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.retryButton, { backgroundColor: theme.primary }]}
+                  onPress={() => router.push('/settings/addons' as any)}
+                >
+                  <Text style={styles.retryButtonText}>Manage Addons</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          <BottomSpacing space={60} />
+        </ScrollView>
       ) : (
         /* 3. Idle / Initial State */
         <ScrollView
@@ -1413,6 +1655,31 @@ const SearchScreen = () => {
                   style={{ marginRight: 6 }}
                 />
                 <Text style={styles.webViewBtnText}>Web view</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.addonBtn,
+                  {
+                    backgroundColor: theme.iconBg,
+                    borderColor: theme.indicator || theme.cardBorder,
+                  },
+                ]}
+                onPress={handleAddonsPress}
+                activeOpacity={0.8}
+                disabled={isLoadingAddons}
+              >
+                {isLoadingAddons ? (
+                  <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 6 }} />
+                ) : (
+                  <Ionicons
+                    name="extension-puzzle-outline"
+                    size={16}
+                    color={theme.primaryLight || theme.primary}
+                    style={{ marginRight: 6 }}
+                  />
+                )}
+                <Text style={styles.addonBtnText}>Addons</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1674,6 +1941,73 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 14,
+  },
+  addonBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+    borderRadius: 22,
+  },
+  addonBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  catalogPillsRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  catalogPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  catalogPillActive: {
+    borderColor: 'transparent',
+  },
+  catalogPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  catalogPillTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  addonSettingsIconBtn: {
+    padding: 6,
+    marginRight: 6,
+  },
+  addonPaginationBar: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  addonPageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  addonPageButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  addonPageIndicator: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
   },
 
   // Grid Results

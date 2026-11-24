@@ -31,7 +31,9 @@ import { StreamingServerClient, TorrentFile, resolveStreamingServerClient } from
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { myListService } from '@/services/MyListService';
-import { tmdbService, TmdbDetails, detectLanguageCode, cleanMovieQuery } from '@/services/TmdbService';
+import { tmdbService, TmdbDetails, TmdbEpisode, TmdbSeason, detectLanguageCode, cleanMovieQuery } from '@/services/TmdbService';
+import { DEFAULT_TRACKERS } from '@/clients/stremio';
+import { addonService, StremioStream } from '@/services/AddonService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
 import { ensureEmbeddedServerRunning } from '@/utils/StremioServerManager';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -349,6 +351,7 @@ const TorrentDetails = () => {
     magnetUrl: paramMagnetUrl,
     infoHash: paramInfoHash,
     guid: paramGuid,
+    imdbId,
   } = useLocalSearchParams<{
     title: string;
     poster: string;
@@ -361,6 +364,7 @@ const TorrentDetails = () => {
     magnetUrl?: string;
     infoHash?: string;
     guid?: string;
+    imdbId?: string;
   }>();
 
   const { height, width } = useWindowDimensions();
@@ -373,6 +377,13 @@ const TorrentDetails = () => {
   const [tmdbData, setTmdbData] = useState<TmdbDetails | null>(null);
   const [isTmdbLoading, setIsTmdbLoading] = useState(true);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+
+  // Series Season & Episode State
+  const [selectedSeason, setSelectedSeason] = useState(1);
+  const [seasonEpisodes, setSeasonEpisodes] = useState<TmdbEpisode[]>([]);
+  const [isLoadingEpisodes, setIsLoadingEpisodes] = useState(false);
+  const [seasonModalVisible, setSeasonModalVisible] = useState(false);
+  const [loadingEpisodeNumber, setLoadingEpisodeNumber] = useState<number | null>(null);
 
   // ── File picker & Download state ──
   const [loadingItem, setLoadingItem] = useState<string | null>(null);
@@ -569,7 +580,174 @@ const TorrentDetails = () => {
     };
   }, [allItemsRaw, topicUrl, groupid, title, publishDate, paramMagnetUrl, paramInfoHash, paramGuid, paramYear, poster]);
 
+  // ── Query installed Stremio stream addons for matching streams ──
+  useEffect(() => {
+    let isMounted = true;
+    const mediaId =
+      imdbId ||
+      (paramGuid?.startsWith('tt') ? paramGuid : null) ||
+      (groupid?.startsWith('tt') ? groupid : null) ||
+      tmdbData?.imdbId;
+
+    if (!mediaId) return;
+
+    addonService
+      .fetchStreamsForMedia(type || 'movie', mediaId)
+      .then((streams) => {
+        if (!isMounted || !streams || streams.length === 0) return;
+
+        const converted: TorrentItem[] = streams.map((st, idx) => {
+          const streamName = st.name ? `[${st.name.replace(/\n/g, ' ')}] ` : '';
+          const displayTitle = st.title
+            ? `${streamName}${st.title.replace(/\n/g, ' • ')}`
+            : (st.name || 'Stream');
+          const trackers = [
+            ...(st.sources || []).filter((s: string) => s.startsWith('tracker:')).map((s: string) => s.replace(/^tracker:/, '')),
+            ...DEFAULT_TRACKERS,
+          ];
+          const trackerParams = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
+          const magnetUrl = st.infoHash
+            ? `magnet:?xt=urn:btih:${st.infoHash}&dn=${encodeURIComponent(st.title || title || 'stream')}&${trackerParams}`
+            : (st.url || '');
+
+          return {
+            name: title || null,
+            year: paramYear || null,
+            language: 'All',
+            groupid: `addon-${st.addonName || 'stream'}`,
+            guid: `addon-${mediaId}-${idx}-${st.infoHash || st.url || idx}`,
+            poster: poster || null,
+            title: displayTitle,
+            magnetUrl,
+            infoHash: st.infoHash || '',
+            publishDate: new Date().toISOString(),
+            url: st.url,
+            fileIdx: st.fileIdx,
+          } as TorrentItem;
+        });
+
+        setItems((prev) => {
+          const existingHashes = new Set(
+            prev.map((i) => (i.infoHash || (i as any).url || i.guid).toLowerCase())
+          );
+          const newItems = converted.filter(
+            (c) => !existingHashes.has((c.infoHash || (c as any).url || c.guid).toLowerCase())
+          );
+          return [...prev, ...newItems];
+        });
+      })
+      .catch((e) => {
+        console.warn('[TorrentDetails] Failed to fetch addon streams:', e);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [imdbId, paramGuid, groupid, tmdbData?.imdbId, type, title, paramYear, poster]);
+
   const allItems = items;
+
+  const isSeries = Boolean(
+    type === 'series' ||
+    tmdbData?.mediaType === 'tv' ||
+    (tmdbData?.numberOfSeasons && tmdbData.numberOfSeasons > 0)
+  );
+
+  const isAddonMedia = Boolean(
+    groupid?.startsWith('addon-') ||
+    paramGuid?.startsWith('addon-') ||
+    imdbId ||
+    (!topicUrl && !groupid?.startsWith('http'))
+  );
+
+  // Fetch TV episodes when series detected and season changes
+  useEffect(() => {
+    if (!isSeries || !tmdbData?.id) return;
+    let isMounted = true;
+    setIsLoadingEpisodes(true);
+    tmdbService
+      .getTvSeasonEpisodes(tmdbData.id, selectedSeason)
+      .then((eps) => {
+        if (isMounted) {
+          setSeasonEpisodes(eps);
+          setIsLoadingEpisodes(false);
+        }
+      })
+      .catch((e) => {
+        console.warn('[TorrentDetails] Failed to fetch TV episodes:', e);
+        if (isMounted) setIsLoadingEpisodes(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isSeries, tmdbData?.id, selectedSeason]);
+
+  // Handle Episode selection: fetch addon streams for that specific episode
+  const handleEpisodePress = async (ep: TmdbEpisode) => {
+    const mediaId =
+      imdbId ||
+      (paramGuid?.startsWith('tt') ? paramGuid : null) ||
+      (groupid?.startsWith('tt') ? groupid : null) ||
+      tmdbData?.imdbId;
+
+    if (!mediaId) {
+      showAlert('Episodes', 'No IMDb ID found for this series to query episode streams.');
+      return;
+    }
+
+    setLoadingEpisodeNumber(ep.episodeNumber);
+    try {
+      // Query addon streams for this specific episode: e.g. tt4574334:1:1
+      const epId = `${mediaId}:${selectedSeason}:${ep.episodeNumber}`;
+      const streams = await addonService.fetchStreamsForMedia('series', epId);
+
+      if (!streams || streams.length === 0) {
+        showAlert('No Streams', `No streams found for Season ${selectedSeason} Episode ${ep.episodeNumber}.`);
+        setLoadingEpisodeNumber(null);
+        return;
+      }
+
+      const converted: TorrentItem[] = streams.map((st, idx) => {
+        const streamName = st.name ? `[${st.name.replace(/\n/g, ' ')}] ` : '';
+        const displayTitle = st.title
+          ? `${streamName}${st.title.replace(/\n/g, ' • ')}`
+          : (st.name || 'Stream');
+        const trackers = [
+          ...(st.sources || []).filter((s: string) => s.startsWith('tracker:')).map((s: string) => s.replace(/^tracker:/, '')),
+          ...DEFAULT_TRACKERS,
+        ];
+        const trackerParams = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
+        const magnetUrl = st.infoHash
+          ? `magnet:?xt=urn:btih:${st.infoHash}&dn=${encodeURIComponent(st.title || `${title} S${selectedSeason}E${ep.episodeNumber}`)}&${trackerParams}`
+          : (st.url || '');
+
+        return {
+          name: `${title} S${selectedSeason}E${ep.episodeNumber}`,
+          year: paramYear || null,
+          language: 'All',
+          groupid: `addon-${st.addonName || 'stream'}`,
+          guid: `addon-${mediaId}-s${selectedSeason}e${ep.episodeNumber}-${idx}`,
+          poster: ep.stillUrl || (ep.stillPath ? `https://image.tmdb.org/t/p/w500${ep.stillPath}` : poster || null),
+          title: displayTitle,
+          magnetUrl,
+          infoHash: st.infoHash || '',
+          publishDate: new Date().toISOString(),
+          url: st.url,
+          fileIdx: st.fileIdx,
+        } as TorrentItem;
+      });
+
+      // Update items with this episode's streams and open quality picker
+      setItems(converted);
+      setQualityModalMode('watch');
+      setQualityModalVisible(true);
+    } catch (err: any) {
+      console.warn('[handleEpisodePress] Error:', err);
+      showAlert('Error', 'Failed to fetch episode streams: ' + (err.message || String(err)));
+    } finally {
+      setLoadingEpisodeNumber(null);
+    }
+  };
 
   // ── My List status & toggle ──
   const [inMyList, setInMyList] = useState(() => myListService.isInMyList(title));
@@ -663,7 +841,6 @@ const TorrentDetails = () => {
   }, [allItemsRaw, items, title]);
 
   const displayLanguage = LANGUAGE_NAMES[movieLanguage] || 'Tamil';
-  const isSeries = type === 'series';
 
   // ── Available Languages (Detected from title, torrent items, and TMDB) ──
   const availableLanguages = useMemo(() => {
@@ -800,8 +977,10 @@ const TorrentDetails = () => {
         infoHash: it.infoHash,
         magnet: it.magnetUrl,
         magnetLink: it.magnetUrl,
-        fileIdx: (it.guid === item.guid || it.infoHash === item.infoHash) ? safeIdx : safeIdx,
-        url: (it.guid === item.guid || it.infoHash === item.infoHash) ? streamUrl : undefined,
+        url: (it as any).url || (it.magnetUrl?.startsWith('http') ? it.magnetUrl : (it.guid === item.guid || it.infoHash === item.infoHash ? streamUrl : undefined)),
+        fileIdx: (it as any).fileIdx !== undefined && (it as any).fileIdx >= 0
+          ? (it as any).fileIdx
+          : ((it.guid === item.guid || it.infoHash === item.infoHash) ? safeIdx : safeIdx),
       }))
     );
 
@@ -835,6 +1014,20 @@ const TorrentDetails = () => {
     try {
       // Warm up embedded streaming server
       ensureEmbeddedServerRunning().catch(() => {});
+
+      // If direct URL without infoHash, play immediately
+      if (!item.infoHash && ((item as any).url || item.magnetUrl?.startsWith('http'))) {
+        setQualityModalVisible(false);
+        navigateToPlayer(item, -1, (item as any).url || item.magnetUrl);
+        return;
+      }
+
+      // If item already specifies file index from addon
+      if ((item as any).fileIdx !== undefined && (item as any).fileIdx >= 0) {
+        setQualityModalVisible(false);
+        navigateToPlayer(item, (item as any).fileIdx);
+        return;
+      }
 
       if (!isSeries) {
         // For movies on TamilMV, torrents contain 1 main video file (fileIdx = 0).
@@ -892,15 +1085,20 @@ const TorrentDetails = () => {
       if (await isHapticsSupported()) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
-      const client = await resolveStreamingServerClient();
-      const safeIdx = typeof fileIdx === 'number' ? fileIdx : -1;
-      const streamUrl = await client.getStreamingURL(item.infoHash, safeIdx, item.magnetUrl);
+      let streamUrl = '';
+      const validFileIdx = fileIdx >= 0 ? fileIdx : (((item as any).fileIdx !== undefined && (item as any).fileIdx >= 0) ? (item as any).fileIdx : 0);
+      if (!item.infoHash && ((item as any).url || item.magnetUrl?.startsWith('http'))) {
+        streamUrl = (item as any).url || item.magnetUrl;
+      } else {
+        const client = await resolveStreamingServerClient();
+        streamUrl = await client.getStreamingURL(item.infoHash, validFileIdx, item.magnetUrl);
+      }
       const clean = cleanTitle(item.title);
       const finalFileName = fileName || `${clean}.mkv`;
 
       await downloadService.startDownload({
-        infoHash: item.infoHash,
-        fileIdx: safeIdx,
+        infoHash: item.infoHash || item.guid,
+        fileIdx: validFileIdx,
         title: clean,
         poster: poster ?? tmdbData?.posterUrl ?? '',
         fileName: finalFileName,
@@ -1016,22 +1214,24 @@ const TorrentDetails = () => {
             <Ionicons name="chevron-back" size={24} color="#ffffff" />
           </TouchableOpacity>
 
-          {/* Circular Web Page Button (top right, near My List) */}
-          <TouchableOpacity
-            style={[
-              styles.webPageButton,
-              { top: Math.max(insets.top + 6, 20) },
-            ]}
-            onPress={handleOpenWebPage}
-            onLongPress={handleOpenExternalWebPage}
-            activeOpacity={0.7}
-            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-            accessibilityRole="button"
-            accessibilityLabel="Open Movie Web Page"
-            accessibilityHint="Opens TamilMV movie page in built-in browser"
-          >
-            <Ionicons name="globe-outline" size={21} color="#ffffff" />
-          </TouchableOpacity>
+          {/* Circular Web Page Button (top right, near My List - hidden for addon media) */}
+          {!isAddonMedia && topicUrl ? (
+            <TouchableOpacity
+              style={[
+                styles.webPageButton,
+                { top: Math.max(insets.top + 6, 20) },
+              ]}
+              onPress={handleOpenWebPage}
+              onLongPress={handleOpenExternalWebPage}
+              activeOpacity={0.7}
+              hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+              accessibilityRole="button"
+              accessibilityLabel="Open Movie Web Page"
+              accessibilityHint="Opens TamilMV movie page in built-in browser"
+            >
+              <Ionicons name="globe-outline" size={21} color="#ffffff" />
+            </TouchableOpacity>
+          ) : null}
 
           {/* Circular My List Button (top right in front of poster image) */}
           <TouchableOpacity
@@ -1200,6 +1400,80 @@ const TorrentDetails = () => {
           </View>
         ) : null}
 
+        {/* ── Section: Episodes (Season-wise thumbnails for series) ── */}
+        {isSeries && (
+          <View style={styles.episodesSection}>
+            <View style={styles.episodesHeaderRow}>
+              <Text style={styles.episodesCountTitle}>
+                Episodes: {seasonEpisodes.length}/{tmdbData?.seasons?.find((s) => s.seasonNumber === selectedSeason)?.episodeCount || seasonEpisodes.length}
+              </Text>
+              {tmdbData?.seasons && tmdbData.seasons.length > 0 && (
+                <TouchableOpacity
+                  style={styles.seasonPickerPill}
+                  onPress={() => setSeasonModalVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.seasonPickerPillText}>Season {selectedSeason}</Text>
+                  <Ionicons name="chevron-down" size={14} color="#ffffff" style={{ marginLeft: 4 }} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {isLoadingEpisodes ? (
+              <View style={styles.episodesLoadingWrap}>
+                <ActivityIndicator size="small" color={theme.primary} />
+                <Text style={styles.episodesLoadingText}>Loading episodes...</Text>
+              </View>
+            ) : seasonEpisodes.length > 0 ? (
+              <FlatList
+                data={seasonEpisodes}
+                keyExtractor={(item) => `ep-${item.seasonNumber}-${item.episodeNumber}-${item.id}`}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.episodesListContent}
+                renderItem={({ item: ep }) => {
+                  const isCurrentLoading = loadingEpisodeNumber === ep.episodeNumber;
+                  return (
+                    <TouchableOpacity
+                      style={styles.episodeCard}
+                      onPress={() => handleEpisodePress(ep)}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.episodeThumbnailWrap}>
+                        <Image
+                          source={{ uri: ep.stillUrl || (ep.stillPath ? `https://image.tmdb.org/t/p/w500${ep.stillPath}` : undefined) || backdropUri || poster }}
+                          style={StyleSheet.absoluteFill}
+                          resizeMode="cover"
+                        />
+                        <View style={styles.episodePlayOverlay}>
+                          {isCurrentLoading ? (
+                            <ActivityIndicator size="small" color="#ffffff" />
+                          ) : (
+                            <Ionicons name="play" size={20} color="#ffffff" style={{ marginLeft: 2 }} />
+                          )}
+                        </View>
+                      </View>
+                      <Text style={styles.episodeCardTitle} numberOfLines={1}>
+                        {ep.episodeNumber}. {ep.name}
+                      </Text>
+                      {ep.airDate ? (
+                        <Text style={styles.episodeCardAirDate}>{ep.airDate}</Text>
+                      ) : null}
+                      {ep.overview ? (
+                        <Text style={styles.episodeCardOverview} numberOfLines={2}>
+                          {ep.overview}
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            ) : (
+              <Text style={styles.noEpisodesText}>No episodes available for Season {selectedSeason}.</Text>
+            )}
+          </View>
+        )}
+
         {/* ── Section: Cast & Crew ── */}
         {tmdbData?.cast && tmdbData.cast.length > 0 && (
           <View style={styles.section}>
@@ -1300,6 +1574,47 @@ const TorrentDetails = () => {
         <BottomSpacing space={60} />
       </ScrollView>
 
+      {/* ── Season Selector Modal ── */}
+      <Modal
+        visible={seasonModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSeasonModalVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setSeasonModalVisible(false)}>
+          <Pressable style={styles.seasonModalSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.seasonModalHeader}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>Select Season</Text>
+            </View>
+            <ScrollView style={styles.seasonScroll} showsVerticalScrollIndicator={false}>
+              {(tmdbData?.seasons || []).map((s) => {
+                const isSelected = selectedSeason === s.seasonNumber;
+                return (
+                  <TouchableOpacity
+                    key={`season-${s.seasonNumber}`}
+                    style={[styles.seasonOptionRow, isSelected && styles.seasonOptionRowSelected]}
+                    onPress={() => {
+                      setSelectedSeason(s.seasonNumber);
+                      setSeasonModalVisible(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.seasonOptionText, isSelected && { color: theme.primary, fontWeight: '700' }]}>
+                        {s.name}
+                      </Text>
+                      <Text style={styles.seasonOptionSub}>{s.episodeCount} Episodes</Text>
+                    </View>
+                    {isSelected && <Ionicons name="checkmark-circle" size={20} color={theme.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* ── Choose Quality Modal (Watch Now / Download) ── */}
       <Modal
         visible={qualityModalVisible}
@@ -1339,12 +1654,13 @@ const TorrentDetails = () => {
 
             {/* Language Filter Chips in Modal */}
             {availableLanguages.length > 1 && (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.modalFilterScrollView}
-                contentContainerStyle={styles.modalFilterScroll}
-              >
+              <View style={styles.modalFilterContainer}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.modalFilterScrollView}
+                  contentContainerStyle={styles.modalFilterScroll}
+                >
                 {['All', ...availableLanguages].map((lang) => {
                   const isSelected = selectedModalLanguage === lang;
                   const count = languageCounts[lang] ?? 0;
@@ -1394,6 +1710,7 @@ const TorrentDetails = () => {
                   );
                 })}
               </ScrollView>
+              </View>
             )}
 
             {isLoadingVariants && allItems.length === 0 ? (
@@ -2451,28 +2768,167 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
+  /* Episodes Section (Series Season-wise thumbnails) */
+  episodesSection: {
+    marginBottom: 26,
+    paddingLeft: 20,
+  },
+  episodesHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 20,
+    marginBottom: 14,
+  },
+  episodesCountTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.2,
+  },
+  seasonPickerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  seasonPickerPillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  episodesLoadingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 20,
+  },
+  episodesLoadingText: {
+    fontSize: 13,
+    color: '#8E8E93',
+  },
+  episodesListContent: {
+    gap: 14,
+    paddingRight: 20,
+  },
+  episodeCard: {
+    width: 250,
+  },
+  episodeThumbnailWrap: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 12,
+    backgroundColor: '#252528',
+    overflow: 'hidden',
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  episodePlayOverlay: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  episodeCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 2,
+  },
+  episodeCardAirDate: {
+    fontSize: 11,
+    color: '#8E8E93',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  episodeCardOverview: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.65)',
+    lineHeight: 16,
+  },
+  noEpisodesText: {
+    fontSize: 13,
+    color: '#8E8E93',
+    paddingVertical: 10,
+  },
+
+  /* Season Modal */
+  seasonModalSheet: {
+    backgroundColor: '#1c1c1e',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 34,
+    maxHeight: '60%',
+  },
+  seasonModalHeader: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  seasonScroll: {
+    maxHeight: 320,
+  },
+  seasonOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  seasonOptionRowSelected: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  seasonOptionText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  seasonOptionSub: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+
   /* Modal Language Filter Chips */
+  modalFilterContainer: {
+    flexShrink: 0,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
   modalFilterScrollView: {
     flexGrow: 0,
-    marginBottom: 12,
+    flexShrink: 0,
+    height: 38,
   },
   modalFilterScroll: {
     paddingHorizontal: 16,
-    paddingBottom: 2,
+    paddingVertical: 2,
     gap: 8,
     alignItems: 'center',
+    flexDirection: 'row',
   },
   modalFilterChip: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 18,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: '#252528',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    gap: 5,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    gap: 6,
   },
   modalFilterChipActive: {
     backgroundColor: '#535aff',
@@ -2482,6 +2938,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#8E8E93',
+    lineHeight: 16,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   modalFilterChipTextActive: {
     color: '#000000',
@@ -2489,20 +2948,27 @@ const styles = StyleSheet.create({
   },
   modalFilterChipCount: {
     backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 8,
-    minWidth: 16,
+    paddingHorizontal: 6,
+    height: 20,
+    borderRadius: 10,
+    minWidth: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalFilterChipCountActive: {
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
   },
   modalFilterChipCountText: {
     fontSize: 10,
     fontWeight: '700',
     color: '#8E8E93',
+    lineHeight: 12,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+  },
+  modalFilterChipCountTextActive: {
+    color: '#000000',
+    fontWeight: '800',
   },
   emptyFilterContainer: {
     paddingVertical: 36,

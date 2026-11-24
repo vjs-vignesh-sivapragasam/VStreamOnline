@@ -28,6 +28,7 @@ import {
   isScreenKeepAwakeEnabled,
   isBackgroundAudioKeepAliveEnabled,
 } from '@/utils/StremioKeepAliveManager';
+import { addonService } from '@/services/AddonService';
 
 const PopupSheet: React.FC<{ children: React.ReactNode; style: any }> = ({ children, style }) => {
   if (Platform.OS === 'ios') {
@@ -43,6 +44,7 @@ const PopupSheet: React.FC<{ children: React.ReactNode; style: any }> = ({ child
 interface SettingItemProps {
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
+  iconColor?: string;
   subtitle?: string;
   badgeText?: string;
   badgeColor?: string;
@@ -54,6 +56,7 @@ interface SettingItemProps {
 const SettingItem: React.FC<SettingItemProps> = ({
   title,
   icon,
+  iconColor,
   subtitle,
   badgeText,
   badgeColor,
@@ -82,7 +85,7 @@ const SettingItem: React.FC<SettingItemProps> = ({
     >
       <View style={styles.leftContent}>
         <View style={[styles.iconContainer, { backgroundColor: theme.iconBg || 'rgba(255,255,255,0.08)' }]}>
-          <Ionicons name={icon} size={20} color={theme.primary} />
+          <Ionicons name={icon} size={20} color={iconColor || theme.primary} />
         </View>
         <View style={styles.textContainer}>
           <Text style={styles.settingText}>{title}</Text>
@@ -125,6 +128,7 @@ const SettingsScreen = () => {
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [screenKeepAwake, setScreenKeepAwake] = useState(true);
   const [bgAudioKeepAlive, setBgAudioKeepAlive] = useState(false);
+  const [addonsCount, setAddonsCount] = useState(() => addonService.getEnabledAddons().length);
 
   const loadDataStats = useCallback(async (force = false) => {
     try {
@@ -141,6 +145,7 @@ const SettingsScreen = () => {
       setNotifEnabled(tamilMVNotificationService.isNotificationsEnabled());
       setScreenKeepAwake(isScreenKeepAwakeEnabled());
       setBgAudioKeepAlive(isBackgroundAudioKeepAliveEnabled());
+      setAddonsCount(addonService.getEnabledAddons().length);
 
       // 2. Defer heavy I/O calculation until after tab transition completes
       const timer = setTimeout(() => {
@@ -314,6 +319,21 @@ const SettingsScreen = () => {
               badgeColor="#30d158"
               onPress={() => onSettingsItemPress('/settings/stremioserver')}
               isFirst={true}
+              isLast={false}
+            />
+            <SettingItem
+              title="Stremio Addons"
+              icon="extension-puzzle-outline"
+              iconColor="#ff2d55"
+              subtitle={
+                addonsCount > 0
+                  ? `${addonsCount} active • Catalogs, torrent streams & community plugins`
+                  : 'Install Cinemeta, Torrentio & community plugins'
+              }
+              badgeText={addonsCount > 0 ? `${addonsCount} Active` : undefined}
+              badgeColor="#ff2d55"
+              onPress={() => onSettingsItemPress('/settings/addons')}
+              isFirst={false}
               isLast={false}
             />
             <SettingItem
