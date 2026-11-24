@@ -8,19 +8,34 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Base URL & Constants ─────────────────────────────────────────────────────
 
-export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.io';
+export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.ceo';
 
 export const KNOWN_TAMILMV_MIRRORS = [
-  'https://www.1tamilmv.io',
+  'https://www.1tamilmv.ceo',
   'https://www.1tamilmv.solar',
   'https://www.1tamilmv.insure',
+  'https://www.1tamilmv.run',
+  'https://www.1tamilmv.io',
+  'https://www.1tamilmv.to',
   'https://www.1tamilmv.click',
   'https://www.1tamilmv.cloud',
-  'https://www.1tamilmv.run',
-  'https://www.1tamilmv.to',
 ];
 
 const STALE_OR_DEAD_DOMAINS = new Set([
+  'https://www.1tamilmv.io',
+  'https://1tamilmv.io',
+  'https://www.1tamilmv.click',
+  'https://1tamilmv.click',
+  'https://www.1tamilmv.cloud',
+  'https://1tamilmv.cloud',
+  'https://www.1tamilmv.vip',
+  'https://1tamilmv.vip',
+  'https://www.1tamilmv.me',
+  'https://1tamilmv.me',
+  'https://www.1tamilmv.pro',
+  'https://1tamilmv.pro',
+  'https://www.1tamilmv.life',
+  'https://1tamilmv.life',
   'https://www.1tamilmv.com',
   'https://1tamilmv.com',
   'https://www.1tamilmv.rocks',
@@ -1499,7 +1514,7 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
       try {
         res = await fetch(finalTopicUrl, {
@@ -1532,6 +1547,7 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
     if (!res || !res.ok || !html || isIspCourtBlock(html)) continue;
 
     const rawMagnets = html.match(/magnet:\?[^\s"'<>]+/gi) || [];
+    if (rawMagnets.length === 0) continue;
     const magnets = rawMagnets.map(m => m.replace(/&amp;/g, '&'));
     const uniqueMagnets = Array.from(new Set(magnets));
 

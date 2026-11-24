@@ -145,6 +145,8 @@ public class VLCPlayerView extends FrameLayout {
             }
 
             media.setHWDecoderEnabled(true, false);
+            media.addOption(":network-caching=3000");
+            media.addOption(":live-caching=3000");
             mediaPlayer.setMedia(media);
             media.release();
 

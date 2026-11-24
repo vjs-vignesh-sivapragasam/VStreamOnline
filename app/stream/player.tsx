@@ -430,8 +430,19 @@ const MediaPlayerScreen: React.FC = () => {
         setIsTorrent(true);
         const safeFileIdx = typeof stream.fileIdx === 'number' && stream.fileIdx >= 0 ? stream.fileIdx : 0;
 
-        const client = stremioClient ?? (await resolveStreamingServerClient());
-        const isOnline = await client.isServerOnline(2000);
+        let client = stremioClient ?? (await resolveStreamingServerClient());
+        let isOnline = await client.isServerOnline(2500);
+        if (!isOnline) {
+          ensureEmbeddedServerRunning().catch(() => {});
+          for (let attempt = 0; attempt < 5; attempt++) {
+            await new Promise((r) => setTimeout(r, 1000));
+            client = await resolveStreamingServerClient();
+            if (await client.isServerOnline(2000)) {
+              isOnline = true;
+              break;
+            }
+          }
+        }
         if (!isOnline) {
           throw new Error(`Stremio streaming server is offline (${client.getBaseURL()}). Please make sure the server is running.`);
         }

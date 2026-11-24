@@ -1012,6 +1012,16 @@ const TorrentDetails = () => {
     setIsLaunchingPlayer(true);
 
     try {
+      // Validate that the item has a streamable link or hash
+      if (!item.infoHash && !item.magnetUrl && !((item as any).url)) {
+        if (isLoadingVariants) {
+          showAlert('Loading Streams', 'Fetching torrent resolutions from TamilMV. Please wait a moment...');
+          return;
+        }
+        showAlert('No Stream Found', 'Please select a quality with an active magnet link.');
+        return;
+      }
+
       // Warm up embedded streaming server
       ensureEmbeddedServerRunning().catch(() => {});
 

@@ -211,7 +211,7 @@ export function getDevHostIp(): string | null {
 
   // 7. Fallback to developer PC LAN IP during development on local network
   if (__DEV__) {
-    return '192.168.1.5';
+    return '192.168.1.2';
   }
 
   return null;
@@ -279,7 +279,7 @@ export async function resolveStreamingServerClient(): Promise<StreamingServerCli
   const results = await Promise.all(
     candidates.map(async (url) => {
       const client = new StreamingServerClient(url);
-      const isOnline = await client.isServerOnline(1200);
+      const isOnline = await client.isServerOnline(2500);
       return { url, client, isOnline };
     })
   );
