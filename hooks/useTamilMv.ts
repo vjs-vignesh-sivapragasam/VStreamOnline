@@ -8,20 +8,17 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─── Base URL & Constants ─────────────────────────────────────────────────────
 
-export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.pizza';
+export const DEFAULT_TAMILMV_BASE_URL = 'https://www.1tamilmv.ceo';
 
 export const KNOWN_TAMILMV_MIRRORS = [
-  'https://www.1tamilmv.style',
+  'https://www.1tamilmv.ceo',
   'https://www.1tamilmv.solar',
-  'https://www.1tamilmv.cards',
-  'https://www.1tamilmv.pizza',
-  'https://www.1tamilmv.fi',
-  'https://www.1tamilmv.live',
-  'https://www.1tamilmv.pm',
-  'https://www.1tamilmv.yt',
-  'https://www.1tamilmv.mx',
-  'https://www.1tamilmv.tf',
-  'https://www.1tamilmv.com',
+  'https://www.1tamilmv.insure',
+  'https://www.1tamilmv.run',
+  'https://www.1tamilmv.io',
+  'https://www.1tamilmv.to',
+  'https://www.1tamilmv.click',
+  'https://www.1tamilmv.cloud',
 ];
 
 type BaseUrlListener = (newUrl: string) => void;
@@ -1147,7 +1144,7 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
 
   for (const targetUrl of mirrorsToTry) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    const timeout = setTimeout(() => controller.abort(), 5000);
 
     try {
       const res = await fetch(targetUrl, {
@@ -1164,6 +1161,7 @@ export async function fetchTamilMVTopicMagnets(topicUrl: string): Promise<{ post
 
       const html = await res.text();
       const rawMagnets = html.match(/magnet:\?[^\s"'<>]+/gi) || [];
+      if (rawMagnets.length === 0) continue;
       const magnets = rawMagnets.map(m => m.replace(/&amp;/g, '&'));
 
       let poster: string | null = null;

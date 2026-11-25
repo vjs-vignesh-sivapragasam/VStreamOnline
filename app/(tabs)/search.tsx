@@ -248,16 +248,6 @@ const SearchMovieCard = React.memo(({
           </View>
         )}
       </View>
-
-      <Text style={[styles.cardTitle, { width: cardWidth }]} numberOfLines={2}>
-        {cleanedTitle}
-      </Text>
-
-      <View style={styles.cardFooter}>
-        <Text style={styles.cardSub}>
-          {type === 'series' ? 'Series' : 'Movie'}{group.year ? ` • ${group.year}` : ''} • {releasesCount} {releasesCount === 1 ? 'source' : 'sources'}
-        </Text>
-      </View>
     </Pressable>
   );
 });

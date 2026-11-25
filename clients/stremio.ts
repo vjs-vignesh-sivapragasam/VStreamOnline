@@ -22,9 +22,13 @@ export interface TorrentStats {
 }
 
 export const DEFAULT_TRACKERS = [
-  'udp://tracker.opentrackers.org:1337/announce',
+  'udp://tracker.opentrackr.org:1337/announce',
   'udp://open.stealth.si:80/announce',
   'udp://tracker.torrent.eu.org:451/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://open.dstud.io:6969/announce',
+  'udp://tracker.srv00.com:6969/announce',
   'udp://tracker.openbittorrent.com:6969/announce',
   'udp://opentracker.i2p.rocks:6969/announce',
   'udp://tracker.moeking.me:6969/announce',
@@ -90,7 +94,12 @@ export class StreamingServerClient {
       const response = await fetch(url, { signal: controller.signal });
       if (!response.ok) throw new Error(`Streaming server responded with status: ${response.status}`);
       const data = await response.json();
-      return data.files ?? [];
+      const rawFiles: any[] = data.files ?? [];
+      return rawFiles.map((f: any, idx: number) => ({
+        id: typeof f.id === 'number' ? f.id : idx,
+        name: f.name || f.path || `File ${idx + 1}`,
+        length: typeof f.length === 'number' ? f.length : (f.size || 0),
+      }));
     } catch (err: any) {
       if (err.name === 'AbortError') {
         throw new Error(`Connection timed out contacting streaming server at ${this.baseURL}`);
@@ -160,6 +169,11 @@ export function getDevHostIp(): string | null {
       }
     }
   } catch {}
+
+  if (__DEV__) {
+    return '192.168.1.2';
+  }
+
   return null;
 }
 
@@ -205,20 +219,27 @@ let cachedActiveUrl: string | null = null;
 export async function resolveStreamingServerClient(): Promise<StreamingServerClient> {
   if (cachedActiveUrl) {
     const client = new StreamingServerClient(cachedActiveUrl);
-    if (await client.isServerOnline(1000)) {
+    if (await client.isServerOnline(800)) {
       return client;
     }
     cachedActiveUrl = null;
   }
 
   const candidates = getServerCandidates();
-  for (const url of candidates) {
-    const client = new StreamingServerClient(url);
-    if (await client.isServerOnline(1200)) {
-      cachedActiveUrl = url;
-      console.log(`[StreamingServerClient] Connected to active streaming server at ${url}`);
-      return client;
-    }
+  // Probe candidates in parallel for fastest resolution
+  const results = await Promise.all(
+    candidates.map(async (url) => {
+      const client = new StreamingServerClient(url);
+      const isOnline = await client.isServerOnline(2500);
+      return { url, client, isOnline };
+    })
+  );
+
+  const working = results.find((r) => r.isOnline);
+  if (working) {
+    cachedActiveUrl = working.url;
+    console.log(`[StreamingServerClient] Connected to active streaming server at ${working.url}`);
+    return working.client;
   }
 
   return new StreamingServerClient(candidates[0] || 'http://127.0.0.1:11470');

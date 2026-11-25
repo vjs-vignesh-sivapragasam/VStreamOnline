@@ -798,6 +798,16 @@ const TorrentDetails = () => {
 
     setLoadingItem(item.guid);
     try {
+      // Validate that the item has a streamable link or hash
+      if (!item.infoHash && !item.magnetUrl && !((item as any).url)) {
+        if (isLoadingVariants) {
+          showAlert('Loading Streams', 'Fetching torrent resolutions from TamilMV. Please wait a moment...');
+          return;
+        }
+        showAlert('No Stream Found', 'Please select a quality with an active magnet link.');
+        return;
+      }
+
       // Warm up embedded streaming server
       ensureEmbeddedServerRunning().catch(() => {});
 
@@ -988,7 +998,7 @@ const TorrentDetails = () => {
         tmdbData?.imdbId;
 
       if (!mediaId) {
-        setQualityModalVisible(true);
+        showAlert('Media Not Identified', 'Could not locate IMDb ID for this series to query addon streams.');
         return;
       }
 
@@ -1029,7 +1039,7 @@ const TorrentDetails = () => {
         setItems(converted);
         setQualityModalVisible(true);
       } else {
-        setQualityModalVisible(true);
+        showAlert('No Streams Found', `No active streams found for Season ${selectedSeason} Episode ${ep.episodeNumber}. Please check your installed addons or try another episode.`);
       }
     } catch (e) {
       console.warn('[TorrentDetails] Error loading episode streams:', e);

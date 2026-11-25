@@ -6,7 +6,7 @@ import { Platform, Linking, ActivityIndicator, View, Text, StyleSheet, Image, To
 import { StatusBar } from "expo-status-bar";
 import { ServerConfig } from "@/components/ServerConfig";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StreamingServerClient, getServerCandidates } from "@/clients/stremio";
+import { StreamingServerClient, getServerCandidates, resolveStreamingServerClient } from "@/clients/stremio";
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { TorrentItem } from "@/hooks/useTamilMv";
 import { StorageKeys, storageService } from "@/utils/StorageService";
@@ -358,21 +358,50 @@ const MediaPlayerScreen: React.FC = () => {
       let finalUrl = stream.url ?? '';
 
       if (isTorrentStream) {
-        const servers = serverList ?? stremioServers;
-        const sid = serverId !== undefined ? serverId : selectedServerId;
-        const server = (sid ? servers.find(s => s.serverId === sid) : null) || servers[0] || {
-          serverId: 'auto-localhost',
-          serverType: 'stremio',
-          serverName: 'Local Server',
-          serverUrl: 'http://127.0.0.1:11470',
-          current: true,
-        };
         setIsTorrent(true);
-        const client = stremioClient ?? new StreamingServerClient(server.serverUrl);
-        const validFileIdx = (stream.fileIdx !== undefined && stream.fileIdx >= 0) ? stream.fileIdx : 0;
-        finalUrl = await generatePlayerUrlWithInfoHash(infoHash!, server.serverUrl, validFileIdx, client, magnetUrl);
 
-        startTorrentStatsPolling(client, infoHash!, validFileIdx);
+        // 1. Resolve active streaming server with retry for embedded/network engine
+        let client = stremioClient ?? (await resolveStreamingServerClient());
+        let isOnline = await client.isServerOnline(2500);
+        if (!isOnline) {
+          ensureEmbeddedServerRunning().catch(() => {});
+          for (let attempt = 0; attempt < 5; attempt++) {
+            await new Promise((r) => setTimeout(r, 1000));
+            client = await resolveStreamingServerClient();
+            if (await client.isServerOnline(2000)) {
+              isOnline = true;
+              break;
+            }
+          }
+        }
+        if (!isOnline) {
+          throw new Error(`Stremio streaming server is offline (${client.getBaseURL()}). Please make sure the server is running.`);
+        }
+        setStremioClient(client);
+
+        // 2. Pre-warm torrent engine via /create and find correct video file index
+        let safeFileIdx = (stream.fileIdx !== undefined && stream.fileIdx >= 0) ? stream.fileIdx : 0;
+        try {
+          const files = await client.getTorrentFiles(infoHash!, 5000, magnetUrl);
+          if (files && files.length > 0) {
+            if (stream.fileIdx === undefined || stream.fileIdx < 0) {
+              const videoFiles = files.filter((f) => {
+                const ext = f.name.split('.').pop()?.toLowerCase();
+                return ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(ext || '');
+              });
+              const chosen = videoFiles.length > 0
+                ? videoFiles.sort((a, b) => b.length - a.length)[0]
+                : [...files].sort((a, b) => b.length - a.length)[0];
+              safeFileIdx = typeof chosen.id === 'number' && chosen.id >= 0 ? chosen.id : 0;
+            }
+          }
+        } catch (warmErr) {
+          console.warn('[Player] Engine warm-up note:', warmErr);
+        }
+
+        // 3. Generate direct streaming URL on active server
+        finalUrl = await client.getStreamingURL(infoHash!, safeFileIdx, magnetUrl);
+        startTorrentStatsPolling(client, infoHash!, safeFileIdx);
       } else {
         if (!stream.url) return;
         setIsTorrent(false);
@@ -403,17 +432,9 @@ const MediaPlayerScreen: React.FC = () => {
     try {
       let url = stream.url ?? '';
       if (isTorrentStream) {
-        const servers = serverList ?? stremioServers;
-        const sid = serverId !== undefined ? serverId : selectedServerId;
-        const server = (sid ? servers.find(s => s.serverId === sid) : null) || servers[0] || {
-          serverId: 'auto-localhost',
-          serverType: 'stremio',
-          serverName: 'Local Server',
-          serverUrl: 'http://127.0.0.1:11470',
-          current: true,
-        };
-        const client = stremioClient ?? new StreamingServerClient(server.serverUrl);
-        url = await client.getStreamingURL(infoHash!, stream.fileIdx ?? -1, stream.magnet || stream.magnetLink);
+        const client = stremioClient ?? (await resolveStreamingServerClient());
+        const safeFileIdx = (stream.fileIdx !== undefined && stream.fileIdx >= 0) ? stream.fileIdx : 0;
+        url = await client.getStreamingURL(infoHash!, safeFileIdx, stream.magnet || stream.magnetLink);
       }
       if (!url) { showAlert('Error', 'Unable to generate video URL'); return; }
 

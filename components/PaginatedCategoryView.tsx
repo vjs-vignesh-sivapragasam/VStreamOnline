@@ -111,18 +111,7 @@ const CategoryItemCard = ({
             />
           </View>
         )}
-
-        {releasesCount > 1 ? (
-          <View style={styles.releaseBadge}>
-            <Text style={styles.releaseBadgeText}>{releasesCount} releases</Text>
-          </View>
-        ) : null}
       </View>
-
-      <Text style={[styles.cardTitle, { width: cardWidth }]} numberOfLines={2}>
-        {cleanedTitle}
-      </Text>
-      {group.year ? <Text style={styles.cardYear}>{group.year}</Text> : null}
     </Pressable>
   );
 };
