@@ -1551,6 +1551,19 @@ class DownloadManager {
         console.warn('[DownloadService] Error deleting file:', err);
       }
     }
+    try {
+      const dir = this.getDownloadsDirectory();
+      if (dir.exists) {
+        const entries = dir.list();
+        for (const entry of entries) {
+          try {
+            entry.delete();
+          } catch {}
+        }
+      }
+    } catch (dirErr) {
+      console.warn('[DownloadService] Error clearing download directory entries:', dirErr);
+    }
     this.inMemoryDownloads = [];
     this.notifyListeners();
     this.persistDownloadsImmediately();
