@@ -103,7 +103,7 @@ const CarouselSlideItem = ({
             activeOpacity={0.92}
         >
             <ImageBackground
-                source={{ uri: backdropUri || item.posterUrl }}
+                source={{ uri: backdropUri || item.posterUrl, cache: 'force-cache' as any }}
                 style={styles.backdropImage}
                 resizeMode="cover"
             >
@@ -229,7 +229,7 @@ export default function PosterCarousel({
 
     const carouselHeight = dimensions.isLandscape
         ? dimensions.height * 0.95
-        : Math.min(Math.max(dimensions.height * 0.68, 520), 620);
+        : Math.min(Math.max(dimensions.height * 0.58, 460), 540);
 
     useEffect(() => {
         if (autoPlay && data.length > 1) {
@@ -328,22 +328,39 @@ export default function PosterCarousel({
                     style={[
                         styles.paginationContainer,
                         {
-                            bottom: 12,
+                            bottom: 48,
                         },
                     ]}
                 >
-                    <BlurView intensity={20} style={styles.paginationBlur}>
-                        <View style={styles.paginationDots}>
-                            {data.map((_, index) => (
-                                <TouchableOpacity
-                                    key={`dot-${index}`}
-                                    style={[
-                                        styles.paginationDot,
-                                        activeIndex === index && [styles.paginationDotActive, { backgroundColor: theme.primary }],
-                                    ]}
-                                    onPress={() => scrollToIndex(index)}
-                                />
-                            ))}
+                    <BlurView intensity={35} tint="dark" style={styles.paginationBlur}>
+                        <View style={styles.paginationRow}>
+                            {/* Movies count text e.g. 1 / 15 */}
+                            <View style={styles.movieCountBadge}>
+                                <Text style={styles.movieCountCurrent}>{activeIndex + 1}</Text>
+                                <Text style={styles.movieCountDivider}>/</Text>
+                                <Text style={styles.movieCountTotal}>{data.length}</Text>
+                            </View>
+
+                            <View style={styles.paginationDividerPipe} />
+
+                            {/* Moving dots */}
+                            <View style={styles.paginationDots}>
+                                {data.slice(0, Math.min(data.length, 10)).map((_, index) => {
+                                    const isActive = activeIndex === index || (activeIndex >= 10 && index === 9);
+                                    return (
+                                        <TouchableOpacity
+                                            key={`dot-${index}`}
+                                            style={[
+                                                styles.paginationDot,
+                                                isActive && [styles.paginationDotActive, { backgroundColor: theme.primary }],
+                                            ]}
+                                            onPress={() => scrollToIndex(index)}
+                                            hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                                            activeOpacity={0.7}
+                                        />
+                                    );
+                                })}
+                            </View>
                         </View>
                     </BlurView>
                 </View>
@@ -483,30 +500,71 @@ const styles = StyleSheet.create({
     },
     paginationContainer: {
         position: 'absolute',
-        bottom: 12,
+        bottom: 48,
         alignSelf: 'center',
-        borderRadius: 20,
+        borderRadius: 22,
         overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.14)',
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+        elevation: 6,
     },
     paginationBlur: {
-        paddingHorizontal: 8,
+        paddingHorizontal: 12,
         paddingVertical: 6,
+    },
+    paginationRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    movieCountBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingRight: 2,
+    },
+    movieCountCurrent: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#ffffff',
+        letterSpacing: 0.2,
+    },
+    movieCountDivider: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: 'rgba(255, 255, 255, 0.4)',
+        marginHorizontal: 1,
+    },
+    movieCountTotal: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: 'rgba(255, 255, 255, 0.6)',
+    },
+    paginationDividerPipe: {
+        width: 1,
+        height: 12,
+        backgroundColor: 'rgba(255, 255, 255, 0.22)',
+        marginHorizontal: 2,
     },
     paginationDots: {
         flexDirection: 'row',
         alignItems: 'center',
     },
     paginationDot: {
-        width: 7,
-        height: 7,
-        borderRadius: 3.5,
-        backgroundColor: 'rgba(255, 255, 255, 0.4)',
-        marginHorizontal: 3.5,
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: 'rgba(255, 255, 255, 0.32)',
+        marginHorizontal: 3,
     },
     paginationDotActive: {
+        width: 16,
+        height: 6,
+        borderRadius: 3,
         backgroundColor: '#ffffff',
-        width: 12,
-        height: 7,
-        borderRadius: 3.5,
     },
 });

@@ -161,13 +161,54 @@ export function formatReleaseDate(dateStr?: string): string {
 
 // ── Service Class ─────────────────────────────────────────────────────────────
 
+const TMDB_POSTER_DISK_CACHE_KEY = 'vstream_tmdb_posters_disk_v1';
+
 class TmdbService {
   private inMemoryCache = new Map<string, TmdbDetails>();
   private posterCache = new Map<string, string | null>();
+  private savePosterTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.loadPersistedPosters();
+  }
+
+  private loadPersistedPosters(): void {
+    try {
+      const raw = storageService.getItem(TMDB_POSTER_DISK_CACHE_KEY as any);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === 'object' && parsed !== null) {
+          for (const [k, v] of Object.entries(parsed)) {
+            if (typeof v === 'string' || v === null) {
+              this.posterCache.set(k, v);
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  private persistPostersDebounced(): void {
+    if (this.savePosterTimer) return;
+    this.savePosterTimer = setTimeout(() => {
+      this.savePosterTimer = null;
+      try {
+        const obj: Record<string, string | null> = {};
+        const entries = Array.from(this.posterCache.entries()).slice(-600);
+        for (const [k, v] of entries) {
+          obj[k] = v;
+        }
+        storageService.setItem(TMDB_POSTER_DISK_CACHE_KEY as any, JSON.stringify(obj));
+      } catch {}
+    }, 2500);
+  }
 
   clearCache(): void {
     this.inMemoryCache.clear();
     this.posterCache.clear();
+    try {
+      storageService.removeItem(TMDB_POSTER_DISK_CACHE_KEY as any);
+    } catch {}
   }
 
   /**
@@ -212,6 +253,7 @@ class TmdbService {
         if (best?.poster_path) {
           const posterUrl = `${TMDB_IMAGE_BASE}/w342${best.poster_path}`;
           this.posterCache.set(cacheKey, posterUrl);
+          this.persistPostersDebounced();
           return posterUrl;
         }
       }

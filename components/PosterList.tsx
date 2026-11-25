@@ -17,6 +17,7 @@ import { DefaultPosterImgXml } from '@/utils/Svg';
 import { Ionicons } from '@expo/vector-icons';
 import { TorrentItem, GroupedItem, Language, Category } from '@/hooks/useTamilMv';
 import { tmdbService } from '@/services/TmdbService';
+import { storageService } from '@/utils/StorageService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,12 +55,44 @@ function groupToItem(group: GroupedItem, type: 'movie' | 'series'): PosterItemDa
 
 // ─── Poster Cache & Concurrency Queue ───────────────────────────────────────
 
+const POSTER_LIST_CACHE_KEY = 'vstream_poster_list_cache_v1';
 const globalPosterCache = new Map<string, string | null>();
+
+// Initialize persistent cache from disk
+try {
+  const saved = storageService.getItem(POSTER_LIST_CACHE_KEY as any);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    if (typeof parsed === 'object' && parsed !== null) {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'string' || v === null) {
+          globalPosterCache.set(k, v);
+        }
+      }
+    }
+  }
+} catch {}
+
+let persistQueueTimer: NodeJS.Timeout | null = null;
+function schedulePersistGlobalPosterCache() {
+  if (persistQueueTimer) return;
+  persistQueueTimer = setTimeout(() => {
+    persistQueueTimer = null;
+    try {
+      const obj: Record<string, string | null> = {};
+      const entries = Array.from(globalPosterCache.entries()).slice(-600);
+      for (const [k, v] of entries) {
+        obj[k] = v;
+      }
+      storageService.setItem(POSTER_LIST_CACHE_KEY as any, JSON.stringify(obj));
+    } catch {}
+  }, 2500);
+}
 
 class PosterFetchQueue {
   private queue: (() => Promise<void>)[] = [];
   private activeCount = 0;
-  private maxConcurrent = 3;
+  private maxConcurrent = 10;
 
   enqueue(fn: () => Promise<void>) {
     this.queue.push(fn);
@@ -113,6 +146,7 @@ const PosterItem = React.memo(({
     if (item.poster) {
       setPosterUri(item.poster);
       globalPosterCache.set(titleKey, item.poster);
+      schedulePersistGlobalPosterCache();
       return;
     }
 
@@ -134,6 +168,7 @@ const PosterItem = React.memo(({
         );
         if (poster) {
           globalPosterCache.set(titleKey, poster);
+          schedulePersistGlobalPosterCache();
           if (isMounted) setPosterUri(poster);
         } else {
           globalPosterCache.set(titleKey, null);
@@ -185,7 +220,7 @@ const PosterItem = React.memo(({
       <View style={{ position: 'relative' }}>
         {activePoster && !imgError ? (
           <Image
-            source={{ uri: activePoster }}
+            source={{ uri: activePoster, cache: 'force-cache' as any }}
             onError={() => setImgError(true)}
             style={[styles.posterImage, { width: posterWidth, height: posterHeight }]}
             resizeMode="cover"

@@ -1597,13 +1597,13 @@ export async function fetchTamilMVHomepageData(
       const item = group.items[0];
       if (item && !item.poster) {
         try {
-          const tmdb = await tmdbService.getMovieFullInfo(
+          const poster = await tmdbService.getMoviePoster(
             item.name || '',
             item.year || undefined,
             (group as any).type
           );
-          if (tmdb?.backdropUrl || tmdb?.posterUrl) {
-            item.poster = tmdb.backdropUrl || tmdb.posterUrl;
+          if (poster) {
+            item.poster = poster;
           }
         } catch {}
       }
