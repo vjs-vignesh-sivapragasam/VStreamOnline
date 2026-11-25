@@ -291,7 +291,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  filtersContainer: { paddingVertical: 12, paddingHorizontal: 5 },
+  filtersContainer: { paddingVertical: 6, paddingHorizontal: 5 },
   filterRow: { paddingHorizontal: 10, gap: 15 },
   filterButton: {
     flexDirection: 'row',
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   filterButtonTextActive: { color: '#000000', fontWeight: '700' },
-  contentContainer: { marginTop: 28 },
+  contentContainer: { marginTop: 6 },
   loadingContainer: {
     alignItems: 'center',
     paddingVertical: 60,
