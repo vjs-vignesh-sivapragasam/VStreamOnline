@@ -136,6 +136,15 @@ export function cleanMovieQuery(raw: string): { query: string; year?: string } {
 
 // ── Date Formatting: "15 July 2026" ───────────────────────────────────────────
 
+export function formatShortDate(dateStr?: string): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const day = d.getDate();
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[d.getMonth()]} ${day}, ${d.getFullYear()}`;
+}
+
 export function formatReleaseDate(dateStr?: string): string {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -677,7 +686,7 @@ class TmdbService {
         overview: ep.overview || '',
         stillPath: ep.still_path,
         stillUrl: ep.still_path ? `${TMDB_IMAGE_BASE}/w500${ep.still_path}` : null,
-        airDate: ep.air_date ? formatReleaseDate(ep.air_date) : '',
+        airDate: ep.air_date ? formatShortDate(ep.air_date) : '',
         voteAverage: ep.vote_average || 0,
         runtime: ep.runtime,
       }));

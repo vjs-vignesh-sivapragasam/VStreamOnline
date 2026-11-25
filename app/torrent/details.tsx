@@ -381,7 +381,7 @@ const TorrentDetails = () => {
       return;
     }
 
-    const targetUrl = topicUrl || (groupid?.startsWith('http') ? groupid : null) || (rawParsed[0]?.groupid?.startsWith('http') ? rawParsed[0].groupid : null);
+    const targetUrl = (topicUrl?.startsWith('http') ? topicUrl : null) || (groupid?.startsWith('http') ? groupid : null) || (rawParsed[0]?.groupid?.startsWith('http') ? rawParsed[0].groupid : null);
     if (targetUrl) {
       setIsLoadingVariants(true);
       fetchTamilMVTopicMagnets(targetUrl)
@@ -405,7 +405,7 @@ const TorrentDetails = () => {
     }
 
     // Auto-search TamilMV when opened with just a title (e.g. Recommended or Similar movies)
-    const searchTitle = getMovieSearchTitle(title);
+    const searchTitle = !isAddonMedia ? getMovieSearchTitle(title) : '';
     if (searchTitle) {
       setIsLoadingVariants(true);
       searchTamilMV(searchTitle, 'all')
@@ -503,9 +503,11 @@ const TorrentDetails = () => {
         });
 
         setItems((prev) => {
-          const existingHashes = new Set(prev.map((i) => i.infoHash).filter(Boolean));
+          // Filter out dummy/placeholder items that have no streamable hash or link
+          const realPrev = prev.filter((i) => Boolean(i.infoHash || i.magnetUrl || (i as any).url));
+          const existingHashes = new Set(realPrev.map((i) => i.infoHash).filter(Boolean));
           const newItems = converted.filter((c) => !c.infoHash || !existingHashes.has(c.infoHash));
-          return [...prev, ...newItems];
+          return [...realPrev, ...newItems];
         });
       })
       .catch((e) => {
@@ -630,6 +632,7 @@ const TorrentDetails = () => {
 
   const isSeries = Boolean(
     type === 'series' ||
+    type === 'tv' ||
     tmdbData?.mediaType === 'tv' ||
     (tmdbData?.numberOfSeasons && tmdbData.numberOfSeasons > 0)
   );
@@ -638,7 +641,9 @@ const TorrentDetails = () => {
     groupid?.startsWith('addon-') ||
     guid?.startsWith('addon-') ||
     imdbId ||
-    (!topicUrl && !groupid?.startsWith('http'))
+    (groupid && /^tt\d+/i.test(groupid)) ||
+    (guid && /^tt\d+/i.test(guid)) ||
+    (!topicUrl?.startsWith('http') && !groupid?.startsWith('http'))
   );
 
   // ── Available Languages (Detected from title, torrent items, and TMDB) ──
@@ -659,9 +664,11 @@ const TorrentDetails = () => {
   const [selectedModalLanguage, setSelectedModalLanguage] = useState<string>('All');
 
   const languageCounts = useMemo(() => {
-    const counts: Record<string, number> = { All: allItems.length };
+    const validItems = allItems.filter((i) => Boolean(i.infoHash || i.magnetUrl || (i as any).url));
+    const pool = validItems.length > 0 ? validItems : allItems;
+    const counts: Record<string, number> = { All: pool.length };
     availableLanguages.forEach((lang) => {
-      counts[lang] = allItems.filter((item) =>
+      counts[lang] = pool.filter((item) =>
         getItemLanguages(item, title).some((l) => l.toLowerCase() === lang.toLowerCase())
       ).length;
     });
@@ -669,8 +676,10 @@ const TorrentDetails = () => {
   }, [allItems, availableLanguages, title]);
 
   const filteredModalItems = useMemo(() => {
-    if (selectedModalLanguage === 'All') return allItems;
-    return allItems.filter((item) => {
+    const validItems = allItems.filter((i) => Boolean(i.infoHash || i.magnetUrl || (i as any).url));
+    const pool = validItems.length > 0 ? validItems : allItems;
+    if (selectedModalLanguage === 'All') return pool;
+    return pool.filter((item) => {
       const langs = getItemLanguages(item, title);
       return langs.some((l) => l.toLowerCase() === selectedModalLanguage.toLowerCase());
     });
@@ -702,6 +711,10 @@ const TorrentDetails = () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    if (isSeries && seasonEpisodes.length > 0) {
+      handleEpisodePress(seasonEpisodes[0], 'watch');
+      return;
+    }
     if (isLoadingVariants) {
       showAlert('Loading Streams', 'Fetching available streaming qualities. Please wait a moment...');
       return;
@@ -723,6 +736,10 @@ const TorrentDetails = () => {
   const handleDownloadPress = async () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (isSeries && seasonEpisodes.length > 0) {
+      handleEpisodePress(seasonEpisodes[0], 'download');
+      return;
     }
     if (isLoadingVariants) {
       showAlert('Loading Downloads', 'Fetching available download qualities. Please wait a moment...');
@@ -985,7 +1002,7 @@ const TorrentDetails = () => {
   }, [isSeries, tmdbData?.id, selectedSeason]);
 
   // Handle Episode selection: fetch addon streams for that specific episode
-  const handleEpisodePress = async (ep: TmdbEpisode) => {
+  const handleEpisodePress = async (ep: TmdbEpisode, mode: 'watch' | 'download' = 'watch') => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
@@ -993,8 +1010,8 @@ const TorrentDetails = () => {
     try {
       const mediaId =
         imdbId ||
-        (guid?.startsWith('tt') ? guid : null) ||
-        (groupid?.startsWith('tt') ? groupid : null) ||
+        (guid && /^tt\d+/i.test(guid) ? guid : null) ||
+        (groupid && /^tt\d+/i.test(groupid) ? groupid : null) ||
         tmdbData?.imdbId;
 
       if (!mediaId) {
@@ -1037,6 +1054,8 @@ const TorrentDetails = () => {
         });
 
         setItems(converted);
+        setSelectedModalLanguage('All');
+        setQualityModalMode(mode);
         setQualityModalVisible(true);
       } else {
         showAlert('No Streams Found', `No active streams found for Season ${selectedSeason} Episode ${ep.episodeNumber}. Please check your installed addons or try another episode.`);
@@ -1095,7 +1114,7 @@ const TorrentDetails = () => {
           </TouchableOpacity>
 
           {/* Circular Web Page Button (top right, near My List - hidden for addon media) */}
-          {!isAddonMedia && topicUrl ? (
+          {!isAddonMedia && topicUrl?.startsWith('http') ? (
             <TouchableOpacity
               style={[
                 styles.webPageButton,
@@ -1268,6 +1287,7 @@ const TorrentDetails = () => {
         {/* ── Overview Description Paragraph ── */}
         {tmdbData?.overview ? (
           <View style={styles.overviewContainer}>
+            <Text style={styles.sectionTitle}>Overview</Text>
             <Text
               style={styles.overviewText}
               numberOfLines={isOverviewExpanded ? undefined : 3}
@@ -1362,10 +1382,10 @@ const TorrentDetails = () => {
           </View>
         )}
 
-        {/* ── Section: Cast & Crew ── */}
+        {/* ── Section: Cast ── */}
         {tmdbData?.cast && tmdbData.cast.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Cast & Crew</Text>
+            <Text style={styles.sectionTitle}>Cast</Text>
             <FlatList
               data={tmdbData.cast}
               keyExtractor={(item) => `cast-${item.id}`}
@@ -1398,6 +1418,35 @@ const TorrentDetails = () => {
                 </View>
               )}
             />
+          </View>
+        )}
+
+        {/* ── Section: Trailer ── */}
+        {(tmdbData?.trailerKey || backdropUri) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Trailer</Text>
+            <TouchableOpacity
+              style={styles.trailerCard}
+              onPress={handleTrailerPress}
+              activeOpacity={0.8}
+            >
+              <Image
+                source={{
+                  uri: tmdbData?.trailerKey
+                    ? `https://img.youtube.com/vi/${tmdbData.trailerKey}/hqdefault.jpg`
+                    : (backdropUri || poster),
+                }}
+                style={styles.trailerThumbnail}
+                resizeMode="cover"
+              />
+              <LinearGradient
+                colors={['transparent', 'rgba(0, 0, 0, 0.65)']}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={styles.trailerPlayOverlay}>
+                <Ionicons name="play" size={26} color="#ffffff" style={{ marginLeft: 3 }} />
+              </View>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -2058,6 +2107,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#8E8E93',
     fontWeight: '600',
+  },
+
+  /* Trailer Section */
+  trailerCard: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#1c1c1e',
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  trailerThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  trailerPlayOverlay: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   /* Cast & Crew */

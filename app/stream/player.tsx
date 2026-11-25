@@ -455,14 +455,7 @@ const MediaPlayerScreen: React.FC = () => {
   const handleStreamChange = (newIndex: number) => {
     if (newIndex < 0 || newIndex >= streams.length) return;
     setCurrentStreamIndex(newIndex);
-    const s = streams[newIndex];
-    if (s.url) {
-      setVideoUrl(s.url);
-      setStreamError('');
-      setIsLoadingStream(false);
-    } else {
-      loadStream(newIndex);
-    }
+    loadStream(newIndex);
   };
 
   const handlePlaybackError = (event: PlaybackErrorEvent) => {
