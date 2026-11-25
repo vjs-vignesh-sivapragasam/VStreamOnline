@@ -96,6 +96,12 @@ const CarouselSlideItem = ({
         };
     }, [item.title, item.publishDate, item.type]);
 
+    const cleanTitle = useMemo(() => {
+        const parsed = cleanTopicTitle(item.title).name;
+        const cleaned = parsed.replace(/^[a-z0-9\.-]+\.[a-z]{2,6}\s*[-_:]\s*/i, '').trim();
+        return cleaned || item.title;
+    }, [item.title]);
+
     return (
         <TouchableOpacity
             style={[styles.carouselItem, { width: dimensions.width, height: carouselHeight }]}
@@ -111,15 +117,27 @@ const CarouselSlideItem = ({
                     colors={[
                         'rgba(0,0,0,0.3)',
                         'transparent',
-                        'rgba(0,0,0,0.65)',
-                        'rgba(0,0,0,0.92)',
+                        'rgba(0,0,0,0.5)',
+                        'rgba(0,0,0,0.85)',
                         '#000000',
                     ]}
                     locations={[0, 0.2, 0.5, 0.8, 1]}
                     style={StyleSheet.absoluteFill}
                 />
 
-                {/* Clean movie poster backdrop with gradient fade - no text or badges in front of poster */}
+                <View
+                    style={[
+                        styles.slideContent,
+                        {
+                            paddingHorizontal: dimensions.isLandscape ? 40 : 20,
+                            paddingBottom: dimensions.isLandscape ? 68 : 96,
+                        },
+                    ]}
+                >
+                    <Text style={styles.slideTitle} numberOfLines={2}>
+                        {cleanTitle}
+                    </Text>
+                </View>
             </ImageBackground>
         </TouchableOpacity>
     );
@@ -386,19 +404,19 @@ const styles = StyleSheet.create({
     slideContent: {
         zIndex: 2,
         alignItems: 'center',
-        paddingBottom: 56,
+        justifyContent: 'center',
+        width: '100%',
     },
     slideTitle: {
-        fontSize: 24,
+        fontSize: 22,
         fontWeight: '800',
         color: '#ffffff',
         textAlign: 'center',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
+        letterSpacing: 0.4,
         textShadowColor: 'rgba(0, 0, 0, 0.95)',
         textShadowOffset: { width: 0, height: 2 },
         textShadowRadius: 8,
-        paddingHorizontal: 16,
+        paddingHorizontal: 20,
     },
     metaRowText: {
         fontSize: 13,
