@@ -78,17 +78,16 @@ const CarouselSlideItem = ({
     carouselHeight,
     onPress,
 }: SlideItemProps) => {
-    const [tmdb, setTmdb] = useState<TmdbDetails | null>(null);
-    const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+    const [backdropUri, setBackdropUri] = useState<string>(item.posterUrl);
 
     useEffect(() => {
         let isMounted = true;
         const year = item.publishDate ? new Date(item.publishDate).getFullYear().toString() : undefined;
         tmdbService
-            .getMovieFullInfo(item.title, year, item.type)
-            .then((data) => {
-                if (isMounted && data) {
-                    setTmdb(data);
+            .getMoviePoster(item.title, year, item.type)
+            .then((poster) => {
+                if (isMounted && poster) {
+                    setBackdropUri(poster);
                 }
             })
             .catch(() => {});
@@ -97,28 +96,6 @@ const CarouselSlideItem = ({
         };
     }, [item.title, item.publishDate, item.type]);
 
-    const backdropUri = tmdb?.backdropUrl || item.posterUrl;
-
-    const cleanTitle = useMemo(() => {
-        const raw = tmdb?.title || item.title;
-        return cleanTopicTitle(raw).name.replace(/^[a-z0-9\.-]+\.[a-z]{2,6}\s*[-_:]\s*/i, '').trim();
-    }, [tmdb?.title, item.title]);
-
-    const year = tmdb?.year || (item.publishDate ? new Date(item.publishDate).getFullYear().toString() : '2024');
-    const genres = tmdb?.genres
-        ? tmdb.genres.split(',').slice(0, 2).map((g) => g.trim()).join(', ')
-        : (item.type === 'series' ? 'Drama, Series' : 'Adventure, Thriller');
-    const runtime = tmdb?.runtimeFormatted || (item.type === 'series' ? '1 Season' : '120 min');
-    const certification = tmdb?.certification || 'PG-13';
-
-    const imdbRating = tmdb?.imdbRating || '7.1';
-    const tmdbRating = tmdb?.tmdbRating || '7.5';
-    const rtScore = tmdb?.rtScore || '84%';
-    const audienceScore = tmdb?.audienceScore || '94%';
-
-    const tagline = tmdb?.tagline || '';
-    const overview = tmdb?.overview || '';
-
     return (
         <TouchableOpacity
             style={[styles.carouselItem, { width: dimensions.width, height: carouselHeight }]}
@@ -126,7 +103,7 @@ const CarouselSlideItem = ({
             activeOpacity={0.92}
         >
             <ImageBackground
-                source={{ uri: backdropUri }}
+                source={{ uri: backdropUri || item.posterUrl }}
                 style={styles.backdropImage}
                 resizeMode="cover"
             >

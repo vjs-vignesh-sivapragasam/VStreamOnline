@@ -52,9 +52,37 @@ function groupToItem(group: GroupedItem, type: 'movie' | 'series'): PosterItemDa
   };
 }
 
+// ─── Poster Cache & Concurrency Queue ───────────────────────────────────────
+
+const globalPosterCache = new Map<string, string | null>();
+
+class PosterFetchQueue {
+  private queue: (() => Promise<void>)[] = [];
+  private activeCount = 0;
+  private maxConcurrent = 3;
+
+  enqueue(fn: () => Promise<void>) {
+    this.queue.push(fn);
+    this.processNext();
+  }
+
+  private processNext() {
+    if (this.activeCount >= this.maxConcurrent || this.queue.length === 0) return;
+    const task = this.queue.shift();
+    if (!task) return;
+    this.activeCount++;
+    task().finally(() => {
+      this.activeCount--;
+      this.processNext();
+    });
+  }
+}
+
+const posterQueue = new PosterFetchQueue();
+
 // ─── PosterItem ───────────────────────────────────────────────────────────────
 
-const PosterItem = ({
+const PosterItem = React.memo(({
   item,
   posterWidth,
   posterHeight,
@@ -71,25 +99,54 @@ const PosterItem = ({
 }) => {
   const [imgError, setImgError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
-  const [posterUri, setPosterUri] = useState<string | null>(item.poster);
+
+  const titleKey = useMemo(() => {
+    return `${(item.name || '').toLowerCase().trim()}_${item.year || ''}_${item.type}`;
+  }, [item.name, item.year, item.type]);
+
+  const [posterUri, setPosterUri] = useState<string | null>(() => {
+    if (item.poster) return item.poster;
+    return globalPosterCache.get(titleKey) || null;
+  });
 
   useEffect(() => {
-    setPosterUri(item.poster);
-    if (!item.poster && item.name) {
-      let isMounted = true;
-      tmdbService
-        .getMovieFullInfo(item.name, item.year || undefined, item.type)
-        .then((info) => {
-          if (isMounted && info?.posterUrl) {
-            setPosterUri(info.posterUrl);
-          }
-        })
-        .catch(() => {});
-      return () => {
-        isMounted = false;
-      };
+    if (item.poster) {
+      setPosterUri(item.poster);
+      globalPosterCache.set(titleKey, item.poster);
+      return;
     }
-  }, [item.poster, item.name, item.year, item.type]);
+
+    if (globalPosterCache.has(titleKey)) {
+      setPosterUri(globalPosterCache.get(titleKey) || null);
+      return;
+    }
+
+    if (!item.name) return;
+
+    let isMounted = true;
+    posterQueue.enqueue(async () => {
+      if (!isMounted) return;
+      try {
+        const poster = await tmdbService.getMoviePoster(
+          item.name,
+          item.year || undefined,
+          item.type
+        );
+        if (poster) {
+          globalPosterCache.set(titleKey, poster);
+          if (isMounted) setPosterUri(poster);
+        } else {
+          globalPosterCache.set(titleKey, null);
+        }
+      } catch {
+        globalPosterCache.set(titleKey, null);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [item.poster, item.name, item.year, item.type, titleKey]);
 
   const handlePress = async () => {
     if (await isHapticsSupported()) {
@@ -154,7 +211,7 @@ const PosterItem = ({
       {showYear && item.year ? <Text style={styles.posterYear}>{item.year}</Text> : null}
     </Pressable>
   );
-};
+});
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
