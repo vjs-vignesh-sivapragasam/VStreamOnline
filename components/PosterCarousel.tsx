@@ -130,7 +130,7 @@ const CarouselSlideItem = ({
                         styles.slideContent,
                         {
                             paddingHorizontal: dimensions.isLandscape ? 40 : 20,
-                            paddingBottom: dimensions.isLandscape ? 68 : 96,
+                            paddingBottom: dimensions.isLandscape ? 68 : 108,
                         },
                     ]}
                 >
@@ -346,7 +346,7 @@ export default function PosterCarousel({
                     style={[
                         styles.paginationContainer,
                         {
-                            bottom: 48,
+                            bottom: 40,
                         },
                     ]}
                 >
@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
     },
     paginationContainer: {
         position: 'absolute',
-        bottom: 48,
+        bottom: 40,
         alignSelf: 'center',
         borderRadius: 22,
         overflow: 'hidden',

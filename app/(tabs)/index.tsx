@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   filterButtonTextActive: { color: '#000000', fontWeight: '700' },
-  contentContainer: { marginTop: 16 },
+  contentContainer: { marginTop: 28 },
   loadingContainer: {
     alignItems: 'center',
     paddingVertical: 60,
