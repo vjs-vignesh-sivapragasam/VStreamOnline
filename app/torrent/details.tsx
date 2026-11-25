@@ -294,6 +294,26 @@ const TorrentDetails = () => {
   const [tmdbData, setTmdbData] = useState<TmdbDetails | null>(null);
   const [isTmdbLoading, setIsTmdbLoading] = useState(true);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+  const backdropUri = tmdbData?.backdropUrl || poster;
+  const [trailerThumbnailUri, setTrailerThumbnailUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tmdbData?.trailerKey) {
+      setTrailerThumbnailUri(`https://img.youtube.com/vi/${tmdbData.trailerKey}/maxresdefault.jpg`);
+    } else if (backdropUri) {
+      setTrailerThumbnailUri(backdropUri);
+    } else {
+      setTrailerThumbnailUri(poster || null);
+    }
+  }, [tmdbData?.trailerKey, backdropUri, poster]);
+
+  const handleTrailerThumbError = () => {
+    if (backdropUri && trailerThumbnailUri !== backdropUri) {
+      setTrailerThumbnailUri(backdropUri);
+    } else if (tmdbData?.trailerKey && !trailerThumbnailUri?.includes('mqdefault')) {
+      setTrailerThumbnailUri(`https://img.youtube.com/vi/${tmdbData.trailerKey}/mqdefault.jpg`);
+    }
+  };
 
   // Series Season & Episode State
   const [selectedSeason, setSelectedSeason] = useState(1);
@@ -1068,8 +1088,7 @@ const TorrentDetails = () => {
     }
   };
 
-  // Movie backdrop image or poster fallback
-  const backdropUri = tmdbData?.backdropUrl || poster;
+  // Movie backdrop image or poster fallback (declared above)
 
   return (
     <>
@@ -1382,6 +1401,35 @@ const TorrentDetails = () => {
           </View>
         )}
 
+                {/* ── Section: Trailer (Positioned BEFORE Cast) ── */}
+        {(tmdbData?.trailerKey || backdropUri) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Trailer</Text>
+            <TouchableOpacity
+              style={styles.trailerCard}
+              onPress={handleTrailerPress}
+              activeOpacity={0.8}
+            >
+              <Image
+                source={{
+                  uri: trailerThumbnailUri || backdropUri || poster || undefined,
+                  cache: 'force-cache' as any,
+                }}
+                style={styles.trailerThumbnail}
+                resizeMode="cover"
+                onError={handleTrailerThumbError}
+              />
+              <LinearGradient
+                colors={['transparent', 'rgba(0, 0, 0, 0.55)']}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={styles.trailerPlayOverlay}>
+                <Ionicons name="play" size={26} color="#ffffff" style={{ marginLeft: 3 }} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* ── Section: Cast ── */}
         {tmdbData?.cast && tmdbData.cast.length > 0 && (
           <View style={styles.section}>
@@ -1418,35 +1466,6 @@ const TorrentDetails = () => {
                 </View>
               )}
             />
-          </View>
-        )}
-
-        {/* ── Section: Trailer ── */}
-        {(tmdbData?.trailerKey || backdropUri) && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Trailer</Text>
-            <TouchableOpacity
-              style={styles.trailerCard}
-              onPress={handleTrailerPress}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={{
-                  uri: tmdbData?.trailerKey
-                    ? `https://img.youtube.com/vi/${tmdbData.trailerKey}/hqdefault.jpg`
-                    : (backdropUri || poster),
-                }}
-                style={styles.trailerThumbnail}
-                resizeMode="cover"
-              />
-              <LinearGradient
-                colors={['transparent', 'rgba(0, 0, 0, 0.65)']}
-                style={StyleSheet.absoluteFill}
-              />
-              <View style={styles.trailerPlayOverlay}>
-                <Ionicons name="play" size={26} color="#ffffff" style={{ marginLeft: 3 }} />
-              </View>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -2000,7 +2019,7 @@ const styles = StyleSheet.create({
 
   /* Title */
   titleSection: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     marginTop: -20,
     marginBottom: 16,
     alignItems: 'center',
@@ -2021,7 +2040,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     marginBottom: 20,
   },
   circularActionBtn: {
@@ -2065,7 +2084,7 @@ const styles = StyleSheet.create({
 
   /* Overview Paragraph */
   overviewContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     marginBottom: 24,
   },
   overviewText: {
@@ -2088,7 +2107,7 @@ const styles = StyleSheet.create({
   /* Sections */
   section: {
     marginTop: 20,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   sectionTitle: {
     fontSize: 18,
@@ -2123,6 +2142,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   trailerThumbnail: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: '100%',
     height: '100%',
   },
@@ -2140,7 +2164,7 @@ const styles = StyleSheet.create({
   /* Cast & Crew */
   castListContent: {
     gap: 16,
-    paddingRight: 20,
+    paddingRight: 16,
   },
   castCard: {
     width: 86,
@@ -2397,13 +2421,13 @@ const styles = StyleSheet.create({
   /* Episodes Section (Series Season-wise thumbnails) */
   episodesSection: {
     marginBottom: 26,
-    paddingLeft: 20,
+    paddingLeft: 16,
   },
   episodesHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingRight: 20,
+    paddingRight: 16,
     marginBottom: 14,
   },
   episodesCountTitle: {
@@ -2439,7 +2463,7 @@ const styles = StyleSheet.create({
   },
   episodesListContent: {
     gap: 14,
-    paddingRight: 20,
+    paddingRight: 16,
   },
   episodeCard: {
     width: 250,
