@@ -10,7 +10,7 @@ import { MenuAction } from '@react-native-menu/menu';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { ResizeMode } from 'react-native-video';
-import { GlassView } from 'expo-glass-effect';
+import { ThemeSpinner } from '@/components/ThemeSpinner';
 import { useTheme } from '@/contexts/ThemeContext';
 
 // ==================== CONSTANTS ====================
@@ -393,8 +393,8 @@ export const WaitingLobby: React.FC<{
 
     return (
         <Animated.View style={[styles.bufferingContainer, { opacity }]} pointerEvents="none">
-            <ActivityIndicator size="large" color={theme.primary} />
-            <Text style={styles.bufferingText}>{displayText}</Text>
+            <ThemeSpinner size={60} color={theme.primary} text={displayText} />
+
         </Animated.View>
     );
 };
@@ -423,8 +423,8 @@ export const ArtworkBackground: React.FC<{
             <View style={styles.artworkOverlay} />
             {isBuffering && (
                 <View style={styles.artworkLoadingOverlay}>
-                    <ActivityIndicator size="large" color={theme.primary} />
-                    <Text style={styles.bufferingText}>{displayText}</Text>
+                    <ThemeSpinner size={60} color={theme.primary} text={displayText} />
+        
                 </View>
             )}
         </View>
@@ -475,29 +475,29 @@ export const CenterControls: React.FC<{
     return (
         <View style={styles.centerControls}>
             <TouchableOpacity style={[styles.skipButton]} onPress={onSkipBackward}>
-                <GlassView glassEffectStyle="clear" style={styles.glassIcon}>
+                <View style={styles.glassIcon}>
                     <MaterialIcons name="replay-10" size={36} color={"#ffffff"} />
-                </GlassView>
+                </View>
             </TouchableOpacity>
 
             {isBuffering ? (
-                <GlassView glassEffectStyle="clear" style={styles.glassIcon}>
+                <View style={styles.glassIcon}>
                     <View style={styles.bufferingButton}>
-                        <ActivityIndicator size="large" color="#ffffff" />
+                        <ThemeSpinner size={36} color="#ffffff" />
                     </View>
-                </GlassView>
+                </View>
             ) : (
-                <GlassView glassEffectStyle="clear" style={styles.glassIcon}>
+                <View style={styles.glassIcon}>
                     <TouchableOpacity style={styles.playButton} onPress={onPlayPause}>
                         <Ionicons name={isPlaying ? "pause" : "play"} size={60} color="#ffffff" />
                     </TouchableOpacity>
-                </GlassView>
+                </View>
             )}
 
             <TouchableOpacity style={[styles.skipButton]} onPress={onSkipForward}>
-                <GlassView glassEffectStyle="clear" style={styles.glassIcon}>
+                <View style={styles.glassIcon}>
                     <MaterialIcons name="forward-30" size={36} color={"#ffffff"} />
-                </GlassView>
+                </View>
             </TouchableOpacity>
         </View>
     );
@@ -517,7 +517,7 @@ export const ProgressBar: React.FC<{
     return (
         <View style={styles.bottomControls}>
             <View style={styles.progressContainerWithMargin}>
-                <GlassView glassEffectStyle="clear" style={styles.glassContainer}>
+                <View style={styles.glassContainer}>
                     <View style={styles.sliderRow}>
                         <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
                         <Slider
@@ -537,7 +537,7 @@ export const ProgressBar: React.FC<{
                         />
                         <Text style={styles.timeText}>{formatTime(duration)}</Text>
                     </View>
-                </GlassView>
+                </View>
             </View>
         </View>
     );

@@ -11,6 +11,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { TorrentItem } from "@/hooks/useTamilMv";
 import { StorageKeys, storageService } from "@/utils/StorageService";
 import { isKSPlayerAvailable } from "@/components/ksplayer/KSPlayerView";
+import { ThemeSpinner } from "@/components/ThemeSpinner";
 import { useTheme } from "@/contexts/ThemeContext";
 import { ensureEmbeddedServerRunning } from "@/utils/StremioServerManager";
 import { Ionicons } from "@expo/vector-icons";
@@ -596,14 +597,17 @@ const MediaPlayerScreen: React.FC = () => {
         <View style={styles.loadingContainer}>
           {artwork ? <Image source={{ uri: artwork }} style={styles.backdropImage} /> : null}
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color={theme.primary} />
-            <Text style={styles.loadingText}>
-              {streamBufferProgress > 0 && streamBufferProgress < 100
-                ? `Buffering: ${streamBufferProgress}%`
-                : (streamBufferProgress >= 100
-                    ? 'Starting playback...'
-                    : (streamPeers > 0 ? `Connecting to ${streamPeers} peers...` : 'Connecting to stream...'))}
-            </Text>
+            <ThemeSpinner
+              size={64}
+              color={theme.primary}
+              text={
+                streamBufferProgress > 0 && streamBufferProgress < 100
+                  ? `Buffering: ${streamBufferProgress}%`
+                  : (streamBufferProgress >= 100
+                      ? 'Starting playback...'
+                      : (streamPeers > 0 ? `Connecting to ${streamPeers} peers...` : 'Connecting to stream...'))
+              }
+            />
           </View>
         </View>
       </GestureHandlerRootView>

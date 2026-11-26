@@ -13,13 +13,17 @@ import {
 import { StatusBar as DefaultStatusBar } from 'expo-status-bar';
 import Colors from '@/constants/Colors';
 import { useTheme } from '@/contexts/ThemeContext';
+import { ThemeSpinner } from '@/components/ThemeSpinner';
 
 
 export type TextProps = DefaultText['props'];
 export type TextInputProps = DefaultTextInput['props'];
 export type ViewProps = DefaultView['props'];
 export type StatusBarProps = React.ComponentProps<typeof DefaultStatusBar>;
-export type ActivityIndicatorProps = DefaultActivityIndicator['props'];
+export type ActivityIndicatorProps = DefaultActivityIndicator['props'] & {
+  text?: string;
+  showText?: boolean;
+};
 
 export function useThemeColor(
   props: { light?: string; dark?: string },
@@ -69,7 +73,13 @@ export function ActivityIndicator(props: ActivityIndicatorProps) {
   }
 
   return (
-    <DefaultActivityIndicator style={style} color={color || activeThemeColor} {...otherProps} />
+    <ThemeSpinner
+      size={props.size}
+      color={color || activeThemeColor}
+      style={style}
+      text={props.text}
+      showText={props.showText}
+    />
   );
 }
 

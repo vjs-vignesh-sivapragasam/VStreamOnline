@@ -36,7 +36,10 @@ export const styles = StyleSheet.create({
     //Glass Effect
     glassIcon: {
         padding: 12,
-        borderRadius: 100
+        borderRadius: 100,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     glassSlider: {
         borderRadius: 100
@@ -82,7 +85,8 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         marginRight: 10,
         borderRadius: 25,
-        padding: 5
+        padding: 5,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
     },
 
     controlButton: {
@@ -140,9 +144,10 @@ export const styles = StyleSheet.create({
     },
 
     glassContainer: {
-        paddingHorizontal: 10,
+        paddingHorizontal: 14,
         paddingVertical: 10,
-        borderRadius: 100
+        borderRadius: 100,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
     },
 
     sliderRow: {
