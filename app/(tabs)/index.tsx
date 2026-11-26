@@ -46,7 +46,38 @@ const LANGUAGE_FILTERS: FilterItem[] = [
   { key: 'kannada', label: 'Kannada', icon: 'language-outline' },
 ];
 
-// ─── Section renderer ─────────────────────────────────────────────────────────
+// ─── Lazy section wrapper ─────────────────────────────────────────────────────
+
+const LazySection = ({
+  section,
+  index,
+  language,
+  onSeeAll,
+}: {
+  section: CatalogSection;
+  index: number;
+  language: Language;
+  onSeeAll: (category: Category, title: string, language: Language) => void;
+}) => {
+  const [shouldLoad, setShouldLoad] = useState(index < 2);
+
+  return (
+    <View onLayout={() => { if (!shouldLoad) setShouldLoad(true); }}>
+      {shouldLoad ? (
+        <PosterList
+          groups={section.groups}
+          title={section.label}
+          type={section.type}
+          language={language}
+          category={section.category}
+          onSeeAll={onSeeAll}
+        />
+      ) : (
+        <View style={{ height: 220, marginBottom: 20 }} />
+      )}
+    </View>
+  );
+};
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -102,16 +133,11 @@ export default function HomeScreen() {
   };
 
   const handleCarouselItemPress = (item: any) => {
-    const topicUrl =
-      item.groupid?.startsWith('http') ? item.groupid :
-      (item.allItems?.find((i: any) => i.groupid?.startsWith('http'))?.groupid || undefined);
-
     router.push({
       pathname: '/torrent/details',
       params: {
         guid:        item.guid,
         groupid:     item.groupid,
-        topicUrl,
         title:       item.title,
         magnetUrl:   item.magnetUrl,
         infoHash:    item.infoHash,
@@ -206,18 +232,18 @@ export default function HomeScreen() {
             />
           </View>
 
-          {/* Loading state: Only show blocking loader if NO movies are visible yet */}
-          {loading && sections.length === 0 && recentGroups.length === 0 && (
+          {/* Loading state */}
+          {loading && (
             <View style={styles.loadingContainer}>
               <ActivityIndicator color={theme.primary} size="large" />
               <Text style={styles.loadingText}>
-                Loading movies…
+                Loading content…
               </Text>
             </View>
           )}
 
           {/* Error state */}
-          {!loading && errors.length > 0 && sections.length === 0 && recentGroups.length === 0 && (
+          {!loading && errors.length > 0 && sections.length === 0 && (
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>Failed to load feed</Text>
               <TouchableOpacity style={styles.retryButton} onPress={refresh}>
@@ -242,14 +268,12 @@ export default function HomeScreen() {
           )}
 
           {/* Category sections */}
-          {sections.map((section) => (
-            <PosterList
+          {sections.map((section, i) => (
+            <LazySection
               key={`${language}-${section.category}`}
-              groups={section.groups}
-              title={section.label}
-              type={section.type}
+              section={section}
+              index={i}
               language={language}
-              category={section.category}
               onSeeAll={(cat, catTitle, catLang) => {
                 setActiveCategory({ category: cat, title: catTitle, language: catLang });
               }}
@@ -267,7 +291,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  filtersContainer: { paddingVertical: 12, paddingHorizontal: 5 },
+  filtersContainer: { paddingVertical: 6, paddingHorizontal: 5 },
   filterRow: { paddingHorizontal: 10, gap: 15 },
   filterButton: {
     flexDirection: 'row',
@@ -288,7 +312,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   filterButtonTextActive: { color: '#000000', fontWeight: '700' },
-  contentContainer: { marginTop: 16 },
+  contentContainer: { marginTop: 6 },
   loadingContainer: {
     alignItems: 'center',
     paddingVertical: 60,

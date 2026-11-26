@@ -9,6 +9,7 @@ import {
   FlatList,
   useWindowDimensions,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -20,6 +21,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import {
   fetchTamilMVRecentlyAdded,
   searchTamilMV,
+  getPaginationItems,
   GroupedItem,
   TorrentItem,
 } from '@/hooks/useTamilMv';
@@ -54,215 +56,6 @@ export const CATEGORY_CONFIG: {
   { key: 'bollywood', label: 'Bollywood', icon: 'film-outline' },
   { key: 'mollywood', label: 'Mollywood', icon: 'film-outline' },
 ];
-
-// ─── OTT Platforms Configuration ─────────────────────────────────────────────
-
-const NETFLIX_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#000000"/>
-  <path fill="#B1060F" d="M17 11h6.5v32H17z"/>
-  <path fill="#E50914" d="M30.5 11h6.5v32h-6.5z"/>
-  <path fill="#E50914" d="M17 11h6.5l13.5 32H30.5z"/>
-</svg>`;
-
-const YOUTUBE_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#1F1F1F"/>
-  <rect x="10" y="16" width="34" height="22" rx="7" fill="#FF0000"/>
-  <polygon points="23,21 33,27 23,33" fill="#FFFFFF"/>
-</svg>`;
-
-const PRIME_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#00A8E1"/>
-  <text x="27" y="23" font-family="-apple-system, Roboto, sans-serif" font-size="11.5" font-weight="900" fill="#ffffff" text-anchor="middle">prime</text>
-  <text x="27" y="33" font-family="-apple-system, Roboto, sans-serif" font-size="8.5" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">video</text>
-  <path d="M15 38c7 3.5 17 3.5 24 0" stroke="#FF9900" stroke-width="2.5" stroke-linecap="round" fill="none"/>
-</svg>`;
-
-const DISNEY_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <defs>
-    <linearGradient id="disneyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0E1B40"/>
-      <stop offset="100%" stop-color="#040714"/>
-    </linearGradient>
-  </defs>
-  <rect width="54" height="54" rx="15" fill="url(#disneyGrad)"/>
-  <path d="M10 26c9-13 24-13 34 0" stroke="#00A8FF" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-  <text x="23" y="30" font-family="Georgia, serif" font-size="14" font-style="italic" font-weight="bold" fill="#ffffff" text-anchor="middle">Disn<tspan font-style="normal">ey</tspan></text>
-  <text x="39" y="28" font-family="-apple-system, sans-serif" font-size="15" font-weight="900" fill="#00B5FF" text-anchor="middle">+</text>
-</svg>`;
-
-const ZEE5_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#1B0733"/>
-  <circle cx="27" cy="27" r="17" fill="none" stroke="#A855F7" stroke-width="2.5"/>
-  <circle cx="27" cy="27" r="17" fill="none" stroke="#EC4899" stroke-width="2.5" stroke-dasharray="28 85"/>
-  <text x="27" y="31.5" font-family="-apple-system, Roboto, sans-serif" font-size="12" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">ZEE5</text>
-</svg>`;
-
-const SONYLIV_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#141416"/>
-  <circle cx="18" cy="18" r="3.5" fill="#00A3FF"/>
-  <circle cx="27" cy="18" r="3.5" fill="#FF007A"/>
-  <circle cx="36" cy="18" r="3.5" fill="#FFA800"/>
-  <text x="27" y="36" font-family="-apple-system, Roboto, sans-serif" font-size="13" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">LIV</text>
-</svg>`;
-
-const AHA_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#FF3E1D"/>
-  <text x="27" y="34" font-family="-apple-system, Roboto, sans-serif" font-size="17" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="-0.5">aha</text>
-</svg>`;
-
-const JIOCINEMA_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#0E0E12"/>
-  <rect x="9" y="13" width="36" height="28" rx="10" fill="#E11D48"/>
-  <text x="27" y="32" font-family="-apple-system, Roboto, sans-serif" font-size="13" font-weight="900" fill="#ffffff" text-anchor="middle">Jio</text>
-</svg>`;
-
-const SUNNXT_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#111111"/>
-  <circle cx="27" cy="19" r="7" fill="#FBBF24"/>
-  <text x="27" y="36" font-family="-apple-system, Roboto, sans-serif" font-size="8.5" font-weight="900" fill="#FBBF24" text-anchor="middle" letter-spacing="0.5">SUN NXT</text>
-</svg>`;
-
-const APPLETV_SVG = `<svg viewBox="0 0 54 54" width="100%" height="100%">
-  <rect width="54" height="54" rx="15" fill="#000000"/>
-  <path fill="#ffffff" d="M21 27.5c-.8.9-2 1.5-3 1.5-1.1 0-2.1-.6-2.9-1.5-1.6-1.8-2.6-5.1-1.2-7.5.7-1.2 2-2 3.4-2 1 0 1.9.7 2.6.7.7 0 1.8-.7 3-.7 1.2 0 2.3.6 3 1.6-2.7 1.6-2.2 5.2.1 6.2-.6 1.4-1.3 2.7-2.4 3.7-.7.6-1.4 1.2-2.3 1.2-.9 0-1.5-.6-2.3-1.2zM20.2 16.5c.5-.6.8-1.4.7-2.3-.8.1-1.7.5-2.2 1.2-.5.5-.8 1.4-.7 2.2.9 0 1.7-.5 2.2-1.1z"/>
-  <text x="33" y="27" font-family="-apple-system, sans-serif" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">tv+</text>
-</svg>`;
-
-export interface OttPlatform {
-  id: string;
-  name: string;
-  short: string;
-  searchQuery: string;
-  brandColor: string;
-  tag: string;
-  svgXml?: string;
-  glyphType?: 'icon' | 'text';
-  iconName?: keyof typeof Ionicons.glyphMap;
-  glyphText?: string;
-  regex: RegExp;
-}
-
-export const OTT_PLATFORMS: OttPlatform[] = [
-  {
-    id: 'netflix',
-    name: 'Netflix',
-    short: 'Netflix',
-    searchQuery: 'netflix',
-    brandColor: '#E50914',
-    tag: 'NF',
-    svgXml: NETFLIX_SVG,
-    regex: /\b(netflix|nflx)\b|\[\s*nf\s*[-–\]]|\[\s*netflix\s*[-–\]]|\bnf\s*[-_:]/i,
-  },
-  {
-    id: 'youtube',
-    name: 'YouTube',
-    short: 'YouTube',
-    searchQuery: 'youtube',
-    brandColor: '#FF0000',
-    tag: 'YOUTUBE',
-    svgXml: YOUTUBE_SVG,
-    regex: /\b(youtube|yt)\b|\[\s*yt\s*[-–\]]|\[\s*youtube\s*[-–\]]/i,
-  },
-  {
-    id: 'prime',
-    name: 'Prime Video',
-    short: 'Prime',
-    searchQuery: 'prime',
-    brandColor: '#00A8E1',
-    tag: 'PRIME',
-    svgXml: PRIME_SVG,
-    regex: /\b(prime\s*video|amazon\s*prime|amzn|prime)\b|\[\s*amzn\s*|\[\s*prime\s*/i,
-  },
-  {
-    id: 'hotstar',
-    name: 'Disney+ Hotstar',
-    short: 'Disney+',
-    searchQuery: 'hotstar',
-    brandColor: '#1455FF',
-    tag: 'HOTSTAR',
-    svgXml: DISNEY_SVG,
-    regex: /\b(hotstar|jiohotstar|disney\+?|dsnp)\b|\[\s*hotstar\s*|\[\s*dsnp\s*/i,
-  },
-  {
-    id: 'zee5',
-    name: 'Zee5',
-    short: 'Zee5',
-    searchQuery: 'zee5',
-    brandColor: '#A855F7',
-    tag: 'ZEE5',
-    svgXml: ZEE5_SVG,
-    regex: /\b(zee5|zee\s*5)\b|\[\s*zee5\s*/i,
-  },
-  {
-    id: 'sonyliv',
-    name: 'SonyLIV',
-    short: 'SonyLIV',
-    searchQuery: 'sonyliv',
-    brandColor: '#FF6900',
-    tag: 'SONY LIV',
-    svgXml: SONYLIV_SVG,
-    regex: /\b(sonyliv|sony\s*liv)\b|\[\s*sonyliv\s*|\[\s*sony\s*/i,
-  },
-  {
-    id: 'aha',
-    name: 'Aha Video',
-    short: 'Aha',
-    searchQuery: 'aha',
-    brandColor: '#FF3E1D',
-    tag: 'AHA',
-    svgXml: AHA_SVG,
-    regex: /\b(aha|ahavideo)\b|\[\s*aha\s*/i,
-  },
-  {
-    id: 'jiocinema',
-    name: 'JioCinema',
-    short: 'JioCinema',
-    searchQuery: 'jiocinema',
-    brandColor: '#E11D48',
-    tag: 'JIOCINEMA',
-    svgXml: JIOCINEMA_SVG,
-    regex: /\b(jiocinema|jio\s*cinema)\b|\[\s*jiocinema\s*|\[\s*jio\s*/i,
-  },
-  {
-    id: 'sunnxt',
-    name: 'Sun NXT',
-    short: 'Sun NXT',
-    searchQuery: 'sunnxt',
-    brandColor: '#EF4444',
-    tag: 'SUN NXT',
-    svgXml: SUNNXT_SVG,
-    regex: /\b(sunnxt|sun\s*nxt)\b|\[\s*sunnxt\s*/i,
-  },
-  {
-    id: 'appletv',
-    name: 'Apple TV+',
-    short: 'Apple TV',
-    searchQuery: 'apple tv',
-    brandColor: '#A1A1AA',
-    tag: 'APPLE TV',
-    svgXml: APPLETV_SVG,
-    regex: /\b(apple\s*tv\+?|atvp)\b|\[\s*atvp\s*/i,
-  },
-];
-
-const ottCache = new WeakMap<GroupedItem, OttPlatform | null>();
-
-export function getGroupOtt(group: GroupedItem): OttPlatform | null {
-  if (ottCache.has(group)) {
-    return ottCache.get(group)!;
-  }
-  for (const item of group.items) {
-    const raw = `${item.title || ''} ${group.name || ''} ${item.guid || ''} ${item.groupid || ''}`;
-    for (const ott of OTT_PLATFORMS) {
-      if (ott.regex.test(raw)) {
-        ottCache.set(group, ott);
-        return ott;
-      }
-    }
-  }
-  ottCache.set(group, null);
-  return null;
-}
 
 // Caches for maximum performance & zero re-computation
 const categoryCache = new WeakMap<GroupedItem, MovieCategoryKey>();
@@ -379,7 +172,6 @@ const SearchMovieCard = React.memo(({
   const best: TorrentItem = group.items.find((i) => i.poster) ?? group.items[0];
   const type = (group as any).type || 'movie';
   const releasesCount = group.items.length;
-  const ottInfo = useMemo(() => getGroupOtt(group), [group]);
 
   const titleKey = useMemo(() => {
     return `${(group.name || best?.title || '').toLowerCase().trim()}_${group.year || ''}_${type}`;
@@ -455,43 +247,226 @@ const SearchMovieCard = React.memo(({
             <SvgXml xml={DefaultPosterImgXml} width={cardWidth * 0.5} height={posterHeight * 0.4} />
           </View>
         )}
-        {ottInfo && (
-          <View style={[styles.cardOttBadge, { backgroundColor: ottInfo.brandColor }]}>
-            <Text style={styles.cardOttBadgeText}>{ottInfo.short}</Text>
-          </View>
-        )}
-      </View>
-
-      <Text style={[styles.cardTitle, { width: cardWidth }]} numberOfLines={2}>
-        {cleanedTitle}
-      </Text>
-
-      <View style={styles.cardFooter}>
-        <Text style={styles.cardSub}>
-          {type === 'series' ? 'Series' : 'Movie'}{group.year ? ` • ${group.year}` : ''} • {releasesCount} {releasesCount === 1 ? 'source' : 'sources'}
-        </Text>
       </View>
     </Pressable>
   );
 });
 
+// ─── Pagination Controls ───────────────────────────────────────────────────────
+
+const PaginationControls = ({
+  currentPage,
+  totalPages,
+  onPageChange,
+  onOpenJumpModal,
+}: {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  onOpenJumpModal: () => void;
+}) => {
+  const { theme } = useTheme();
+  const pages = useMemo(
+    () => getPaginationItems(currentPage, totalPages),
+    [currentPage, totalPages]
+  );
+
+  const handlePrev = async () => {
+    if (currentPage > 1) {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      onPageChange(currentPage - 1);
+    }
+  };
+
+  const handleNext = async () => {
+    if (currentPage < totalPages) {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      onPageChange(currentPage + 1);
+    }
+  };
+
+  const handlePageSelect = async (page: number) => {
+    if (page !== currentPage) {
+      if (await isHapticsSupported()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      onPageChange(page);
+    }
+  };
+
+  return (
+    <View style={styles.paginationContainer}>
+      {/* Top summary row: Page X of Y with quick jump button */}
+      <View style={styles.paginationSummaryRow}>
+        <Text style={styles.paginationSummaryText}>
+          Page <Text style={[styles.paginationSummaryHighlight, { color: theme.primary }]}>{currentPage}</Text> of{' '}
+          <Text style={[styles.paginationSummaryHighlight, { color: theme.primary }]}>{totalPages}</Text>
+        </Text>
+        {totalPages > 1 && (
+          <TouchableOpacity
+            style={styles.jumpButton}
+            onPress={onOpenJumpModal}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="search-outline" size={13} color={theme.primary} style={{ marginRight: 4 }} />
+            <Text style={styles.jumpButtonText}>Jump to Page</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Pagination button bar: Previous | 1 | 2 | 3 | … | N | Next */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.paginationBar}
+      >
+        <TouchableOpacity
+          style={[styles.navBtn, currentPage <= 1 && styles.navBtnDisabled]}
+          onPress={handlePrev}
+          disabled={currentPage <= 1}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="chevron-back"
+            size={16}
+            color={currentPage <= 1 ? '#444' : '#ffffff'}
+          />
+          <Text style={[styles.navBtnText, currentPage <= 1 && styles.navBtnTextDisabled]}>
+            Previous
+          </Text>
+        </TouchableOpacity>
+
+        {pages.map((item: number | '...', index: number) => {
+          if (item === '...') {
+            return (
+              <TouchableOpacity
+                key={`ellipsis-${index}`}
+                style={styles.ellipsisBtn}
+                onPress={onOpenJumpModal}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.ellipsisText}>…</Text>
+              </TouchableOpacity>
+            );
+          }
+
+          const isActive = item === currentPage;
+          return (
+            <TouchableOpacity
+              key={`page-${item}`}
+              style={[
+                styles.pageBtn,
+                isActive && { backgroundColor: theme.primary, borderColor: theme.primary },
+              ]}
+              onPress={() => handlePageSelect(item)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.pageBtnText, isActive && styles.pageBtnTextActive]}>
+                {item}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+
+        <TouchableOpacity
+          style={[styles.navBtn, currentPage >= totalPages && styles.navBtnDisabled]}
+          onPress={handleNext}
+          disabled={currentPage >= totalPages}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.navBtnText, currentPage >= totalPages && styles.navBtnTextDisabled]}>
+            Next
+          </Text>
+          <Ionicons
+            name="chevron-forward"
+            size={16}
+            color={currentPage >= totalPages ? '#444' : '#ffffff'}
+          />
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  );
+};
+
+// ─── Jump To Page Modal ────────────────────────────────────────────────────────
+
+const JumpModal = ({
+  visible,
+  onClose,
+  totalPages,
+  onJump,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  totalPages: number;
+  onJump: (page: number) => void;
+}) => {
+  const { theme } = useTheme();
+  const [pageInput, setPageInput] = useState('');
+
+  const handleConfirm = () => {
+    const p = parseInt(pageInput.trim(), 10);
+    if (!isNaN(p) && p >= 1 && p <= totalPages) {
+      onJump(p);
+      setPageInput('');
+      onClose();
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+          <Text style={styles.modalTitle}>Jump to Page</Text>
+          <Text style={styles.modalSubtitle}>
+            Enter page number (1 – {totalPages})
+          </Text>
+
+          <TextInput
+            style={styles.modalInput}
+            value={pageInput}
+            onChangeText={setPageInput}
+            placeholder={`1 - ${totalPages}`}
+            placeholderTextColor="#666"
+            keyboardType="number-pad"
+            autoFocus
+            onSubmitEditing={handleConfirm}
+          />
+
+          <View style={styles.modalActions}>
+            <TouchableOpacity style={styles.modalCancelBtn} onPress={onClose}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalGoBtn, { backgroundColor: theme.primary }]}
+              onPress={handleConfirm}
+            >
+              <Text style={styles.modalGoText}>Go</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+};
+
 // ─── Search Screen ────────────────────────────────────────────────────────────
 
 const SearchScreen = () => {
   const { theme } = useTheme();
-  const params = useLocalSearchParams<{ query?: string; ott?: string }>();
-  const initialOtt = useMemo(() => {
-    return (
-      OTT_PLATFORMS.find(
-        (p) =>
-          p.id === params.ott ||
-          (params.query && p.searchQuery.toLowerCase() === params.query.trim().toLowerCase())
-      ) || null
-    );
-  }, [params.ott, params.query]);
-
-  const [query, setQuery]                         = useState(params.query || initialOtt?.searchQuery || '');
-  const [selectedOttId, setSelectedOttId]         = useState<string | null>(initialOtt?.id || null);
+  const params = useLocalSearchParams<{ query?: string }>();
+  const [query, setQuery]                         = useState(params.query || '');
+  const ITEMS_PER_PAGE                            = 24;
+  const [searchPage, setSearchPage]               = useState(1);
+  const [recentPage, setRecentPage]               = useState(1);
+  const [jumpModalVisible, setJumpModalVisible]   = useState(false);
+  const [jumpTarget, setJumpTarget]               = useState<'search' | 'recent'>('search');
+  const searchScrollRef                           = useRef<ScrollView>(null);
+  const recentScrollRef                           = useRef<ScrollView>(null);
   const [showRecentlyAdded, setShowRecentlyAdded] = useState(false);
   const [recentlyAddedMovies, setRecentlyAddedMovies] = useState<GroupedItem[]>(() => {
     try {
@@ -527,51 +502,12 @@ const SearchScreen = () => {
   const cardWidth = (width - totalHorizontalPadding - (numColumns - 1) * cardSpacing) / numColumns;
   const posterHeight = cardWidth * 1.5;
 
-  const selectedOtt = useMemo(
-    () => OTT_PLATFORMS.find((p) => p.id === selectedOttId) || null,
-    [selectedOttId]
-  );
-
-  const handleOttPress = useCallback(
-    async (ott: OttPlatform) => {
-      if (await isHapticsSupported()) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      }
-      if (selectedOttId === ott.id) {
-        setSelectedOttId(null);
-        setSelectedCategory('all');
-      } else {
-        setSelectedOttId(ott.id);
-        setSelectedCategory('all');
-
-        // If no search query typed, load and filter Recently Added
-        if (!query.trim()) {
-          setShowRecentlyAdded(true);
-          if (recentlyAddedMovies.length === 0) {
-            setIsLoadingRecent(true);
-            try {
-              const items = await fetchTamilMVRecentlyAdded(false);
-              setRecentlyAddedMovies(items || []);
-            } catch (e) {
-              console.warn('[Search] Failed to fetch recently added for OTT:', e);
-            } finally {
-              setIsLoadingRecent(false);
-            }
-          }
-        }
-      }
-    },
-    [selectedOttId, query, recentlyAddedMovies.length]
-  );
-
   const handleRecentlyAddedPress = useCallback(async () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setShowRecentlyAdded(true);
     setShowAddons(false);
-    setSelectedOttId(null);
-    setQuery('');
     setSelectedCategory('all');
     if (recentlyAddedMovies.length === 0) {
       setIsLoadingRecent(true);
@@ -591,41 +527,8 @@ const SearchScreen = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setShowRecentlyAdded(false);
-    setShowAddons(false);
     setSelectedCategory('all');
   }, []);
-
-  const handleRefreshRecent = useCallback(async () => {
-    setIsLoadingRecent(true);
-    try {
-      const items = await fetchTamilMVRecentlyAdded(true);
-      setRecentlyAddedMovies(items || []);
-    } catch (e) {
-      console.warn('[Search] Failed to refresh recently added:', e);
-    } finally {
-      setIsLoadingRecent(false);
-    }
-  }, []);
-
-  const handleCategorySelect = useCallback(async (key: MovieCategoryKey) => {
-    if (await isHapticsSupported()) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    setSelectedCategory(key);
-  }, []);
-
-  // If a query parameter was passed on mount, handle it
-  useEffect(() => {
-    if (params.query && params.query !== query) {
-      setQuery(params.query);
-      const match = OTT_PLATFORMS.find(
-        (p) => p.searchQuery.toLowerCase() === params.query!.trim().toLowerCase()
-      );
-      if (match) {
-        setSelectedOttId(match.id);
-      }
-    }
-  }, [params.query]);
 
   const loadAddonCatalog = useCallback(async (catalogIdx = 0, page = 1) => {
     setIsLoadingAddons(true);
@@ -658,7 +561,6 @@ const SearchScreen = () => {
       }
     } catch (e) {
       console.warn('[Search] Failed to load addon catalog:', e);
-      setAddonMovies([]);
     } finally {
       setIsLoadingAddons(false);
     }
@@ -699,6 +601,34 @@ const SearchScreen = () => {
     [loadAddonCatalog, selectedCatalogIdx]
   );
 
+  const handleRefreshRecent = useCallback(async () => {
+    setIsLoadingRecent(true);
+    try {
+      const items = await fetchTamilMVRecentlyAdded(true);
+      setRecentlyAddedMovies(items || []);
+    } catch (e) {
+      console.warn('[Search] Failed to refresh recently added:', e);
+    } finally {
+      setIsLoadingRecent(false);
+    }
+  }, []);
+
+  const handleCategorySelect = useCallback(async (key: MovieCategoryKey) => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setSelectedCategory(key);
+    setSearchPage(1);
+    setRecentPage(1);
+  }, []);
+
+  // If a query parameter was passed on mount, handle it
+  useEffect(() => {
+    if (params.query && params.query !== query) {
+      setQuery(params.query);
+    }
+  }, [params.query]);
+
   // Live web search when user types query
   useEffect(() => {
     const q = query.trim();
@@ -720,6 +650,7 @@ const SearchScreen = () => {
           addonService.searchAllCatalogs(q).catch(() => []),
         ]);
         setLiveSearchResults([...liveItems, ...addonItems]);
+
       } catch {
         // Fallback
       } finally {
@@ -739,24 +670,9 @@ const SearchScreen = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setQuery('');
-    setSelectedOttId(null);
     setLiveSearchResults([]);
     setSelectedCategory('all');
-    setShowAddons(false);
   }, []);
-
-  const handleSearchTextChange = useCallback(
-    (text: string) => {
-      setQuery(text);
-      if (selectedOttId) {
-        const active = OTT_PLATFORMS.find((p) => p.id === selectedOttId);
-        if (active && text.trim().toLowerCase() !== active.searchQuery.toLowerCase()) {
-          setSelectedOttId(null);
-        }
-      }
-    },
-    [selectedOttId]
-  );
 
   const handleOpenWebView = useCallback(async () => {
     if (await isHapticsSupported()) {
@@ -782,70 +698,92 @@ const SearchScreen = () => {
         infoHash: best.infoHash,
         poster: best.poster ?? '',
         year: group.year || (best.publishDate ? new Date(best.publishDate).getFullYear().toString() : ''),
-        type: (group as any).type || type,
+        type,
         publishDate: best.publishDate,
         allItems: JSON.stringify(group.items),
-        topicUrl: best.groupid?.startsWith('http') ? best.groupid : undefined,
+        topicUrl: best.groupid,
         imdbId: (group as any).imdbId || (best.guid?.startsWith('tt') ? best.guid : undefined),
       },
     });
   }, []);
 
-  // Filter movies by query (single deduplicated pass)
+  // Filter movies by query: combine local recently added and live search results (deduplicated)
   const filteredMovies = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    if (liveSearchResults.length === 0) return [];
 
-    const activeOtt = OTT_PLATFORMS.find((p) => p.id === selectedOttId);
+    const normQ = q.replace(/[._-]+/g, ' ').trim();
+    const qWords = normQ.split(/\s+/).filter(Boolean);
 
-    const movieMap = new Map<string, GroupedItem>();
-    for (const g of liveSearchResults) {
-      if (activeOtt) {
-        const ott = getGroupOtt(g);
-        const matchesOtt =
-          ott?.id === selectedOttId ||
-          g.items.some((i) =>
-            activeOtt.regex.test(`${i.title || ''} ${g.name || ''} ${i.guid || ''} ${i.groupid || ''}`)
-          );
-        if (!matchesOtt) continue;
+    const matchesQuery = (g: GroupedItem) => {
+      // Exclude audio / song releases that may have slipped into cache or live results
+      const allTitles = (g.name || '') + ' ' + g.items.map((i) => i.title || '').join(' ');
+      if (
+        /\b(video\s*songs?|mp3\s*songs?|soundtracks?|alac|flac\s*musical|audio\s*track)\b/i.test(allTitles) ||
+        /\b(original motion picture soundtrack|anirudh ravichander musical|ar rahman musical)\b/i.test(allTitles)
+      ) {
+        return false;
       }
 
-      const nameMatch = g.name?.toLowerCase().includes(q);
-      const yearMatch = g.year ? g.year.toString().includes(q) : false;
-      const titleMatch = g.items.some((i) => i.title.toLowerCase().includes(q));
-      const langMatch = g.items.some((i) => i.language?.toLowerCase().includes(q));
+      const normName = (g.name || '').toLowerCase().replace(/[._-]+/g, ' ');
+      const rawName = (g.name || '').toLowerCase();
 
-      if (nameMatch || yearMatch || titleMatch || langMatch || activeOtt) {
-        const key = `${(g.name || '').toLowerCase()}|||${g.year || ''}`;
-        if (!movieMap.has(key)) {
+      // Check full phrase match
+      if (normName.includes(normQ) || rawName.includes(q)) return true;
+
+      // Check all words match in name
+      if (qWords.length > 1 && qWords.every((w) => normName.includes(w))) return true;
+
+      // Check year match if user typed a year
+      if (g.year && qWords.includes(g.year.toString())) return true;
+
+      // Check items title match
+      return g.items.some((i) => {
+        const normTitle = (i.title || '').toLowerCase().replace(/[._-]+/g, ' ');
+        if (normTitle.includes(normQ) || (i.title || '').toLowerCase().includes(q)) return true;
+        if (qWords.length > 1 && qWords.every((w) => normTitle.includes(w))) return true;
+        return false;
+      });
+    };
+
+    const movieMap = new Map<string, GroupedItem>();
+
+    // 1. Populate from recentlyAddedMovies first (instant match for movies in recently added!)
+    for (const g of recentlyAddedMovies) {
+      if (matchesQuery(g)) {
+        const key = `${(g.name || '').toLowerCase().trim()}|||${g.year || ''}`;
+        movieMap.set(key, g);
+      }
+    }
+
+    // 2. Merge matching movies from liveSearchResults
+    for (const g of liveSearchResults) {
+      if (matchesQuery(g)) {
+        const key = `${(g.name || '').toLowerCase().trim()}|||${g.year || ''}`;
+        const existing = movieMap.get(key);
+        if (!existing) {
           movieMap.set(key, g);
+        } else {
+          const existingGuids = new Set(existing.items.map((it) => it.guid || it.groupid));
+          const newItems = g.items.filter((it) => !existingGuids.has(it.guid || it.groupid));
+          if (newItems.length > 0) {
+            existing.items = [...existing.items, ...newItems];
+          }
+          if (!existing.items[0]?.poster && g.items.find((it) => it.poster)) {
+            const p = g.items.find((it) => it.poster)?.poster;
+            if (p && existing.items[0]) existing.items[0].poster = p;
+          }
         }
       }
     }
 
     return Array.from(movieMap.values());
-  }, [query, liveSearchResults, selectedOttId]);
-
-  // If an OTT shortcut is selected, filter Recently Added by that OTT platform
-  const ottFilteredRecentMovies = useMemo(() => {
-    if (!selectedOttId) return recentlyAddedMovies;
-    const activeOtt = OTT_PLATFORMS.find((p) => p.id === selectedOttId);
-    if (!activeOtt) return recentlyAddedMovies;
-
-    return recentlyAddedMovies.filter((g) => {
-      const ott = getGroupOtt(g);
-      if (ott?.id === selectedOttId) return true;
-      return g.items.some((i) =>
-        activeOtt.regex.test(`${i.title || ''} ${g.name || ''} ${i.guid || ''} ${i.groupid || ''}`)
-      );
-    });
-  }, [recentlyAddedMovies, selectedOttId]);
+  }, [query, recentlyAddedMovies, liveSearchResults]);
 
   // Category statistics & grouped sections for Recently Added (single-pass O(N))
   const { recentCategoryCounts, recentGroupedByCategory } = useMemo(() => {
     const counts: Record<MovieCategoryKey, number> = {
-      all: ottFilteredRecentMovies.length,
+      all: recentlyAddedMovies.length,
       kollywood: 0,
       hollywood: 0,
       series: 0,
@@ -855,7 +793,7 @@ const SearchScreen = () => {
     };
     const map = new Map<MovieCategoryKey, GroupedItem[]>();
 
-    for (const g of ottFilteredRecentMovies) {
+    for (const g of recentlyAddedMovies) {
       const cat = getGroupCategory(g);
       counts[cat] = (counts[cat] || 0) + 1;
       let list = map.get(cat);
@@ -880,12 +818,12 @@ const SearchScreen = () => {
     }
 
     return { recentCategoryCounts: counts, recentGroupedByCategory: sections };
-  }, [ottFilteredRecentMovies]);
+  }, [recentlyAddedMovies]);
 
   const displayedRecentMovies = useMemo(() => {
-    if (selectedCategory === 'all') return ottFilteredRecentMovies;
-    return ottFilteredRecentMovies.filter((g) => getGroupCategory(g) === selectedCategory);
-  }, [ottFilteredRecentMovies, selectedCategory]);
+    if (selectedCategory === 'all') return recentlyAddedMovies;
+    return recentlyAddedMovies.filter((g) => getGroupCategory(g) === selectedCategory);
+  }, [recentlyAddedMovies, selectedCategory]);
 
   const recentCategoryFilterOptions = useMemo(() => {
     return CATEGORY_CONFIG.filter((cfg) => {
@@ -941,6 +879,20 @@ const SearchScreen = () => {
     if (selectedCategory === 'all') return filteredMovies;
     return filteredMovies.filter((g) => getGroupCategory(g) === selectedCategory);
   }, [filteredMovies, selectedCategory]);
+
+  const searchTotalPages = Math.ceil(displayedSearchMovies.length / ITEMS_PER_PAGE);
+  const paginatedSearchMovies = useMemo(() => {
+    if (searchTotalPages <= 1) return displayedSearchMovies;
+    const start = (searchPage - 1) * ITEMS_PER_PAGE;
+    return displayedSearchMovies.slice(start, start + ITEMS_PER_PAGE);
+  }, [displayedSearchMovies, searchPage, searchTotalPages]);
+
+  const recentTotalPages = Math.ceil(displayedRecentMovies.length / ITEMS_PER_PAGE);
+  const paginatedRecentMovies = useMemo(() => {
+    if (recentTotalPages <= 1) return displayedRecentMovies;
+    const start = (recentPage - 1) * ITEMS_PER_PAGE;
+    return displayedRecentMovies.slice(start, start + ITEMS_PER_PAGE);
+  }, [displayedRecentMovies, recentPage, recentTotalPages]);
 
   const searchCategoryFilterOptions = useMemo(() => {
     return CATEGORY_CONFIG.filter((cfg) => {
@@ -1005,7 +957,7 @@ const SearchScreen = () => {
       {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>Explore</Text>
+          <Text style={styles.headerTitle}>Search</Text>
         </View>
       </View>
 
@@ -1017,14 +969,10 @@ const SearchScreen = () => {
           </View>
           <TextInput
             style={styles.searchInput}
-            placeholder={
-              selectedOtt
-                ? `Filter ${selectedOtt.name} or type search…`
-                : "Search movie title..."
-            }
+            placeholder="Search movie title..."
             placeholderTextColor="#6E6E73"
             value={query}
-            onChangeText={handleSearchTextChange}
+            onChangeText={setQuery}
             returnKeyType="search"
             submitBehavior="blurAndSubmit"
             autoCorrect={false}
@@ -1039,73 +987,6 @@ const SearchScreen = () => {
             </Pressable>
           )}
         </View>
-
-        {/* OTT Platform Shortcuts Bar (TV Remote Style App Buttons) */}
-        <View style={styles.ottBarContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.ottBarScroll}
-            keyboardShouldPersistTaps="handled"
-          >
-            {OTT_PLATFORMS.map((ott) => {
-              const isSelected = selectedOttId === ott.id;
-              return (
-                <TouchableOpacity
-                  key={`ott-remote-btn-${ott.id}`}
-                  style={styles.ottShortcutItem}
-                  onPress={() => handleOttPress(ott)}
-                  activeOpacity={0.78}
-                  accessibilityRole="button"
-                  accessibilityLabel={ott.name}
-                >
-                  <View
-                    style={[
-                      styles.ottTileButton,
-                      isSelected && [
-                        styles.ottTileButtonActive,
-                        {
-                          borderColor: ott.brandColor,
-                          shadowColor: ott.brandColor,
-                        },
-                      ],
-                    ]}
-                  >
-                    {ott.svgXml ? (
-                      <SvgXml xml={ott.svgXml} width={50} height={50} />
-                    ) : ott.glyphType === 'icon' ? (
-                      <Ionicons
-                        name={ott.iconName!}
-                        size={22}
-                        color={isSelected ? '#ffffff' : ott.brandColor}
-                      />
-                    ) : (
-                      <Text
-                        style={[
-                          styles.ottGlyphText,
-                          {
-                            color: isSelected ? '#ffffff' : ott.brandColor,
-                          },
-                        ]}
-                      >
-                        {ott.glyphText}
-                      </Text>
-                    )}
-                  </View>
-                  <Text
-                    style={[
-                      styles.ottTileLabel,
-                      isSelected && [styles.ottTileLabelActive, { color: ott.brandColor }],
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {ott.short}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
       </View>
 
       {/* Main Content Area */}
@@ -1117,32 +998,22 @@ const SearchScreen = () => {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {filteredMovies.length > 0 && (
+          {isSearchingLive && filteredMovies.length === 0 ? (
+            <View style={styles.searchingLoadingContainer}>
+              <View style={[styles.loadingPulseCircle, { backgroundColor: theme.iconBg, borderColor: theme.indicator || theme.cardBorder }]}>
+                <ActivityIndicator size="large" color={theme.primary} />
+              </View>
+              <Text style={styles.catalogLoadingTitle}>Searching for "{query}"</Text>
+              <Text style={styles.catalogLoadingText}>Finding best movie matches across all categories…</Text>
+            </View>
+          ) : filteredMovies.length > 0 ? (
             <View style={styles.resultsGridSection}>
               <View style={styles.resultsHeaderRow}>
-                {selectedOtt ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
-                    <View
-                      style={[
-                        styles.ottHeaderBadge,
-                        { backgroundColor: selectedOtt.brandColor },
-                      ]}
-                    >
-                      <Text style={styles.ottHeaderBadgeText}>{selectedOtt.name}</Text>
-                    </View>
-                    <Text style={styles.resultsCountText} numberOfLines={1}>
-                      {selectedCategory === 'all'
-                        ? ` • ${filteredMovies.length} ${filteredMovies.length === 1 ? 'Title' : 'Titles'}`
-                        : ` • ${displayedSearchMovies.length} ${searchCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || ''}`}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.resultsCountText}>
-                    {selectedCategory === 'all'
-                      ? `${filteredMovies.length} ${filteredMovies.length === 1 ? 'Movie' : 'Movies'} found`
-                      : `${searchCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedSearchMovies.length} ${displayedSearchMovies.length === 1 ? 'Match' : 'Matches'})`}
-                  </Text>
-                )}
+                <Text style={styles.resultsCountText}>
+                  {selectedCategory === 'all'
+                    ? `${filteredMovies.length} ${filteredMovies.length === 1 ? 'Movie' : 'Movies'} found`
+                    : `${searchCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedSearchMovies.length} ${displayedSearchMovies.length === 1 ? 'Match' : 'Matches'})`}
+                </Text>
                 <TouchableOpacity
                   style={styles.clearIconButton}
                   onPress={handleClearQuery}
@@ -1192,16 +1063,32 @@ const SearchScreen = () => {
               ) : (
                 /* Single Filtered Category Grid */
                 displayedSearchMovies.length > 0 ? (
-                  <View style={styles.gridWrap}>
-                    {displayedSearchMovies.map((group) => (
-                      <SearchMovieCard
-                        key={`movie-${group.name}-${group.year || ''}`}
-                        group={group}
-                        cardWidth={cardWidth}
-                        posterHeight={posterHeight}
-                        onPress={handleCardPress}
+                  <View>
+                    <View style={styles.gridWrap}>
+                      {paginatedSearchMovies.map((group) => (
+                        <SearchMovieCard
+                          key={`movie-${group.name}-${group.year || ''}`}
+                          group={group}
+                          cardWidth={cardWidth}
+                          posterHeight={posterHeight}
+                          onPress={handleCardPress}
+                        />
+                      ))}
+                    </View>
+                    {searchTotalPages > 1 && (
+                      <PaginationControls
+                        currentPage={searchPage}
+                        totalPages={searchTotalPages}
+                        onPageChange={(p) => {
+                          setSearchPage(p);
+                          searchScrollRef.current?.scrollTo({ y: 0, animated: true });
+                        }}
+                        onOpenJumpModal={() => {
+                          setJumpTarget('search');
+                          setJumpModalVisible(true);
+                        }}
                       />
-                    ))}
+                    )}
                   </View>
                 ) : (
                   <View style={styles.emptyCategoryWrap}>
@@ -1219,12 +1106,12 @@ const SearchScreen = () => {
                 )
               )}
             </View>
-          )}
+          ) : null}
 
           {/* No Search Matches Found */}
           {!isSearchingLive && filteredMovies.length === 0 && (
             <View style={styles.emptyStateContainer}>
-              <View style={styles.emptyStateIconContainer}>
+              <View style={[styles.emptyStateIconContainer, { backgroundColor: theme.iconBg }]}>
                 <Ionicons name="search-outline" color={theme.primary} size={48} />
               </View>
               <Text style={styles.emptyStateTitle}>No movies found</Text>
@@ -1265,7 +1152,7 @@ const SearchScreen = () => {
         >
           {isLoadingRecent && recentlyAddedMovies.length === 0 ? (
             <View style={styles.catalogLoadingContainer}>
-              <View style={styles.loadingPulseCircle}>
+              <View style={[styles.loadingPulseCircle, { backgroundColor: theme.iconBg, borderColor: theme.indicator || theme.cardBorder }]}>
                 <ActivityIndicator color={theme.primary} size="large" />
               </View>
               <Text style={styles.catalogLoadingTitle}>Loading Recently Added</Text>
@@ -1291,32 +1178,14 @@ const SearchScreen = () => {
           ) : recentlyAddedMovies.length > 0 ? (
             <View style={styles.resultsGridSection}>
               <View style={styles.resultsHeaderRow}>
-                {selectedOtt ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
-                    <View
-                      style={[
-                        styles.ottHeaderBadge,
-                        { backgroundColor: selectedOtt.brandColor },
-                      ]}
-                    >
-                      <Text style={styles.ottHeaderBadgeText}>{selectedOtt.name}</Text>
-                    </View>
-                    <Text style={styles.resultsCountText} numberOfLines={1}>
-                      {selectedCategory === 'all'
-                        ? `in Recently Added (${displayedRecentMovies.length} ${displayedRecentMovies.length === 1 ? 'Title' : 'Titles'})`
-                        : `(${displayedRecentMovies.length} ${recentCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || ''})`}
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="time-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
-                    <Text style={styles.resultsCountText}>
-                      {selectedCategory === 'all'
-                        ? `Recently Added (${recentlyAddedMovies.length} ${recentlyAddedMovies.length === 1 ? 'Movie' : 'Movies'})`
-                        : `${recentCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedRecentMovies.length} ${displayedRecentMovies.length === 1 ? 'Title' : 'Titles'})`}
-                    </Text>
-                  </View>
-                )}
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="time-outline" size={16} color={theme.primary} style={{ marginRight: 6 }} />
+                  <Text style={styles.resultsCountText}>
+                    {selectedCategory === 'all'
+                      ? `Recently Added (${recentlyAddedMovies.length} ${recentlyAddedMovies.length === 1 ? 'Movie' : 'Movies'})`
+                      : `${recentCategoryFilterOptions.find((o) => o.key === selectedCategory)?.label || 'Filtered'} (${displayedRecentMovies.length} ${displayedRecentMovies.length === 1 ? 'Title' : 'Titles'})`}
+                  </Text>
+                </View>
                 <TouchableOpacity
                   style={styles.clearIconButton}
                   onPress={handleClearRecentlyAdded}
@@ -1332,86 +1201,66 @@ const SearchScreen = () => {
               {renderCategoryFilterChips(recentCategoryFilterOptions)}
 
               {selectedCategory === 'all' ? (
-                recentGroupedByCategory.length > 0 ? (
-                  /* Grouped by Category Sections (like index.tsx) */
-                  recentGroupedByCategory.map((sec) => (
-                    <View key={`recent-sec-${sec.key}`} style={styles.categorySection}>
-                      <View style={styles.categorySectionHeader}>
-                        <Text style={styles.categorySectionTitle}>
-                          {sec.label}
-                        </Text>
-                        <TouchableOpacity
-                          style={styles.seeAllButton}
-                          onPress={() => handleCategorySelect(sec.key)}
-                          activeOpacity={0.7}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <Text style={styles.seeAllText}>See all ({sec.items.length})</Text>
-                          <Ionicons name="chevron-forward" size={15} color="#8E8E93" style={styles.chevronIcon} />
-                        </TouchableOpacity>
-                      </View>
-
-                      <View style={styles.gridWrap}>
-                        {sec.items.map((group, index) => (
-                          <SearchMovieCard
-                            key={`recent-${sec.key}-${group.name}-${group.year || ''}-${index}`}
-                            group={group}
-                            cardWidth={cardWidth}
-                            posterHeight={posterHeight}
-                            onPress={handleCardPress}
-                          />
-                        ))}
-                      </View>
-                    </View>
-                  ))
-                ) : (
-                  <View style={styles.emptyCategoryWrap}>
-                    <Ionicons name="film-outline" size={36} color="#6E6E73" />
-                    <Text style={styles.emptyCategoryText}>
-                      {selectedOtt
-                        ? `No ${selectedOtt.name} releases found in this Recently Added batch.`
-                        : 'No releases found in this batch.'}
-                    </Text>
-                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-                      {selectedOtt && (
-                        <TouchableOpacity
-                          style={[
-                            styles.retryButton,
-                            { backgroundColor: selectedOtt.brandColor, borderColor: selectedOtt.brandColor },
-                          ]}
-                          onPress={() => {
-                            setQuery(selectedOtt.searchQuery);
-                            setShowRecentlyAdded(false);
-                          }}
-                        >
-                          <Text style={styles.retryButtonText}>Search all {selectedOtt.name}</Text>
-                        </TouchableOpacity>
-                      )}
+                /* Grouped by Category Sections (like index.tsx) */
+                recentGroupedByCategory.map((sec) => (
+                  <View key={`recent-sec-${sec.key}`} style={styles.categorySection}>
+                    <View style={styles.categorySectionHeader}>
+                      <Text style={styles.categorySectionTitle}>
+                        {sec.label}
+                      </Text>
                       <TouchableOpacity
-                        style={styles.retryButton}
-                        onPress={() => {
-                          setSelectedOttId(null);
-                          setSelectedCategory('all');
-                        }}
+                        style={styles.seeAllButton}
+                        onPress={() => handleCategorySelect(sec.key)}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                       >
-                        <Text style={styles.retryButtonText}>Show All Releases</Text>
+                        <Text style={styles.seeAllText}>See all ({sec.items.length})</Text>
+                        <Ionicons name="chevron-forward" size={15} color="#8E8E93" style={styles.chevronIcon} />
                       </TouchableOpacity>
                     </View>
+
+                    <View style={styles.gridWrap}>
+                      {sec.items.map((group, index) => (
+                        <SearchMovieCard
+                          key={`recent-${sec.key}-${group.name}-${group.year || ''}-${index}`}
+                          group={group}
+                          cardWidth={cardWidth}
+                          posterHeight={posterHeight}
+                          onPress={handleCardPress}
+                        />
+                      ))}
+                    </View>
                   </View>
-                )
+                ))
               ) : (
                 /* Single Filtered Category Grid */
                 displayedRecentMovies.length > 0 ? (
-                  <View style={styles.gridWrap}>
-                    {displayedRecentMovies.map((group, index) => (
-                      <SearchMovieCard
-                        key={`recent-${group.name}-${group.year || ''}-${index}`}
-                        group={group}
-                        cardWidth={cardWidth}
-                        posterHeight={posterHeight}
-                        onPress={handleCardPress}
+                  <View>
+                    <View style={styles.gridWrap}>
+                      {paginatedRecentMovies.map((group, index) => (
+                        <SearchMovieCard
+                          key={`recent-${group.name}-${group.year || ''}-${index}`}
+                          group={group}
+                          cardWidth={cardWidth}
+                          posterHeight={posterHeight}
+                          onPress={handleCardPress}
+                        />
+                      ))}
+                    </View>
+                    {recentTotalPages > 1 && (
+                      <PaginationControls
+                        currentPage={recentPage}
+                        totalPages={recentTotalPages}
+                        onPageChange={(p) => {
+                          setRecentPage(p);
+                          recentScrollRef.current?.scrollTo({ y: 0, animated: true });
+                        }}
+                        onOpenJumpModal={() => {
+                          setJumpTarget('recent');
+                          setJumpModalVisible(true);
+                        }}
                       />
-                    ))}
+                    )}
                   </View>
                 ) : (
                   <View style={styles.emptyCategoryWrap}>
@@ -1583,13 +1432,15 @@ const SearchScreen = () => {
               </View>
             ) : (
               <View style={styles.emptyStateContainer}>
-                <Ionicons name="extension-puzzle-outline" size={48} color="#8E8E93" />
-                <Text style={styles.emptyStateTitle}>No Addon Titles Found</Text>
+                <View style={styles.emptyStateIconContainer}>
+                  <Ionicons name="extension-puzzle-outline" color={theme.primary} size={48} />
+                </View>
+                <Text style={styles.emptyStateTitle}>No Addon Movies Found</Text>
                 <Text style={styles.emptyStateSubtitle}>
-                  Please check your installed addons in Settings or try a different catalog.
+                  Ensure your addons have active catalogs, or open Addon Settings to configure addons.
                 </Text>
                 <TouchableOpacity
-                  style={[styles.retryButton, { backgroundColor: theme.primary }]}
+                  style={[styles.retryButton, { backgroundColor: theme.primary, borderColor: theme.primary }]}
                   onPress={() => router.push('/settings/addons' as any)}
                 >
                   <Text style={styles.retryButtonText}>Manage Addons</Text>
@@ -1601,7 +1452,7 @@ const SearchScreen = () => {
           <BottomSpacing space={60} />
         </ScrollView>
       ) : (
-        /* 3. Idle / Initial State */
+        /* 4. Idle / Initial State */
         <ScrollView
           showsVerticalScrollIndicator={false}
           style={styles.contentContainer}
@@ -1742,63 +1593,6 @@ const styles = StyleSheet.create({
     padding: 2,
   },
 
-  // OTT Shortcuts Bar (TV Remote Style App Buttons)
-  ottBarContainer: {
-    marginTop: 10,
-    marginHorizontal: -16,
-    paddingBottom: 2,
-  },
-  ottBarScroll: {
-    paddingHorizontal: 16,
-    gap: 14,
-    alignItems: 'flex-start',
-  },
-  ottShortcutItem: {
-    alignItems: 'center',
-    width: 62,
-  },
-  ottTileButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 15,
-    backgroundColor: '#161619',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-  ottTileButtonActive: {
-    borderWidth: 2,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.75,
-    shadowRadius: 10,
-    elevation: 6,
-    transform: [{ scale: 1.04 }],
-  },
-  ottTileLabel: {
-    fontSize: 10.5,
-    fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.65)',
-    marginTop: 5,
-    textAlign: 'center',
-    letterSpacing: -0.1,
-  },
-  ottTileLabelActive: {
-    color: '#ffffff',
-    fontWeight: '700',
-  },
-  ottGlyphText: {
-    fontWeight: '900',
-    textAlign: 'center',
-    letterSpacing: -0.4,
-  },
-
   catalogLoadingContainer: {
     alignItems: 'center',
     paddingVertical: 36,
@@ -1937,11 +1731,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 22,
   },
-  webViewBtnText: {
-    color: '#ffffff',
-    fontWeight: '700',
-    fontSize: 14,
-  },
   addonBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2009,6 +1798,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#8E8E93',
   },
+  webViewBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
 
   // Grid Results
   resultsGridSection: {
@@ -2050,36 +1844,175 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#151518',
   },
-  topBadgesRow: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    right: 6,
+  // ─── Pagination Styles ───────────────────────────────────────────────────────
+  paginationContainer: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  paginationSummaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+    paddingHorizontal: 4,
   },
-  yearBadge: {
+  paginationSummaryText: {
+    color: '#8E8E93',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  paginationSummaryHighlight: {
+    fontWeight: '700',
+  },
+  jumpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1c1c1e',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2c2c2e',
+  },
+  jumpButtonText: {
+    color: '#d1d1d6',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  paginationBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 4,
+    flexGrow: 1,
+  },
+  pageBtn: {
+    minWidth: 38,
+    height: 38,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#18181a',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pageBtnText: {
+    color: '#d1d1d6',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pageBtnTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  ellipsisBtn: {
+    minWidth: 32,
+    height: 38,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ellipsisText: {
+    color: '#8E8E93',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  navBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 38,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#18181a',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 4,
+  },
+  navBtnDisabled: {
+    opacity: 0.35,
+    backgroundColor: '#121214',
+    borderColor: 'transparent',
+  },
+  navBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  navBtnTextDisabled: {
+    color: '#666666',
+  },
+  modalOverlay: {
+    flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
   },
-  yearBadgeText: {
-    fontSize: 9,
+  modalContent: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#1c1c1e',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#2c2c2e',
+  },
+  modalTitle: {
+    fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
+    marginBottom: 6,
   },
-  langBadge: {
-    backgroundColor: 'rgba(83, 90, 255, 0.85)',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginBottom: 16,
   },
-  langBadgeText: {
-    fontSize: 8,
-    fontWeight: '700',
+  modalInput: {
+    backgroundColor: '#121214',
+    borderWidth: 1,
+    borderColor: '#3a3a3c',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     color: '#ffffff',
-    letterSpacing: 0.2,
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#2c2c2e',
+  },
+  modalCancelText: {
+    color: '#ffffff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  modalGoBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  modalGoText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  searchingLoadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+    width: '100%',
   },
   cardTitle: {
     fontSize: 13,
@@ -2192,44 +2125,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
-  },
-
-  // Active OTT Header Badge
-  ottHeaderBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    marginRight: 6,
-  },
-  ottHeaderBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#ffffff',
-    letterSpacing: 0.2,
-  },
-
-  // Card Poster OTT Badge
-  cardOttBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.6,
-    shadowRadius: 2,
-    elevation: 3,
-  },
-  cardOttBadgeText: {
-    fontSize: 8,
-    fontWeight: '800',
-    color: '#ffffff',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
   },
 });
 

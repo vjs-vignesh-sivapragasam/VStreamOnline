@@ -17,6 +17,7 @@ import { DefaultPosterImgXml } from '@/utils/Svg';
 import { Ionicons } from '@expo/vector-icons';
 import { TorrentItem, GroupedItem, Language, Category } from '@/hooks/useTamilMv';
 import { tmdbService } from '@/services/TmdbService';
+import { storageService } from '@/utils/StorageService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,55 +53,145 @@ function groupToItem(group: GroupedItem, type: 'movie' | 'series'): PosterItemDa
   };
 }
 
+// ─── Poster Cache & Concurrency Queue ───────────────────────────────────────
+
+const POSTER_LIST_CACHE_KEY = 'vstream_poster_list_cache_v1';
+const globalPosterCache = new Map<string, string | null>();
+
+// Initialize persistent cache from disk
+try {
+  const saved = storageService.getItem(POSTER_LIST_CACHE_KEY as any);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    if (typeof parsed === 'object' && parsed !== null) {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'string' || v === null) {
+          globalPosterCache.set(k, v);
+        }
+      }
+    }
+  }
+} catch {}
+
+let persistQueueTimer: NodeJS.Timeout | null = null;
+function schedulePersistGlobalPosterCache() {
+  if (persistQueueTimer) return;
+  persistQueueTimer = setTimeout(() => {
+    persistQueueTimer = null;
+    try {
+      const obj: Record<string, string | null> = {};
+      const entries = Array.from(globalPosterCache.entries()).slice(-600);
+      for (const [k, v] of entries) {
+        obj[k] = v;
+      }
+      storageService.setItem(POSTER_LIST_CACHE_KEY as any, JSON.stringify(obj));
+    } catch {}
+  }, 2500);
+}
+
+class PosterFetchQueue {
+  private queue: (() => Promise<void>)[] = [];
+  private activeCount = 0;
+  private maxConcurrent = 10;
+
+  enqueue(fn: () => Promise<void>) {
+    this.queue.push(fn);
+    this.processNext();
+  }
+
+  private processNext() {
+    if (this.activeCount >= this.maxConcurrent || this.queue.length === 0) return;
+    const task = this.queue.shift();
+    if (!task) return;
+    this.activeCount++;
+    task().finally(() => {
+      this.activeCount--;
+      this.processNext();
+    });
+  }
+}
+
+const posterQueue = new PosterFetchQueue();
+
 // ─── PosterItem ───────────────────────────────────────────────────────────────
 
-const PosterItem = ({
+const PosterItem = React.memo(({
   item,
   posterWidth,
   posterHeight,
   spacing,
+  showTitle = false,
+  showYear = false,
 }: {
   item: PosterItemData;
   posterWidth: number;
   posterHeight: number;
   spacing: number;
+  showTitle?: boolean;
+  showYear?: boolean;
 }) => {
   const [imgError, setImgError] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
-  const [posterUri, setPosterUri] = useState<string | null>(item.poster);
+
+  const titleKey = useMemo(() => {
+    return `${(item.name || '').toLowerCase().trim()}_${item.year || ''}_${item.type}`;
+  }, [item.name, item.year, item.type]);
+
+  const [posterUri, setPosterUri] = useState<string | null>(() => {
+    if (item.poster) return item.poster;
+    return globalPosterCache.get(titleKey) || null;
+  });
 
   useEffect(() => {
-    setPosterUri(item.poster);
-    if (!item.poster && item.name) {
-      let isMounted = true;
-      tmdbService
-        .getMovieFullInfo(item.name, item.year || undefined, item.type)
-        .then((info) => {
-          if (isMounted && info?.posterUrl) {
-            setPosterUri(info.posterUrl);
-          }
-        })
-        .catch(() => {});
-      return () => {
-        isMounted = false;
-      };
+    if (item.poster) {
+      setPosterUri(item.poster);
+      globalPosterCache.set(titleKey, item.poster);
+      schedulePersistGlobalPosterCache();
+      return;
     }
-  }, [item.poster, item.name, item.year, item.type]);
+
+    if (globalPosterCache.has(titleKey)) {
+      setPosterUri(globalPosterCache.get(titleKey) || null);
+      return;
+    }
+
+    if (!item.name) return;
+
+    let isMounted = true;
+    posterQueue.enqueue(async () => {
+      if (!isMounted) return;
+      try {
+        const poster = await tmdbService.getMoviePoster(
+          item.name,
+          item.year || undefined,
+          item.type
+        );
+        if (poster) {
+          globalPosterCache.set(titleKey, poster);
+          schedulePersistGlobalPosterCache();
+          if (isMounted) setPosterUri(poster);
+        } else {
+          globalPosterCache.set(titleKey, null);
+        }
+      } catch {
+        globalPosterCache.set(titleKey, null);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [item.poster, item.name, item.year, item.type, titleKey]);
 
   const handlePress = async () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    const topicUrl =
-      item.groupid?.startsWith('http') ? item.groupid :
-      (item.allItems?.find((i) => i.groupid?.startsWith('http'))?.groupid || undefined);
-
     router.push({
       pathname: '/torrent/details',
       params: {
         guid: item.guid,
         groupid: item.groupid,
-        topicUrl,
         title: item.name,
         magnetUrl: item.magnetUrl,
         infoHash: item.infoHash,
@@ -129,7 +220,7 @@ const PosterItem = ({
       <View style={{ position: 'relative' }}>
         {activePoster && !imgError ? (
           <Image
-            source={{ uri: activePoster }}
+            source={{ uri: activePoster, cache: 'force-cache' as any }}
             onError={() => setImgError(true)}
             style={[styles.posterImage, { width: posterWidth, height: posterHeight }]}
             resizeMode="cover"
@@ -147,13 +238,15 @@ const PosterItem = ({
 
 
       </View>
-      <Text numberOfLines={2} style={[styles.posterTitle, { width: posterWidth }]}>
-        {item.name}
-      </Text>
-      {item.year ? <Text style={styles.posterYear}>{item.year}</Text> : null}
+      {showTitle && (
+        <Text numberOfLines={2} style={[styles.posterTitle, { width: posterWidth }]}>
+          {item.name}
+        </Text>
+      )}
+      {showYear && item.year ? <Text style={styles.posterYear}>{item.year}</Text> : null}
     </Pressable>
   );
-};
+});
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -161,15 +254,23 @@ const SkeletonPoster = ({
   posterWidth,
   posterHeight,
   spacing,
+  showTitle = false,
+  showYear = false,
 }: {
   posterWidth: number;
   posterHeight: number;
   spacing: number;
+  showTitle?: boolean;
+  showYear?: boolean;
 }) => (
   <RNView style={[styles.posterContainer, { width: posterWidth, marginRight: spacing }]}>
     <RNView style={[styles.posterImage, styles.skeletonPoster, { width: posterWidth, height: posterHeight }]} />
-    <RNView style={[styles.skeletonText, { width: posterWidth * 0.85, marginTop: 10 }]} />
-    <RNView style={[styles.skeletonText, { width: posterWidth * 0.5, marginTop: 6, height: 12 }]} />
+    {showTitle && (
+      <RNView style={[styles.skeletonText, { width: posterWidth * 0.85, marginTop: 10 }]} />
+    )}
+    {showYear && (
+      <RNView style={[styles.skeletonText, { width: posterWidth * 0.5, marginTop: 6, height: 12 }]} />
+    )}
   </RNView>
 );
 
@@ -183,6 +284,8 @@ interface PosterListProps {
   category: Category;
   loading?: boolean;
   hideSeeAll?: boolean;
+  showTitle?: boolean;
+  showYear?: boolean;
   onSeeAll?: (category: Category, title: string, language: Language) => void;
 }
 
@@ -194,6 +297,8 @@ const PosterList = ({
   category,
   loading = false,
   hideSeeAll = false,
+  showTitle = false,
+  showYear = false,
   onSeeAll,
 }: PosterListProps) => {
   const { width, height } = useWindowDimensions();
@@ -257,7 +362,13 @@ const PosterList = ({
           data={[1, 2, 3, 4, 5]}
           horizontal
           renderItem={() => (
-            <SkeletonPoster posterWidth={posterWidth} posterHeight={posterHeight} spacing={spacing} />
+            <SkeletonPoster
+              posterWidth={posterWidth}
+              posterHeight={posterHeight}
+              spacing={spacing}
+              showTitle={showTitle}
+              showYear={showYear}
+            />
           )}
           keyExtractor={(_, index) => `skeleton-${index}`}
           showsHorizontalScrollIndicator={false}
@@ -290,6 +401,8 @@ const PosterList = ({
             posterWidth={posterWidth}
             posterHeight={posterHeight}
             spacing={spacing}
+            showTitle={showTitle}
+            showYear={showYear}
           />
         )}
         keyExtractor={(item, index) => `${item.guid}-${index}`}
@@ -340,7 +453,7 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   posterContainer: {
-    marginBottom: 10,
+    marginBottom: 6,
   },
   posterPressed: {
     opacity: 0.7,

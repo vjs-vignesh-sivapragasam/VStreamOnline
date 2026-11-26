@@ -6,13 +6,13 @@ import {
     TouchableOpacity,
     StyleSheet,
     ImageBackground,
-    Platform,
 } from 'react-native';
 import { ActivityIndicator, Text } from '@/components/Themed';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { GroupedItem, Language, TorrentItem, useTamilMV, useTamilMVTopReleases, cleanTopicTitle } from '@/hooks/useTamilMv';
 import { tmdbService, TmdbDetails } from '@/services/TmdbService';
+import { useTheme } from '@/contexts/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,17 +78,16 @@ const CarouselSlideItem = ({
     carouselHeight,
     onPress,
 }: SlideItemProps) => {
-    const [tmdb, setTmdb] = useState<TmdbDetails | null>(null);
-    const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+    const [backdropUri, setBackdropUri] = useState<string>(item.posterUrl);
 
     useEffect(() => {
         let isMounted = true;
         const year = item.publishDate ? new Date(item.publishDate).getFullYear().toString() : undefined;
         tmdbService
-            .getMovieFullInfo(item.title, year, item.type)
-            .then((data) => {
-                if (isMounted && data) {
-                    setTmdb(data);
+            .getMoviePoster(item.title, year, item.type)
+            .then((poster) => {
+                if (isMounted && poster) {
+                    setBackdropUri(poster);
                 }
             })
             .catch(() => {});
@@ -97,27 +96,11 @@ const CarouselSlideItem = ({
         };
     }, [item.title, item.publishDate, item.type]);
 
-    const backdropUri = tmdb?.backdropUrl || item.posterUrl;
-
     const cleanTitle = useMemo(() => {
-        const raw = tmdb?.title || item.title;
-        return cleanTopicTitle(raw).name.replace(/^[a-z0-9\.-]+\.[a-z]{2,6}\s*[-_:]\s*/i, '').trim();
-    }, [tmdb?.title, item.title]);
-
-    const year = tmdb?.year || (item.publishDate ? new Date(item.publishDate).getFullYear().toString() : '2024');
-    const genres = tmdb?.genres
-        ? tmdb.genres.split(',').slice(0, 2).map((g) => g.trim()).join(', ')
-        : (item.type === 'series' ? 'Drama, Series' : 'Adventure, Thriller');
-    const runtime = tmdb?.runtimeFormatted || (item.type === 'series' ? '1 Season' : '120 min');
-    const certification = tmdb?.certification || 'PG-13';
-
-    const imdbRating = tmdb?.imdbRating || '7.1';
-    const tmdbRating = tmdb?.tmdbRating || '7.5';
-    const rtScore = tmdb?.rtScore || '84%';
-    const audienceScore = tmdb?.audienceScore || '94%';
-
-    const tagline = tmdb?.tagline || '';
-    const overview = tmdb?.overview || '';
+        const parsed = cleanTopicTitle(item.title).name;
+        const cleaned = parsed.replace(/^[a-z0-9\.-]+\.[a-z]{2,6}\s*[-_:]\s*/i, '').trim();
+        return cleaned || item.title;
+    }, [item.title]);
 
     return (
         <TouchableOpacity
@@ -126,7 +109,7 @@ const CarouselSlideItem = ({
             activeOpacity={0.92}
         >
             <ImageBackground
-                source={{ uri: backdropUri }}
+                source={{ uri: backdropUri || item.posterUrl, cache: 'force-cache' as any }}
                 style={styles.backdropImage}
                 resizeMode="cover"
             >
@@ -134,8 +117,8 @@ const CarouselSlideItem = ({
                     colors={[
                         'rgba(0,0,0,0.3)',
                         'transparent',
-                        'rgba(0,0,0,0.65)',
-                        'rgba(0,0,0,0.92)',
+                        'rgba(0,0,0,0.5)',
+                        'rgba(0,0,0,0.85)',
                         '#000000',
                     ]}
                     locations={[0, 0.2, 0.5, 0.8, 1]}
@@ -147,84 +130,13 @@ const CarouselSlideItem = ({
                         styles.slideContent,
                         {
                             paddingHorizontal: dimensions.isLandscape ? 40 : 20,
-                            paddingBottom: dimensions.isLandscape ? 36 : 52,
+                            paddingBottom: dimensions.isLandscape ? 36 : 46,
                         },
                     ]}
                 >
-                    {/* Movie Title */}
                     <Text style={styles.slideTitle} numberOfLines={2}>
                         {cleanTitle}
                     </Text>
-
-                    {/* Metadata Row: 2026 · Adventure, Thriller · 1 min · PG-13 */}
-                    <Text style={styles.metaRowText} numberOfLines={1}>
-                        {`${year}  ·  ${genres}  ·  ${runtime}  ·  ${certification}`}
-                    </Text>
-
-                    {/* Ratings Badges Row: [IMDb 7.1] [TMDB 7.5] [RT 84%] [🍿 94%] */}
-                    <View style={styles.ratingsRow}>
-                        {/* IMDb Badge */}
-                        <View style={styles.badgePill}>
-                            <View style={styles.imdbLabel}>
-                                <Text style={styles.imdbLabelText}>IMDb</Text>
-                            </View>
-                            <Text style={styles.badgeScoreText}>{imdbRating}</Text>
-                        </View>
-
-                        {/* TMDB Badge */}
-                        <View style={styles.badgePill}>
-                            <View style={styles.tmdbLabel}>
-                                <Text style={styles.tmdbLabelText}>TMDB</Text>
-                            </View>
-                            <Text style={styles.badgeScoreText}>{tmdbRating}</Text>
-                        </View>
-
-                        {/* RT Badge */}
-                        <View style={styles.badgePill}>
-                            <View style={styles.rtLabel}>
-                                <Text style={styles.rtLabelText}>RT</Text>
-                            </View>
-                            <Text style={styles.badgeScoreText}>{rtScore}</Text>
-                        </View>
-
-                        {/* Popcorn Audience Badge */}
-                        <View style={[styles.badgePill, styles.popcornPill]}>
-                            <Text style={styles.popcornText}>🍿 {audienceScore}</Text>
-                        </View>
-                    </View>
-
-                    {/* Tagline / Subtitle */}
-                    {tagline ? (
-                        <Text style={styles.taglineText} numberOfLines={1}>
-                            {tagline}
-                        </Text>
-                    ) : null}
-
-                    {/* Overview Paragraph with more toggle */}
-                    {overview ? (
-                        <View style={styles.overviewWrap}>
-                            <Text
-                                style={styles.overviewText}
-                                numberOfLines={isOverviewExpanded ? undefined : 2}
-                            >
-                                {overview}
-                            </Text>
-                            {overview.length > 80 ? (
-                                <TouchableOpacity
-                                    onPress={(e) => {
-                                        e.stopPropagation();
-                                        setIsOverviewExpanded(!isOverviewExpanded);
-                                    }}
-                                    activeOpacity={0.7}
-                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                >
-                                    <Text style={styles.moreText}>
-                                        {isOverviewExpanded ? 'less' : 'more'}
-                                    </Text>
-                                </TouchableOpacity>
-                            ) : null}
-                        </View>
-                    ) : null}
                 </View>
             </ImageBackground>
         </TouchableOpacity>
@@ -234,11 +146,13 @@ const CarouselSlideItem = ({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PosterCarousel({
+
     filter = 'tamil',
     onItemPress,
     autoPlay = true,
     autoPlayInterval = 5000,
 }: CarouselProps) {
+    const { theme } = useTheme();
     const [activeIndex, setActiveIndex] = useState(0);
     const [dimensions, setDimensions] = useState(() => {
         const { width, height } = Dimensions.get('window');
@@ -321,7 +235,7 @@ export default function PosterCarousel({
     }, [filter]);
 
     useEffect(() => {
-        const sub = Dimensions.addEventListener('change', ({ window }: { window: any }) => {
+        const sub = Dimensions.addEventListener('change', ({ window }) => {
             setDimensions({
                 width: window.width,
                 height: window.height,
@@ -333,18 +247,14 @@ export default function PosterCarousel({
 
     const carouselHeight = dimensions.isLandscape
         ? dimensions.height * 0.95
-        : Math.min(Math.max(dimensions.height * 0.68, 520), 620);
+        : Math.min(Math.max(dimensions.height * 0.58, 460), 540);
 
     useEffect(() => {
         if (autoPlay && data.length > 1) {
             autoPlayRef.current = setInterval(() => {
                 setActiveIndex((prev) => {
                     const next = (prev + 1) % data.length;
-                    try {
-                        flatListRef.current?.scrollToIndex({ index: next, animated: true });
-                    } catch (e) {
-                        // ignore layout measurement error
-                    }
+                    flatListRef.current?.scrollToIndex({ index: next, animated: true });
                     return next;
                 });
             }, autoPlayInterval);
@@ -394,11 +304,11 @@ export default function PosterCarousel({
     );
 
 
-    if (!data.length) {
+    if (loading || !data.length) {
         return (
             <View style={[styles.loadingContainer, { height: carouselHeight }]}>
                 {loading
-                    ? <ActivityIndicator color="#535aff" />
+                    ? <ActivityIndicator color={theme.primary} />
                     : <Text style={styles.emptyText}>No content available</Text>
                 }
             </View>
@@ -424,13 +334,6 @@ export default function PosterCarousel({
                 maxToRenderPerBatch={3}
                 windowSize={5}
                 extraData={activeIndex}
-                onScrollToIndexFailed={(info) => {
-                    setTimeout(() => {
-                        try {
-                            flatListRef.current?.scrollToIndex({ index: info.index, animated: false });
-                        } catch {}
-                    }, 500);
-                }}
                 getItemLayout={(_data, index) => ({
                     length: dimensions.width,
                     offset: dimensions.width * index,
@@ -447,37 +350,37 @@ export default function PosterCarousel({
                         },
                     ]}
                 >
-                    {Platform.OS === 'ios' ? (
-                        <BlurView intensity={20} style={styles.paginationBlur}>
-                            <View style={styles.paginationDots}>
-                                {data.map((_, index) => (
-                                    <TouchableOpacity
-                                        key={`dot-${index}`}
-                                        style={[
-                                            styles.paginationDot,
-                                            activeIndex === index && styles.paginationDotActive,
-                                        ]}
-                                        onPress={() => scrollToIndex(index)}
-                                    />
-                                ))}
+                    <BlurView intensity={35} tint="dark" style={styles.paginationBlur}>
+                        <View style={styles.paginationRow}>
+                            {/* Movies count text e.g. 1 / 15 */}
+                            <View style={styles.movieCountBadge}>
+                                <Text style={styles.movieCountCurrent}>{activeIndex + 1}</Text>
+                                <Text style={styles.movieCountDivider}>/</Text>
+                                <Text style={styles.movieCountTotal}>{data.length}</Text>
                             </View>
-                        </BlurView>
-                    ) : (
-                        <View style={[styles.paginationBlur, { backgroundColor: 'rgba(0, 0, 0, 0.55)' }]}>
+
+                            <View style={styles.paginationDividerPipe} />
+
+                            {/* Moving dots */}
                             <View style={styles.paginationDots}>
-                                {data.map((_, index) => (
-                                    <TouchableOpacity
-                                        key={`dot-${index}`}
-                                        style={[
-                                            styles.paginationDot,
-                                            activeIndex === index && styles.paginationDotActive,
-                                        ]}
-                                        onPress={() => scrollToIndex(index)}
-                                    />
-                                ))}
+                                {data.slice(0, Math.min(data.length, 10)).map((_, index) => {
+                                    const isActive = activeIndex === index || (activeIndex >= 10 && index === 9);
+                                    return (
+                                        <TouchableOpacity
+                                            key={`dot-${index}`}
+                                            style={[
+                                                styles.paginationDot,
+                                                isActive && [styles.paginationDotActive, { backgroundColor: theme.primary }],
+                                            ]}
+                                            onPress={() => scrollToIndex(index)}
+                                            hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                                            activeOpacity={0.7}
+                                        />
+                                    );
+                                })}
                             </View>
                         </View>
-                    )}
+                    </BlurView>
                 </View>
             )}
         </View>
@@ -501,19 +404,19 @@ const styles = StyleSheet.create({
     slideContent: {
         zIndex: 2,
         alignItems: 'center',
-        paddingBottom: 52,
+        justifyContent: 'center',
+        width: '100%',
     },
     slideTitle: {
-        fontSize: 24,
+        fontSize: 22,
         fontWeight: '800',
         color: '#ffffff',
         textAlign: 'center',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
+        letterSpacing: 0.4,
         textShadowColor: 'rgba(0, 0, 0, 0.95)',
         textShadowOffset: { width: 0, height: 2 },
         textShadowRadius: 8,
-        paddingHorizontal: 16,
+        paddingHorizontal: 20,
     },
     metaRowText: {
         fontSize: 13,
@@ -615,30 +518,71 @@ const styles = StyleSheet.create({
     },
     paginationContainer: {
         position: 'absolute',
-        bottom: 14,
+        bottom: 12,
         alignSelf: 'center',
-        borderRadius: 20,
+        borderRadius: 22,
         overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.14)',
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+        elevation: 6,
     },
     paginationBlur: {
-        paddingHorizontal: 8,
+        paddingHorizontal: 12,
         paddingVertical: 6,
+    },
+    paginationRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    movieCountBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingRight: 2,
+    },
+    movieCountCurrent: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#ffffff',
+        letterSpacing: 0.2,
+    },
+    movieCountDivider: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: 'rgba(255, 255, 255, 0.4)',
+        marginHorizontal: 1,
+    },
+    movieCountTotal: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: 'rgba(255, 255, 255, 0.6)',
+    },
+    paginationDividerPipe: {
+        width: 1,
+        height: 12,
+        backgroundColor: 'rgba(255, 255, 255, 0.22)',
+        marginHorizontal: 2,
     },
     paginationDots: {
         flexDirection: 'row',
         alignItems: 'center',
     },
     paginationDot: {
-        width: 7,
-        height: 7,
-        borderRadius: 3.5,
-        backgroundColor: 'rgba(255, 255, 255, 0.4)',
-        marginHorizontal: 3.5,
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: 'rgba(255, 255, 255, 0.32)',
+        marginHorizontal: 3,
     },
     paginationDotActive: {
+        width: 16,
+        height: 6,
+        borderRadius: 3,
         backgroundColor: '#ffffff',
-        width: 12,
-        height: 7,
-        borderRadius: 3.5,
     },
 });

@@ -25,7 +25,6 @@ import {
   cleanTopicTitle,
   Language,
   getTamilMVBaseUrl,
-  normalizeTamilMvUrl,
 } from '@/hooks/useTamilMv';
 import { StreamingServerClient, TorrentFile, resolveStreamingServerClient } from '@/clients/stremio';
 import { StorageKeys, storageService } from '@/utils/StorageService';
@@ -33,9 +32,9 @@ import { downloadService, DownloadItem } from '@/services/DownloadService';
 import { myListService } from '@/services/MyListService';
 import { tmdbService, TmdbDetails, TmdbEpisode, TmdbSeason, detectLanguageCode, cleanMovieQuery } from '@/services/TmdbService';
 import { DEFAULT_TRACKERS } from '@/clients/stremio';
-import { addonService, StremioStream } from '@/services/AddonService';
 import { externalPlayerService } from '@/utils/ExternalPlayerService';
 import { ensureEmbeddedServerRunning } from '@/utils/StremioServerManager';
+import { addonService, StremioStream } from '@/services/AddonService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -213,45 +212,18 @@ function getItemLanguages(item: TorrentItem, topicTitle?: string): string[] {
   return result;
 }
 
-function getResolutionWeight(title: string): number {
-  if (/\b(4k|2160p|uhd)\b/i.test(title)) return 4000;
-  if (/\b(1080p|fhd)\b/i.test(title)) return 1080;
-  if (/\b(720p)\b/i.test(title)) return 720;
-  if (/\b(480p|sdtv|dvdrip|sd)\b/i.test(title)) return 480;
-  if (/\b(360p|240p)\b/i.test(title)) return 360;
-  return 500;
-}
-
-function parseFileSizeInBytes(title: string): number {
-  const match = title.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
-  if (!match) return 0;
-  const num = parseFloat(match[1]);
-  const unit = match[2].toUpperCase();
-  if (unit === 'GB') return num * 1024 * 1024 * 1024;
-  if (unit === 'MB') return num * 1024 * 1024;
-  return num;
-}
-
 function parseQualityMeta(title: string) {
   const is4K = /\b(4k|2160p|uhd)\b/i.test(title);
   const is1080p = /\b(1080p|fhd)\b/i.test(title);
-  const is720p = /\b(720p)\b/i.test(title);
-  const is480p = /\b(480p|sdtv|dvdrip|sd)\b/i.test(title);
+  const is720p = /\b(720p|hd)\b/i.test(title);
 
   let resolution = '';
   if (is4K) resolution = '4K UHD';
   else if (is1080p) resolution = '1080p';
   else if (is720p) resolution = '720p';
-  else if (is480p) resolution = '480p';
   else {
     const resMatch = title.match(/\b(\d{3,4}p)\b/i);
     if (resMatch) resolution = resMatch[1];
-    else if (/\b(dvd9)\b/i.test(title)) resolution = 'DVD9';
-    else if (/\b(dvd5)\b/i.test(title)) resolution = 'DVD5';
-    else if (/\b(hdrip)\b/i.test(title)) resolution = 'HDRip';
-    else if (/\b(web-?dl|webrip)\b/i.test(title)) resolution = 'WEB-DL';
-    else if (/\b(x264|hevc|x265|avc)\b/i.test(title)) resolution = 'HDRip';
-    else resolution = 'HD';
   }
 
   const sizeMatch = title.match(/(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
@@ -269,13 +241,75 @@ function parseQualityMeta(title: string) {
     is4K,
     is1080p,
     is720p,
-    is480p,
     resolution,
     fileSize,
     audio,
     codec,
     languages,
   };
+}
+
+function getQualityScore(item: TorrentItem): { rank: number; sizeMB: number } {
+  const text = `${item.title || ''} ${item.name || ''}`.toLowerCase();
+  const meta = parseQualityMeta(item.title || item.name || '');
+
+  let rank = 2; // Default 720p / HD
+  if (meta.is4K || /\b(4k|2160p|uhd)\b/i.test(text)) {
+    rank = 4;
+  } else if (meta.is1080p || /\b(1080p|fhd)\b/i.test(text)) {
+    rank = 3;
+  } else if (meta.is720p || /\b(720p|hd)\b/i.test(text)) {
+    rank = 2;
+  } else if (/\b(480p|360p|240p|sd|predvd|cam|dvdrip|tc|ts)\b/i.test(text)) {
+    rank = 1; // Lowest quality
+  }
+
+  // Parse file size in MB
+  let sizeMB = 1000; // default 1GB
+  if (meta.fileSize) {
+    const m = meta.fileSize.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
+    if (m) {
+      const val = parseFloat(m[1]);
+      sizeMB = m[2].toUpperCase() === 'GB' ? val * 1024 : val;
+    }
+  } else {
+    const sizeMatch = text.match(/(\d+(?:\.\d+)?)\s*(gb|mb)/i);
+    if (sizeMatch) {
+      const val = parseFloat(sizeMatch[1]);
+      sizeMB = sizeMatch[2].toUpperCase() === 'GB' ? val * 1024 : val;
+    }
+  }
+
+  return { rank, sizeMB };
+}
+
+function pickLowestQualityItem(
+  items: TorrentItem[],
+  targetLang: string = 'Tamil',
+  movieTitle?: string
+): TorrentItem | null {
+  const validItems = items.filter((i) => Boolean(i.infoHash || i.magnetUrl || (i as any).url));
+  if (validItems.length === 0) return items[0] || null;
+
+  // 1. Filter for items matching targetLang (default 'Tamil')
+  const langMatches = validItems.filter((item) => {
+    const langs = getItemLanguages(item, movieTitle);
+    return langs.some((l) => l.toLowerCase() === targetLang.toLowerCase());
+  });
+
+  const candidatePool = langMatches.length > 0 ? [...langMatches] : [...validItems];
+
+  // 2. Sort candidatePool in ASCENDING order of quality rank and file size
+  candidatePool.sort((a, b) => {
+    const scoreA = getQualityScore(a);
+    const scoreB = getQualityScore(b);
+    if (scoreA.rank !== scoreB.rank) {
+      return scoreA.rank - scoreB.rank; // Lowest rank first (1 -> 2 -> 3 -> 4)
+    }
+    return scoreA.sizeMB - scoreB.sizeMB; // Smallest file size first
+  });
+
+  return candidatePool[0] || null;
 }
 
 const LANGUAGE_NAMES: Record<Language, string> = {
@@ -286,56 +320,6 @@ const LANGUAGE_NAMES: Record<Language, string> = {
   telugu: 'Telugu',
   kannada: 'Kannada',
 };
-
-function resolveTopicWebUrl(
-  topicUrl?: string,
-  groupid?: string,
-  paramGuid?: string,
-  items?: TorrentItem[]
-): string | null {
-  const currentBase = normalizeTamilMvUrl(getTamilMVBaseUrl());
-
-  const candidates: (string | undefined)[] = [
-    topicUrl,
-    groupid,
-    paramGuid,
-    items?.[0]?.groupid,
-    items?.[0]?.guid,
-  ];
-
-  // 1. Direct full HTTP URL with /forums/topic/
-  for (const cand of candidates) {
-    if (!cand) continue;
-    if (cand.startsWith('http') && cand.includes('/forums/topic/')) {
-      try {
-        const parsed = new URL(cand);
-        const baseParsed = new URL(currentBase);
-        return `${baseParsed.origin}${parsed.pathname}${parsed.search}`;
-      } catch {
-        return cand;
-      }
-    }
-  }
-
-  // 2. Relative topic path
-  for (const cand of candidates) {
-    if (!cand) continue;
-    if (cand.startsWith('/forums/topic/') || cand.startsWith('index.php?/forums/topic/')) {
-      return `${currentBase.replace(/\/$/, '')}/${cand.replace(/^\//, '')}`;
-    }
-  }
-
-  // 3. Topic ID embedded in string (e.g. "201024", "201024-magnet-0", "topic/201024")
-  for (const cand of candidates) {
-    if (!cand) continue;
-    const match = cand.match(/\b(\d{4,8})\b/);
-    if (match) {
-      return `${currentBase.replace(/\/$/, '')}/index.php?/forums/topic/${match[1]}-view/`;
-    }
-  }
-
-  return null;
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const TorrentDetails = () => {
@@ -348,9 +332,7 @@ const TorrentDetails = () => {
     allItems: allItemsRaw,
     topicUrl,
     groupid,
-    magnetUrl: paramMagnetUrl,
-    infoHash: paramInfoHash,
-    guid: paramGuid,
+    guid,
     imdbId,
   } = useLocalSearchParams<{
     title: string;
@@ -361,8 +343,6 @@ const TorrentDetails = () => {
     allItems?: string;
     topicUrl?: string;
     groupid?: string;
-    magnetUrl?: string;
-    infoHash?: string;
     guid?: string;
     imdbId?: string;
   }>();
@@ -370,13 +350,33 @@ const TorrentDetails = () => {
   const { height, width } = useWindowDimensions();
   const isPortrait = height > width;
   const insets = useSafeAreaInsets();
-  const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
   const { theme } = useTheme();
 
   // ── TMDB State ──
   const [tmdbData, setTmdbData] = useState<TmdbDetails | null>(null);
   const [isTmdbLoading, setIsTmdbLoading] = useState(true);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+  const backdropUri = tmdbData?.backdropUrl || poster;
+  const [trailerThumbnailUri, setTrailerThumbnailUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tmdbData?.trailerKey) {
+      setTrailerThumbnailUri(`https://img.youtube.com/vi/${tmdbData.trailerKey}/maxresdefault.jpg`);
+    } else if (backdropUri) {
+      setTrailerThumbnailUri(backdropUri);
+    } else {
+      setTrailerThumbnailUri(poster || null);
+    }
+  }, [tmdbData?.trailerKey, backdropUri, poster]);
+
+  const handleTrailerThumbError = () => {
+    if (backdropUri && trailerThumbnailUri !== backdropUri) {
+      setTrailerThumbnailUri(backdropUri);
+    } else if (tmdbData?.trailerKey && !trailerThumbnailUri?.includes('mqdefault')) {
+      setTrailerThumbnailUri(`https://img.youtube.com/vi/${tmdbData.trailerKey}/mqdefault.jpg`);
+    }
+  };
 
   // Series Season & Episode State
   const [selectedSeason, setSelectedSeason] = useState(1);
@@ -395,8 +395,6 @@ const TorrentDetails = () => {
   const [pickerMode, setPickerMode] = useState<'stream' | 'download'>('stream');
   const [qualityModalVisible, setQualityModalVisible] = useState(false);
   const [qualityModalMode, setQualityModalMode] = useState<'watch' | 'download'>('watch');
-  const [isLaunchingPlayer, setIsLaunchingPlayer] = useState(false);
-  const [launchingQuality, setLaunchingQuality] = useState<string>('');
 
   // Fetch TMDB data for Cast, Crew, Trailer, Recommendations, Information
   useEffect(() => {
@@ -443,84 +441,45 @@ const TorrentDetails = () => {
 
   const [items, setItems] = useState<TorrentItem[]>(() => {
     try {
-      const parsed = allItemsRaw ? JSON.parse(allItemsRaw) : [];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      return allItemsRaw ? JSON.parse(allItemsRaw) : [];
     } catch {
-      // ignore
+      return [];
     }
-    if (paramMagnetUrl) {
-      return [{
-        guid: paramGuid || topicUrl || groupid || title,
-        groupid: groupid || topicUrl || '',
-        name: title,
-        title: title,
-        year: paramYear,
-        language: 'tamil',
-        poster,
-        magnetUrl: paramMagnetUrl,
-        infoHash: paramInfoHash || '',
-        publishDate: publishDate || new Date().toISOString(),
-      }];
-    }
-    return [];
   });
   const [isLoadingVariants, setIsLoadingVariants] = useState(false);
 
-  // Always load full resolutions from the topic webpage, merging with any initial preloaded variants
+  // When items have no valid magnet URLs (e.g. from TamilMV website search, or Recommended movies),
+  // fetch from topicUrl / groupid, OR auto-search TamilMV by title
   useEffect(() => {
     let isMounted = true;
 
-    const rawParsed: TorrentItem[] = (() => {
-      try {
-        const parsed = allItemsRaw ? JSON.parse(allItemsRaw) : [];
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-      if (paramMagnetUrl) {
-        return [{
-          guid: paramGuid || topicUrl || groupid || title,
-          groupid: groupid || topicUrl || '',
-          name: title,
-          title: title,
-          year: paramYear,
-          language: 'tamil',
-          poster,
-          magnetUrl: paramMagnetUrl,
-          infoHash: paramInfoHash || '',
-          publishDate: publishDate || new Date().toISOString(),
-        }];
-      }
-      return [];
-    })();
+    const rawParsed: TorrentItem[] = allItemsRaw ? (() => {
+      try { return JSON.parse(allItemsRaw); } catch { return []; }
+    })() : [];
 
-    // Immediately display preloaded items with zero waiting delay
-    if (rawParsed.length > 0) {
+    const hasRealMagnets = rawParsed.length > 0 && rawParsed.some(i => i.magnetUrl && i.magnetUrl.startsWith('magnet:?'));
+    if (hasRealMagnets) {
       setItems(rawParsed);
+      setIsLoadingVariants(false);
+      return;
     }
 
-    const targetUrl = resolveTopicWebUrl(topicUrl, groupid, paramGuid, rawParsed);
-
+    const targetUrl = (topicUrl?.startsWith('http') ? topicUrl : null) || (groupid?.startsWith('http') ? groupid : null) || (rawParsed[0]?.groupid?.startsWith('http') ? rawParsed[0].groupid : null);
     if (targetUrl) {
       setIsLoadingVariants(true);
       fetchTamilMVTopicMagnets(targetUrl)
-        .then((res) => {
-          if (isMounted && res.items.length > 0) {
-            // Merge all resolutions from the webpage and deduplicate by infoHash or magnetUrl
-            const map = new Map<string, TorrentItem>();
-            res.items.forEach((it) => {
-              const key = (it.infoHash || it.magnetUrl || it.title).toLowerCase();
-              map.set(key, it);
-            });
-            rawParsed.forEach((it) => {
-              const key = (it.infoHash || it.magnetUrl || it.title).toLowerCase();
-              if (!map.has(key)) {
-                map.set(key, it);
-              }
-            });
-            setItems(Array.from(map.values()));
+        .then(res => {
+          if (isMounted) {
+            if (res.items.length > 0) {
+              setItems(res.items);
+            } else {
+              setItems(rawParsed);
+            }
           }
         })
-        .catch((err) => {
-          console.warn('[TorrentDetails] Failed to fetch topic magnets from web view:', err);
+        .catch(err => {
+          console.warn('[TorrentDetails] Failed to fetch topic magnets:', err);
+          if (isMounted) setItems(rawParsed);
         })
         .finally(() => {
           if (isMounted) setIsLoadingVariants(false);
@@ -529,7 +488,7 @@ const TorrentDetails = () => {
     }
 
     // Auto-search TamilMV when opened with just a title (e.g. Recommended or Similar movies)
-    const searchTitle = getMovieSearchTitle(title);
+    const searchTitle = !isAddonMedia ? getMovieSearchTitle(title) : '';
     if (searchTitle) {
       setIsLoadingVariants(true);
       searchTamilMV(searchTitle, 'all')
@@ -538,13 +497,13 @@ const TorrentDetails = () => {
           if (groups && groups.length > 0) {
             const targetYear = publishDate ? new Date(publishDate).getFullYear().toString() : null;
             let candidateGroup = targetYear
-              ? groups.find((g) => g.year === targetYear) || groups[0]
+              ? groups.find(g => g.year === targetYear) || groups[0]
               : groups[0];
 
-            const candidateGroups = [candidateGroup, ...groups.filter((g) => g !== candidateGroup)].slice(0, 3);
+            const candidateGroups = [candidateGroup, ...groups.filter(g => g !== candidateGroup)].slice(0, 3);
 
             for (const grp of candidateGroups) {
-              const bestCandidate = grp.items.find((i) => i.groupid?.startsWith('http')) || grp.items[0];
+              const bestCandidate = grp.items.find(i => i.groupid?.startsWith('http')) || grp.items[0];
               const topic = bestCandidate?.groupid || bestCandidate?.guid;
               if (topic && topic.startsWith('http')) {
                 try {
@@ -559,13 +518,13 @@ const TorrentDetails = () => {
               }
             }
           }
-          if (isMounted && rawParsed.length === 0) {
+          if (isMounted) {
             setItems([]);
           }
         })
-        .catch((err) => {
+        .catch(err => {
           console.warn('[TorrentDetails] Auto-search failed for title:', searchTitle, err);
-          if (isMounted && rawParsed.length === 0) setItems([]);
+          if (isMounted) setItems([]);
         })
         .finally(() => {
           if (isMounted) setIsLoadingVariants(false);
@@ -578,14 +537,14 @@ const TorrentDetails = () => {
     return () => {
       isMounted = false;
     };
-  }, [allItemsRaw, topicUrl, groupid, title, publishDate, paramMagnetUrl, paramInfoHash, paramGuid, paramYear, poster]);
+  }, [allItemsRaw, topicUrl, groupid, title, publishDate]);
 
   // ── Query installed Stremio stream addons for matching streams ──
   useEffect(() => {
     let isMounted = true;
     const mediaId =
       imdbId ||
-      (paramGuid?.startsWith('tt') ? paramGuid : null) ||
+      (guid?.startsWith('tt') ? guid : null) ||
       (groupid?.startsWith('tt') ? groupid : null) ||
       tmdbData?.imdbId;
 
@@ -607,33 +566,31 @@ const TorrentDetails = () => {
           ];
           const trackerParams = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
           const magnetUrl = st.infoHash
-            ? `magnet:?xt=urn:btih:${st.infoHash}&dn=${encodeURIComponent(st.title || title || 'stream')}&${trackerParams}`
+            ? `magnet:?xt=urn:btih:${st.infoHash}&${trackerParams}`
             : (st.url || '');
-
-          return {
-            name: title || null,
+          const item: any = {
+            name: displayTitle,
             year: paramYear || null,
-            language: 'All',
+            language: 'Multi',
             groupid: `addon-${st.addonName || 'stream'}`,
             guid: `addon-${mediaId}-${idx}-${st.infoHash || st.url || idx}`,
             poster: poster || null,
             title: displayTitle,
             magnetUrl,
             infoHash: st.infoHash || '',
-            publishDate: new Date().toISOString(),
+            publishDate: publishDate || '',
             url: st.url,
-            fileIdx: st.fileIdx,
-          } as TorrentItem;
+            fileIdx: (st.fileIdx !== undefined && st.fileIdx >= 0) ? st.fileIdx : 0,
+          };
+          return item as TorrentItem;
         });
 
         setItems((prev) => {
-          const existingHashes = new Set(
-            prev.map((i) => (i.infoHash || (i as any).url || i.guid).toLowerCase())
-          );
-          const newItems = converted.filter(
-            (c) => !existingHashes.has((c.infoHash || (c as any).url || c.guid).toLowerCase())
-          );
-          return [...prev, ...newItems];
+          // Filter out dummy/placeholder items that have no streamable hash or link
+          const realPrev = prev.filter((i) => Boolean(i.infoHash || i.magnetUrl || (i as any).url));
+          const existingHashes = new Set(realPrev.map((i) => i.infoHash).filter(Boolean));
+          const newItems = converted.filter((c) => !c.infoHash || !existingHashes.has(c.infoHash));
+          return [...realPrev, ...newItems];
         });
       })
       .catch((e) => {
@@ -643,111 +600,9 @@ const TorrentDetails = () => {
     return () => {
       isMounted = false;
     };
-  }, [imdbId, paramGuid, groupid, tmdbData?.imdbId, type, title, paramYear, poster]);
+  }, [imdbId, guid, groupid, tmdbData?.imdbId, type, paramYear, poster, publishDate]);
 
   const allItems = items;
-
-  const isSeries = Boolean(
-    type === 'series' ||
-    tmdbData?.mediaType === 'tv' ||
-    (tmdbData?.numberOfSeasons && tmdbData.numberOfSeasons > 0)
-  );
-
-  const isAddonMedia = Boolean(
-    groupid?.startsWith('addon-') ||
-    paramGuid?.startsWith('addon-') ||
-    imdbId ||
-    (!topicUrl && !groupid?.startsWith('http'))
-  );
-
-  // Fetch TV episodes when series detected and season changes
-  useEffect(() => {
-    if (!isSeries || !tmdbData?.id) return;
-    let isMounted = true;
-    setIsLoadingEpisodes(true);
-    tmdbService
-      .getTvSeasonEpisodes(tmdbData.id, selectedSeason)
-      .then((eps) => {
-        if (isMounted) {
-          setSeasonEpisodes(eps);
-          setIsLoadingEpisodes(false);
-        }
-      })
-      .catch((e) => {
-        console.warn('[TorrentDetails] Failed to fetch TV episodes:', e);
-        if (isMounted) setIsLoadingEpisodes(false);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [isSeries, tmdbData?.id, selectedSeason]);
-
-  // Handle Episode selection: fetch addon streams for that specific episode
-  const handleEpisodePress = async (ep: TmdbEpisode) => {
-    const mediaId =
-      imdbId ||
-      (paramGuid?.startsWith('tt') ? paramGuid : null) ||
-      (groupid?.startsWith('tt') ? groupid : null) ||
-      tmdbData?.imdbId;
-
-    if (!mediaId) {
-      showAlert('Episodes', 'No IMDb ID found for this series to query episode streams.');
-      return;
-    }
-
-    setLoadingEpisodeNumber(ep.episodeNumber);
-    try {
-      // Query addon streams for this specific episode: e.g. tt4574334:1:1
-      const epId = `${mediaId}:${selectedSeason}:${ep.episodeNumber}`;
-      const streams = await addonService.fetchStreamsForMedia('series', epId);
-
-      if (!streams || streams.length === 0) {
-        showAlert('No Streams', `No streams found for Season ${selectedSeason} Episode ${ep.episodeNumber}.`);
-        setLoadingEpisodeNumber(null);
-        return;
-      }
-
-      const converted: TorrentItem[] = streams.map((st, idx) => {
-        const streamName = st.name ? `[${st.name.replace(/\n/g, ' ')}] ` : '';
-        const displayTitle = st.title
-          ? `${streamName}${st.title.replace(/\n/g, ' • ')}`
-          : (st.name || 'Stream');
-        const trackers = [
-          ...(st.sources || []).filter((s: string) => s.startsWith('tracker:')).map((s: string) => s.replace(/^tracker:/, '')),
-          ...DEFAULT_TRACKERS,
-        ];
-        const trackerParams = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
-        const magnetUrl = st.infoHash
-          ? `magnet:?xt=urn:btih:${st.infoHash}&dn=${encodeURIComponent(st.title || `${title} S${selectedSeason}E${ep.episodeNumber}`)}&${trackerParams}`
-          : (st.url || '');
-
-        return {
-          name: `${title} S${selectedSeason}E${ep.episodeNumber}`,
-          year: paramYear || null,
-          language: 'All',
-          groupid: `addon-${st.addonName || 'stream'}`,
-          guid: `addon-${mediaId}-s${selectedSeason}e${ep.episodeNumber}-${idx}`,
-          poster: ep.stillUrl || (ep.stillPath ? `https://image.tmdb.org/t/p/w500${ep.stillPath}` : poster || null),
-          title: displayTitle,
-          magnetUrl,
-          infoHash: st.infoHash || '',
-          publishDate: new Date().toISOString(),
-          url: st.url,
-          fileIdx: st.fileIdx,
-        } as TorrentItem;
-      });
-
-      // Update items with this episode's streams and open quality picker
-      setItems(converted);
-      setQualityModalMode('watch');
-      setQualityModalVisible(true);
-    } catch (err: any) {
-      console.warn('[handleEpisodePress] Error:', err);
-      showAlert('Error', 'Failed to fetch episode streams: ' + (err.message || String(err)));
-    } finally {
-      setLoadingEpisodeNumber(null);
-    }
-  };
 
   // ── My List status & toggle ──
   const [inMyList, setInMyList] = useState(() => myListService.isInMyList(title));
@@ -782,13 +637,29 @@ const TorrentDetails = () => {
   // Resolve the TamilMV web page URL for this movie
   const getMovieWebUrl = useCallback((): string => {
     const currentBase = getTamilMVBaseUrl();
-    const resolved = resolveTopicWebUrl(topicUrl, groupid, paramGuid, allItems);
-    if (resolved) return resolved;
+    const candidate =
+      topicUrl ||
+      (groupid?.startsWith('http') ? groupid : null) ||
+      allItems.find((i) => i.groupid && i.groupid.startsWith('http'))?.groupid ||
+      allItems.find((i) => i.guid && i.guid.startsWith('http') && i.guid.includes('/forums/topic/'))?.guid;
+
+    if (candidate) {
+      try {
+        const parsed = new URL(candidate);
+        const baseParsed = new URL(currentBase);
+        return `${baseParsed.origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+      } catch {
+        if (candidate.startsWith('/')) {
+          return `${currentBase.replace(/\/$/, '')}${candidate}`;
+        }
+        return candidate;
+      }
+    }
 
     // Fallback: search TamilMV for this movie title
     const searchName = getMovieSearchTitle(tmdbData?.title || title);
     return `${currentBase.replace(/\/$/, '')}/index.php?/search/&q=${encodeURIComponent(searchName)}&quick=1`;
-  }, [topicUrl, groupid, paramGuid, allItems, tmdbData?.title, title]);
+  }, [topicUrl, groupid, allItems, tmdbData?.title, title]);
 
   const handleOpenWebPage = useCallback(async () => {
     if (await isHapticsSupported()) {
@@ -842,6 +713,22 @@ const TorrentDetails = () => {
 
   const displayLanguage = LANGUAGE_NAMES[movieLanguage] || 'Tamil';
 
+  const isSeries = Boolean(
+    type === 'series' ||
+    type === 'tv' ||
+    tmdbData?.mediaType === 'tv' ||
+    (tmdbData?.numberOfSeasons && tmdbData.numberOfSeasons > 0)
+  );
+
+  const isAddonMedia = Boolean(
+    groupid?.startsWith('addon-') ||
+    guid?.startsWith('addon-') ||
+    imdbId ||
+    (groupid && /^tt\d+/i.test(groupid)) ||
+    (guid && /^tt\d+/i.test(guid)) ||
+    (!topicUrl?.startsWith('http') && !groupid?.startsWith('http'))
+  );
+
   // ── Available Languages (Detected from title, torrent items, and TMDB) ──
   const availableLanguages = useMemo(() => {
     if (items && items.length > 0) {
@@ -860,9 +747,11 @@ const TorrentDetails = () => {
   const [selectedModalLanguage, setSelectedModalLanguage] = useState<string>('All');
 
   const languageCounts = useMemo(() => {
-    const counts: Record<string, number> = { All: allItems.length };
+    const validItems = allItems.filter((i) => Boolean(i.infoHash || i.magnetUrl || (i as any).url));
+    const pool = validItems.length > 0 ? validItems : allItems;
+    const counts: Record<string, number> = { All: pool.length };
     availableLanguages.forEach((lang) => {
-      counts[lang] = allItems.filter((item) =>
+      counts[lang] = pool.filter((item) =>
         getItemLanguages(item, title).some((l) => l.toLowerCase() === lang.toLowerCase())
       ).length;
     });
@@ -870,22 +759,12 @@ const TorrentDetails = () => {
   }, [allItems, availableLanguages, title]);
 
   const filteredModalItems = useMemo(() => {
-    let list = allItems;
-    if (selectedModalLanguage !== 'All') {
-      const filtered = allItems.filter((item) => {
-        const langs = getItemLanguages(item, title);
-        return langs.some((l) => l.toLowerCase() === selectedModalLanguage.toLowerCase());
-      });
-      list = filtered.length > 0 ? filtered : allItems;
-    }
-
-    return [...list].sort((a, b) => {
-      const wA = getResolutionWeight(a.title);
-      const wB = getResolutionWeight(b.title);
-      if (wA !== wB) return wB - wA; // Highest resolution first
-      const sA = parseFileSizeInBytes(a.title);
-      const sB = parseFileSizeInBytes(b.title);
-      return sB - sA; // Highest file size first
+    const validItems = allItems.filter((i) => Boolean(i.infoHash || i.magnetUrl || (i as any).url));
+    const pool = validItems.length > 0 ? validItems : allItems;
+    if (selectedModalLanguage === 'All') return pool;
+    return pool.filter((item) => {
+      const langs = getItemLanguages(item, title);
+      return langs.some((l) => l.toLowerCase() === selectedModalLanguage.toLowerCase());
     });
   }, [allItems, selectedModalLanguage, title]);
 
@@ -915,8 +794,22 @@ const TorrentDetails = () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    if (isSeries && seasonEpisodes.length > 0) {
+      handleEpisodePress(seasonEpisodes[0], 'watch');
+      return;
+    }
+    if (isLoadingVariants) {
+      showAlert('Loading Streams', 'Fetching available streaming qualities. Please wait a moment...');
+      return;
+    }
 
-    if (allItems.length > 0 || isLoadingVariants) {
+    if (allItems.length > 0) {
+      const targetLang = preselectedLang || 'Tamil';
+      const best = pickLowestQualityItem(allItems, targetLang, title);
+      if (best) {
+        handleStream(best);
+        return;
+      }
       setSelectedModalLanguage(preselectedLang || 'All');
       setQualityModalMode('watch');
       setQualityModalVisible(true);
@@ -933,8 +826,16 @@ const TorrentDetails = () => {
     if (await isHapticsSupported()) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
+    if (isSeries && seasonEpisodes.length > 0) {
+      handleEpisodePress(seasonEpisodes[0], 'download');
+      return;
+    }
+    if (isLoadingVariants) {
+      showAlert('Loading Downloads', 'Fetching available download qualities. Please wait a moment...');
+      return;
+    }
 
-    if (allItems.length > 0 || isLoadingVariants) {
+    if (allItems.length > 0) {
       setSelectedModalLanguage('All');
       setQualityModalMode('download');
       setQualityModalVisible(true);
@@ -962,13 +863,12 @@ const TorrentDetails = () => {
     : null;
 
   // ── Navigate to player ──
-  const navigateToPlayer = (item: TorrentItem, fileIdx: number, streamUrl?: string) => {
+  const navigateToPlayer = (item: TorrentItem, fileIdx: number) => {
     const streamList = allItems.length > 0 ? allItems : [item];
     const itemIndex = streamList.findIndex(
       (i) => (i.guid && i.guid === item.guid) || (i.infoHash && i.infoHash === item.infoHash)
     );
     const selectedIdx = itemIndex >= 0 ? itemIndex : 0;
-    const safeIdx = typeof fileIdx === 'number' && fileIdx >= 0 ? fileIdx : 0;
 
     const streams = JSON.stringify(
       streamList.map((it) => ({
@@ -977,10 +877,10 @@ const TorrentDetails = () => {
         infoHash: it.infoHash,
         magnet: it.magnetUrl,
         magnetLink: it.magnetUrl,
-        url: (it as any).url || (it.magnetUrl?.startsWith('http') ? it.magnetUrl : (it.guid === item.guid || it.infoHash === item.infoHash ? streamUrl : undefined)),
+        url: (it as any).url || (it.magnetUrl?.startsWith('http') ? it.magnetUrl : undefined),
         fileIdx: (it as any).fileIdx !== undefined && (it as any).fileIdx >= 0
           ? (it as any).fileIdx
-          : ((it.guid === item.guid || it.infoHash === item.infoHash) ? safeIdx : safeIdx),
+          : (it.guid === item.guid || it.infoHash === item.infoHash ? fileIdx : -1),
       }))
     );
 
@@ -1002,15 +902,7 @@ const TorrentDetails = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
 
-    const clean = cleanTitle(item.title);
-    const meta = parseQualityMeta(clean);
-    const qualityLabel = meta.resolution || extractQualityTag(clean) || 'HD';
-
-    const itemKey = item.guid || item.infoHash;
-    setLoadingItem(itemKey);
-    setLaunchingQuality(qualityLabel);
-    setIsLaunchingPlayer(true);
-
+    setLoadingItem(item.guid);
     try {
       // Validate that the item has a streamable link or hash
       if (!item.infoHash && !item.magnetUrl && !((item as any).url)) {
@@ -1028,7 +920,7 @@ const TorrentDetails = () => {
       // If direct URL without infoHash, play immediately
       if (!item.infoHash && ((item as any).url || item.magnetUrl?.startsWith('http'))) {
         setQualityModalVisible(false);
-        navigateToPlayer(item, -1, (item as any).url || item.magnetUrl);
+        navigateToPlayer(item, -1);
         return;
       }
 
@@ -1039,53 +931,50 @@ const TorrentDetails = () => {
         return;
       }
 
-      if (!isSeries) {
-        // For movies on TamilMV, torrents contain 1 main video file (fileIdx = 0).
-        // Navigate to player immediately without blocking on network getTorrentFiles!
-        setQualityModalVisible(false);
-        navigateToPlayer(item, 0);
-        return;
-      }
-
-      // For TV series, check if multiple episodes exist
       const client = await resolveStreamingServerClient();
-      const files = await Promise.race([
-        client.getTorrentFiles(item.infoHash, 2500, item.magnetUrl),
-        new Promise<TorrentFile[]>((r) => setTimeout(() => r([]), 2500)),
-      ]).catch(() => []);
+      const files = await client.getTorrentFiles(item.infoHash, 4000, item.magnetUrl).catch(() => []);
 
       if (files && files.length > 1) {
+        // Filter out non-video files (txt, nfo) and small sample videos (< 100MB)
         const videoFiles = files.filter((f) => {
-          const ext = f.name.split('.').pop()?.toLowerCase();
-          return ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(ext || '');
+          const lowerName = f.name.toLowerCase();
+          const ext = lowerName.split('.').pop() || '';
+          const isVideo = ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(ext);
+          const isSample = lowerName.includes('sample') && f.length < 100 * 1024 * 1024;
+          return isVideo && !isSample;
         });
 
-        if (videoFiles.length > 1) {
-          // Multiple episode files -> show episode picker
+        if (videoFiles.length === 1) {
+          // Exactly 1 main video file
           setQualityModalVisible(false);
-          setIsLaunchingPlayer(false);
+          navigateToPlayer(item, videoFiles[0].id);
+        } else if (videoFiles.length > 1) {
+          // Multiple video files (episodes or multi-part)
+          setQualityModalVisible(false);
           setPendingItem(item);
           setPickerFiles(videoFiles);
           setPickerMode('stream');
           setPickerVisible(true);
-          return;
+        } else {
+          // Fallback to largest file
+          const sorted = [...files].sort((a, b) => b.length - a.length);
+          setQualityModalVisible(false);
+          navigateToPlayer(item, sorted[0]?.id ?? -1);
         }
-
-        const chosenFile = videoFiles.length === 1 ? videoFiles[0] : [...files].sort((a, b) => b.length - a.length)[0];
-        const safeIdx = typeof chosenFile?.id === 'number' && chosenFile.id >= 0 ? chosenFile.id : 0;
+      } else if (files && files.length === 1) {
         setQualityModalVisible(false);
-        navigateToPlayer(item, safeIdx);
+        navigateToPlayer(item, files[0].id);
       } else {
+        // fileIdx -1 lets the streaming server automatically guess the largest movie file
         setQualityModalVisible(false);
-        navigateToPlayer(item, 0);
+        navigateToPlayer(item, -1);
       }
     } catch (e) {
-      console.warn('[TorrentDetails] Error starting stream:', e);
+      console.warn('[TorrentDetails] Could not fetch file list from streaming server:', e);
       setQualityModalVisible(false);
-      navigateToPlayer(item, 0);
+      navigateToPlayer(item, -1);
     } finally {
       setLoadingItem(null);
-      setTimeout(() => setIsLaunchingPlayer(false), 400);
     }
   };
 
@@ -1115,6 +1004,7 @@ const TorrentDetails = () => {
         streamUrl,
         fileLength,
       });
+      return;
     } catch (err: any) {
       showAlert('Download Failed', err?.message || 'Could not start download');
     }
@@ -1125,25 +1015,32 @@ const TorrentDetails = () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
-    const clean = cleanTitle(item.title);
-    const itemKey = item.guid || item.infoHash;
-    setDownloadingGuid(itemKey);
+    let clean = cleanTitle(item.title);
+    setDownloadingGuid(item.guid);
     try {
+      const clean = cleanTitle(item.title);
+      if (!item.infoHash && ((item as any).url || item.magnetUrl?.startsWith('http'))) {
+        setQualityModalVisible(false);
+        await executeDownload(item, -1);
+        return;
+      }
+
+      if ((item as any).fileIdx !== undefined && (item as any).fileIdx >= 0) {
+        setQualityModalVisible(false);
+        await executeDownload(item, (item as any).fileIdx);
+        return;
+      }
+
       const client = await resolveStreamingServerClient();
-      const files = await Promise.race([
-        client.getTorrentFiles(item.infoHash, 2500, item.magnetUrl),
-        new Promise<TorrentFile[]>((r) => setTimeout(() => r([]), 2500)),
-      ]).catch(() => []);
+      const files = await client.getTorrentFiles(item.infoHash, 4000, item.magnetUrl).catch(() => []);
 
       if (files && files.length > 1) {
+        setPendingItem(item);
         const videoFiles = files.filter((f) => ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(f.name.split('.').pop()?.toLowerCase() || ''));
         if (videoFiles.length === 1) {
-          setQualityModalVisible(false);
           await executeDownload(item, videoFiles[0].id, videoFiles[0].name, videoFiles[0].length);
           return;
         }
-        setQualityModalVisible(false);
-        setPendingItem(item);
         setPickerFiles(videoFiles.length > 0 ? videoFiles : files);
         setPickerMode('download');
         setPickerVisible(true);
@@ -1151,36 +1048,126 @@ const TorrentDetails = () => {
         const fileIdx = files && files.length === 1 ? files[0].id : -1;
         const fileName = files && files.length === 1 ? files[0].name : `${clean}.mkv`;
         const fileLength = files && files.length === 1 ? files[0].length : undefined;
-        setQualityModalVisible(false);
         await executeDownload(item, fileIdx, fileName, fileLength);
       }
     } catch {
-      setQualityModalVisible(false);
       await executeDownload(item, -1, `${clean}.mkv`);
     } finally {
       setDownloadingGuid(null);
     }
   };
 
-  const handleFilePick = async (file: TorrentFile) => {
+  const handleFilePick = (file: TorrentFile) => {
     setPickerVisible(false);
     if (!pendingItem) return;
-    const safeIdx = typeof file.id === 'number' && file.id >= 0 ? file.id : 0;
     if (pickerMode === 'download') {
-      executeDownload(pendingItem, safeIdx, file.name, file.length);
+      executeDownload(pendingItem, file.id, file.name, file.length);
     } else {
-      try {
-        const client = await resolveStreamingServerClient();
-        const streamUrl = await client.getStreamingURL(pendingItem.infoHash, safeIdx);
-        navigateToPlayer(pendingItem, safeIdx, streamUrl);
-      } catch {
-        navigateToPlayer(pendingItem, safeIdx);
-      }
+      navigateToPlayer(pendingItem, file.id);
     }
   };
 
-  // Movie backdrop image or poster fallback
-  const backdropUri = tmdbData?.backdropUrl || poster;
+
+
+  // Load episodes when media is a TV series and TMDB data or season changes
+  useEffect(() => {
+    if (!isSeries || !tmdbData?.id) return;
+    let isMounted = true;
+    setIsLoadingEpisodes(true);
+
+    tmdbService
+      .getTvSeasonEpisodes(tmdbData.id, selectedSeason)
+      .then((eps) => {
+        if (isMounted) {
+          setSeasonEpisodes(eps);
+          setIsLoadingEpisodes(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('[TorrentDetails] Error fetching episodes:', err);
+        if (isMounted) setIsLoadingEpisodes(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isSeries, tmdbData?.id, selectedSeason]);
+
+  // Handle Episode selection: fetch addon streams for that specific episode
+  const handleEpisodePress = async (ep: TmdbEpisode, mode: 'watch' | 'download' = 'watch') => {
+    if (await isHapticsSupported()) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setLoadingEpisodeNumber(ep.episodeNumber);
+    try {
+      const mediaId =
+        imdbId ||
+        (guid && /^tt\d+/i.test(guid) ? guid : null) ||
+        (groupid && /^tt\d+/i.test(groupid) ? groupid : null) ||
+        tmdbData?.imdbId;
+
+      if (!mediaId) {
+        showAlert('Media Not Identified', 'Could not locate IMDb ID for this series to query addon streams.');
+        return;
+      }
+
+      // Query addon streams for this specific episode: e.g. tt4574334:1:1
+      const epId = `${mediaId}:${selectedSeason}:${ep.episodeNumber}`;
+      const streams = await addonService.fetchStreamsForMedia('series', epId);
+
+      if (streams && streams.length > 0) {
+        const converted: TorrentItem[] = streams.map((st, idx) => {
+          const streamName = st.name ? `[${st.name.replace(/\n/g, ' ')}] ` : '';
+          const displayTitle = st.title
+            ? `${streamName}${st.title.replace(/\n/g, ' • ')}`
+            : (st.name || 'Stream');
+          const trackers = [
+            ...(st.sources || []).filter((s: string) => s.startsWith('tracker:')).map((s: string) => s.replace(/^tracker:/, '')),
+            ...DEFAULT_TRACKERS,
+          ];
+          const trackerParams = trackers.map((t) => `tr=${encodeURIComponent(t)}`).join('&');
+          const magnetUrl = st.infoHash
+            ? `magnet:?xt=urn:btih:${st.infoHash}&${trackerParams}`
+            : (st.url || '');
+          return {
+            name: displayTitle,
+            year: paramYear || null,
+            language: 'Multi',
+            groupid: `addon-${st.addonName || 'stream'}`,
+            guid: `addon-${mediaId}-s${selectedSeason}e${ep.episodeNumber}-${idx}`,
+            poster: ep.stillUrl || poster || null,
+            title: displayTitle,
+            magnetUrl,
+            infoHash: st.infoHash || '',
+            publishDate: ep.airDate || publishDate || '',
+            url: st.url,
+            fileIdx: (st.fileIdx !== undefined && st.fileIdx >= 0) ? st.fileIdx : 0,
+          } as TorrentItem;
+        });
+
+        setItems(converted);
+        if (mode === 'watch') {
+          const best = pickLowestQualityItem(converted, 'Tamil', title);
+          if (best) {
+            handleStream(best);
+            return;
+          }
+        }
+        setSelectedModalLanguage('All');
+        setQualityModalMode(mode);
+        setQualityModalVisible(true);
+      } else {
+        showAlert('No Streams Found', `No active streams found for Season ${selectedSeason} Episode ${ep.episodeNumber}. Please check your installed addons or try another episode.`);
+      }
+    } catch (e) {
+      console.warn('[TorrentDetails] Error loading episode streams:', e);
+      setQualityModalVisible(true);
+    } finally {
+      setLoadingEpisodeNumber(null);
+    }
+  };
+
+  // Movie backdrop image or poster fallback (declared above)
 
   return (
     <>
@@ -1225,7 +1212,7 @@ const TorrentDetails = () => {
           </TouchableOpacity>
 
           {/* Circular Web Page Button (top right, near My List - hidden for addon media) */}
-          {!isAddonMedia && topicUrl ? (
+          {!isAddonMedia && topicUrl?.startsWith('http') ? (
             <TouchableOpacity
               style={[
                 styles.webPageButton,
@@ -1358,9 +1345,16 @@ const TorrentDetails = () => {
             style={styles.watchNowBtn}
             onPress={() => handleWatchNow()}
             activeOpacity={0.8}
+            disabled={isLoadingVariants || Boolean(loadingItem)}
           >
-            <Ionicons name="play" size={20} color="#000000" style={{ marginRight: 8 }} />
-            <Text style={styles.watchNowBtnText}>Play</Text>
+            {isLoadingVariants || loadingItem ? (
+              <ActivityIndicator size="small" color="#000000" style={{ marginRight: 8 }} />
+            ) : (
+              <Ionicons name="play" size={20} color="#000000" style={{ marginRight: 8 }} />
+            )}
+            <Text style={styles.watchNowBtnText}>
+              {isLoadingVariants ? 'Loading...' : loadingItem ? 'Starting...' : 'Play'}
+            </Text>
           </TouchableOpacity>
 
           {/* Right: Circular Download Button */}
@@ -1376,6 +1370,7 @@ const TorrentDetails = () => {
             ]}
             onPress={handleDownloadPress}
             activeOpacity={0.7}
+            disabled={isLoadingVariants}
           >
             {hasActiveDownload ? (
               <Ionicons name="arrow-down" size={22} color={theme.primary} />
@@ -1390,13 +1385,14 @@ const TorrentDetails = () => {
         {/* ── Overview Description Paragraph ── */}
         {tmdbData?.overview ? (
           <View style={styles.overviewContainer}>
+            <Text style={styles.sectionTitle}>Overview</Text>
             <Text
               style={styles.overviewText}
               numberOfLines={isOverviewExpanded ? undefined : 3}
             >
               {tmdbData.overview}
             </Text>
-            {tmdbData.overview.length > 120 && (
+                        {tmdbData.overview.length > 120 && (
               <TouchableOpacity
                 onPress={() => setIsOverviewExpanded(!isOverviewExpanded)}
                 style={styles.moreButton}
@@ -1451,7 +1447,7 @@ const TorrentDetails = () => {
                     >
                       <View style={styles.episodeThumbnailWrap}>
                         <Image
-                          source={{ uri: ep.stillUrl || (ep.stillPath ? `https://image.tmdb.org/t/p/w500${ep.stillPath}` : undefined) || backdropUri || poster }}
+                          source={{ uri: ep.stillUrl || backdropUri || poster }}
                           style={StyleSheet.absoluteFill}
                           resizeMode="cover"
                         />
@@ -1484,10 +1480,39 @@ const TorrentDetails = () => {
           </View>
         )}
 
-        {/* ── Section: Cast & Crew ── */}
+                {/* ── Section: Trailer (Positioned BEFORE Cast) ── */}
+        {(tmdbData?.trailerKey || backdropUri) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Trailer</Text>
+            <TouchableOpacity
+              style={styles.trailerCard}
+              onPress={handleTrailerPress}
+              activeOpacity={0.8}
+            >
+              <Image
+                source={{
+                  uri: trailerThumbnailUri || backdropUri || poster || undefined,
+                  cache: 'force-cache' as any,
+                }}
+                style={styles.trailerThumbnail}
+                resizeMode="cover"
+                onError={handleTrailerThumbError}
+              />
+              <LinearGradient
+                colors={['transparent', 'rgba(0, 0, 0, 0.55)']}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={styles.trailerPlayOverlay}>
+                <Ionicons name="play" size={26} color="#ffffff" style={{ marginLeft: 3 }} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── Section: Cast ── */}
         {tmdbData?.cast && tmdbData.cast.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Cast & Crew</Text>
+            <Text style={styles.sectionTitle}>Cast</Text>
             <FlatList
               data={tmdbData.cast}
               keyExtractor={(item) => `cast-${item.id}`}
@@ -1645,11 +1670,8 @@ const TorrentDetails = () => {
                     {qualityModalMode === 'watch' ? 'Choose Quality to Play' : 'Choose Quality to Download'}
                   </Text>
                   <Text style={styles.modalSubtitle}>
-                    {isLoadingVariants && allItems.length === 0
-                      ? 'Fetching streaming qualities...'
-                      : `${filteredModalItems.length} ${filteredModalItems.length === 1 ? 'quality' : 'qualities'} available${isLoadingVariants ? ' (loading more...)' : ''} • ${
-                          qualityModalMode === 'watch' ? 'Tap to start playback' : 'Tap to start download'
-                        }`}
+                    {filteredModalItems.length} {filteredModalItems.length === 1 ? 'quality' : 'qualities'} available •{' '}
+                    {qualityModalMode === 'watch' ? 'Tap to start playback' : 'Tap to start download'}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -1671,67 +1693,59 @@ const TorrentDetails = () => {
                   style={styles.modalFilterScrollView}
                   contentContainerStyle={styles.modalFilterScroll}
                 >
-                {['All', ...availableLanguages].map((lang) => {
-                  const isSelected = selectedModalLanguage === lang;
-                  const count = languageCounts[lang] ?? 0;
-                  return (
-                    <TouchableOpacity
-                      key={lang}
-                      style={[
-                        styles.modalFilterChip,
-                        isSelected && [
-                          styles.modalFilterChipActive,
-                          { backgroundColor: theme.primary, borderColor: theme.primary },
-                        ],
-                      ]}
-                      onPress={() => setSelectedModalLanguage(lang)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons
-                        name={lang === 'All' ? 'layers-outline' : 'volume-medium'}
-                        size={13}
-                        color={isSelected ? '#000000' : theme.primary}
-                        style={{ marginRight: 2 }}
-                      />
-                      <Text
+                  {['All', ...availableLanguages].map((lang) => {
+                    const isSelected = selectedModalLanguage === lang;
+                    const count = languageCounts[lang] ?? 0;
+                    return (
+                      <TouchableOpacity
+                        key={lang}
                         style={[
-                          styles.modalFilterChipText,
-                          isSelected && styles.modalFilterChipTextActive,
+                          styles.modalFilterChip,
+                          isSelected && [
+                            styles.modalFilterChipActive,
+                            { backgroundColor: theme.primary, borderColor: theme.primary },
+                          ],
                         ]}
+                        onPress={() => setSelectedModalLanguage(lang)}
+                        activeOpacity={0.7}
                       >
-                        {lang}
-                      </Text>
-                      <View
-                        style={[
-                          styles.modalFilterChipCount,
-                          isSelected && styles.modalFilterChipCountActive,
-                        ]}
-                      >
+                        <Ionicons
+                          name={lang === 'All' ? 'layers-outline' : 'volume-medium'}
+                          size={13}
+                          color={isSelected ? '#000000' : theme.primary}
+                          style={{ marginRight: 2 }}
+                        />
                         <Text
                           style={[
-                            styles.modalFilterChipCountText,
-                            isSelected && { color: '#000000' },
+                            styles.modalFilterChipText,
+                            isSelected && styles.modalFilterChipTextActive,
                           ]}
                         >
-                          {count}
+                          {lang}
                         </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+                        <View
+                          style={[
+                            styles.modalFilterChipCount,
+                            isSelected && styles.modalFilterChipCountActive,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.modalFilterChipCountText,
+                              isSelected && { color: '#000000' },
+                            ]}
+                          >
+                            {count}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
               </View>
             )}
 
-            {isLoadingVariants && allItems.length === 0 ? (
-              <View style={styles.emptyFilterContainer}>
-                <ActivityIndicator size="large" color={theme.primary} style={{ marginBottom: 16 }} />
-                <Text style={styles.emptyFilterTitle}>Fetching Available Qualities...</Text>
-                <Text style={styles.emptyFilterSubtitle}>
-                  Loading all resolutions and audio streams from TamilMV.
-                </Text>
-              </View>
-            ) : filteredModalItems.length === 0 ? (
+            {filteredModalItems.length === 0 ? (
               <View style={styles.emptyFilterContainer}>
                 <Ionicons name="filter-outline" size={32} color="#8E8E93" />
                 <Text style={styles.emptyFilterTitle}>No qualities found for {selectedModalLanguage}</Text>
@@ -1747,6 +1761,7 @@ const TorrentDetails = () => {
               </View>
             ) : (
             <FlatList
+              style={styles.qualityFlatList}
               data={filteredModalItems}
               keyExtractor={(item, index) => item.guid || `${item.infoHash}-${index}`}
               showsVerticalScrollIndicator={false}
@@ -1756,9 +1771,8 @@ const TorrentDetails = () => {
                 const qualityTag = extractQualityTag(clean);
                 const meta = parseQualityMeta(clean);
                 const isLast = index === allItems.length - 1;
-                const itemKey = item.guid || item.infoHash;
-                const isLoadingStream = loadingItem === itemKey;
-                const isStartingDownload = downloadingGuid === itemKey;
+                const isLoadingStream = loadingItem === item.guid;
+                const isStartingDownload = downloadingGuid === item.guid;
                 const downloadInfo = activeDownloadsMap[item.infoHash];
                 const isItemCompleted = downloadInfo?.status === 'completed';
                 const isItemDownloading = downloadInfo?.status === 'downloading';
@@ -1775,22 +1789,14 @@ const TorrentDetails = () => {
                     ]}
                     onPress={() => {
                       if (isWatchMode) {
+                        setQualityModalVisible(false);
                         if (isItemCompleted && downloadInfo?.fileUri) {
-                          setQualityModalVisible(false);
-                          externalPlayerService.promptPlayerSelection({
-                            fileUri: downloadInfo.fileUri,
-                            title: clean,
-                            poster: poster ?? tmdbData?.posterUrl ?? '',
-                            fileLength: downloadInfo.totalBytes,
-                            onPlayInternal: () => {
-                              router.push({
-                                pathname: '/stream/player' as any,
-                                params: {
-                                  videoUrl: downloadInfo.fileUri,
-                                  title: clean,
-                                  poster: poster ?? tmdbData?.posterUrl ?? '',
-                                },
-                              });
+                          router.push({
+                            pathname: '/stream/player' as any,
+                            params: {
+                              videoUrl: downloadInfo.fileUri,
+                              title: clean,
+                              poster: poster ?? tmdbData?.posterUrl ?? '',
                             },
                           });
                         } else {
@@ -1821,6 +1827,7 @@ const TorrentDetails = () => {
                         } else if (isItemPaused) {
                           downloadService.resumeDownload(downloadInfo.id);
                         } else {
+                          setQualityModalVisible(false);
                           handleDownload(item);
                         }
                       }
@@ -2026,22 +2033,6 @@ const TorrentDetails = () => {
         </Pressable>
       </Modal>
 
-      {/* ── Stream Launching Spinner Overlay ── */}
-      {isLaunchingPlayer && (
-        <Modal transparent animationType="fade" visible={isLaunchingPlayer}>
-          <View style={styles.launchingPlayerOverlay}>
-            <View style={styles.launchingPlayerCard}>
-              <ActivityIndicator size="large" color={theme.primary} />
-              <Text style={styles.launchingPlayerTitle}>
-                {launchingQuality ? `Starting ${launchingQuality}...` : 'Starting Stream...'}
-              </Text>
-              <Text style={styles.launchingPlayerSubtitle}>
-                Launching video player...
-              </Text>
-            </View>
-          </View>
-        </Modal>
-      )}
 
     </>
   );
@@ -2107,7 +2098,7 @@ const styles = StyleSheet.create({
 
   /* Title */
   titleSection: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     marginTop: -20,
     marginBottom: 16,
     alignItems: 'center',
@@ -2128,7 +2119,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     marginBottom: 20,
   },
   circularActionBtn: {
@@ -2172,7 +2163,7 @@ const styles = StyleSheet.create({
 
   /* Overview Paragraph */
   overviewContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     marginBottom: 24,
   },
   overviewText: {
@@ -2195,7 +2186,7 @@ const styles = StyleSheet.create({
   /* Sections */
   section: {
     marginTop: 20,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   sectionTitle: {
     fontSize: 18,
@@ -2216,10 +2207,43 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  /* Trailer Section */
+  trailerCard: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#1c1c1e',
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  trailerThumbnail: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
+  trailerPlayOverlay: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   /* Cast & Crew */
   castListContent: {
     gap: 16,
-    paddingRight: 20,
+    paddingRight: 16,
   },
   castCard: {
     width: 86,
@@ -2473,16 +2497,153 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
 
+  /* Episodes Section (Series Season-wise thumbnails) */
+  episodesSection: {
+    marginBottom: 26,
+    paddingLeft: 16,
+  },
+  episodesHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 16,
+    marginBottom: 14,
+  },
+  episodesCountTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.2,
+  },
+  seasonPickerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  seasonPickerPillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  episodesLoadingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 20,
+  },
+  episodesLoadingText: {
+    fontSize: 13,
+    color: '#8E8E93',
+  },
+  episodesListContent: {
+    gap: 14,
+    paddingRight: 16,
+  },
+  episodeCard: {
+    width: 250,
+  },
+  episodeThumbnailWrap: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 12,
+    backgroundColor: '#252528',
+    overflow: 'hidden',
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  episodePlayOverlay: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  episodeCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 2,
+  },
+  episodeCardAirDate: {
+    fontSize: 11,
+    color: '#8E8E93',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  episodeCardOverview: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.65)',
+    lineHeight: 16,
+  },
+  noEpisodesText: {
+    fontSize: 13,
+    color: '#8E8E93',
+    paddingVertical: 10,
+  },
+
+  /* Season Modal */
+  seasonModalSheet: {
+    backgroundColor: '#1c1c1e',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 34,
+    maxHeight: '60%',
+  },
+  seasonModalHeader: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  seasonScroll: {
+    maxHeight: 320,
+  },
+  seasonOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  seasonOptionRowSelected: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  seasonOptionText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  seasonOptionSub: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+
   /* Choose Quality Modal */
   qualityModalSheet: {
     backgroundColor: '#1c1c1e',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '80%',
+    height: '82%',
+    maxHeight: '85%',
     ...Platform.select({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.4, shadowRadius: 20 },
       android: { elevation: 20 },
     }),
+  },
+  qualityFlatList: {
+    flex: 1,
+    width: '100%',
   },
   qualityModalHeader: {
     alignItems: 'center',
@@ -2753,6 +2914,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 2,
+    height: 28,
   },
   languagesHeaderLabel: {
     fontSize: 11,
@@ -2765,8 +2927,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 16,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderColor: 'rgba(255, 255, 255, 0.16)',
@@ -2776,138 +2938,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#ffffff',
     letterSpacing: 0.3,
-  },
-
-  /* Episodes Section (Series Season-wise thumbnails) */
-  episodesSection: {
-    marginBottom: 26,
-    paddingLeft: 20,
-  },
-  episodesHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingRight: 20,
-    marginBottom: 14,
-  },
-  episodesCountTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.2,
-  },
-  seasonPickerPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  seasonPickerPillText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  episodesLoadingWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 20,
-  },
-  episodesLoadingText: {
-    fontSize: 13,
-    color: '#8E8E93',
-  },
-  episodesListContent: {
-    gap: 14,
-    paddingRight: 20,
-  },
-  episodeCard: {
-    width: 250,
-  },
-  episodeThumbnailWrap: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    borderRadius: 12,
-    backgroundColor: '#252528',
-    overflow: 'hidden',
-    marginBottom: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  episodePlayOverlay: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  episodeCardTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 2,
-  },
-  episodeCardAirDate: {
-    fontSize: 11,
-    color: '#8E8E93',
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  episodeCardOverview: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.65)',
-    lineHeight: 16,
-  },
-  noEpisodesText: {
-    fontSize: 13,
-    color: '#8E8E93',
-    paddingVertical: 10,
-  },
-
-  /* Season Modal */
-  seasonModalSheet: {
-    backgroundColor: '#1c1c1e',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 34,
-    maxHeight: '60%',
-  },
-  seasonModalHeader: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  seasonScroll: {
-    maxHeight: 320,
-  },
-  seasonOptionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  seasonOptionRowSelected: {
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-  },
-  seasonOptionText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  seasonOptionSub: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 2,
   },
 
   /* Modal Language Filter Chips */
@@ -2976,10 +3006,6 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: 'center',
   },
-  modalFilterChipCountTextActive: {
-    color: '#000000',
-    fontWeight: '800',
-  },
   emptyFilterContainer: {
     paddingVertical: 36,
     paddingHorizontal: 24,
@@ -3010,42 +3036,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#000000',
-  },
-  launchingPlayerOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.78)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  launchingPlayerCard: {
-    backgroundColor: '#18181c',
-    borderRadius: 20,
-    paddingHorizontal: 28,
-    paddingVertical: 24,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 16,
-    elevation: 12,
-    maxWidth: 320,
-    width: '100%',
-  },
-  launchingPlayerTitle: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 16,
-    textAlign: 'center',
-  },
-  launchingPlayerSubtitle: {
-    color: 'rgba(255, 255, 255, 0.65)',
-    fontSize: 13,
-    marginTop: 6,
-    textAlign: 'center',
   },
 });
 

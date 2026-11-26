@@ -136,6 +136,15 @@ export function cleanMovieQuery(raw: string): { query: string; year?: string } {
 
 // ── Date Formatting: "15 July 2026" ───────────────────────────────────────────
 
+export function formatShortDate(dateStr?: string): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const day = d.getDate();
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[d.getMonth()]} ${day}, ${d.getFullYear()}`;
+}
+
 export function formatReleaseDate(dateStr?: string): string {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -152,13 +161,54 @@ export function formatReleaseDate(dateStr?: string): string {
 
 // ── Service Class ─────────────────────────────────────────────────────────────
 
+const TMDB_POSTER_DISK_CACHE_KEY = 'vstream_tmdb_posters_disk_v1';
+
 class TmdbService {
   private inMemoryCache = new Map<string, TmdbDetails>();
   private posterCache = new Map<string, string | null>();
+  private savePosterTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.loadPersistedPosters();
+  }
+
+  private loadPersistedPosters(): void {
+    try {
+      const raw = storageService.getItem(TMDB_POSTER_DISK_CACHE_KEY as any);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === 'object' && parsed !== null) {
+          for (const [k, v] of Object.entries(parsed)) {
+            if (typeof v === 'string' || v === null) {
+              this.posterCache.set(k, v);
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  private persistPostersDebounced(): void {
+    if (this.savePosterTimer) return;
+    this.savePosterTimer = setTimeout(() => {
+      this.savePosterTimer = null;
+      try {
+        const obj: Record<string, string | null> = {};
+        const entries = Array.from(this.posterCache.entries()).slice(-600);
+        for (const [k, v] of entries) {
+          obj[k] = v;
+        }
+        storageService.setItem(TMDB_POSTER_DISK_CACHE_KEY as any, JSON.stringify(obj));
+      } catch {}
+    }, 2500);
+  }
 
   clearCache(): void {
     this.inMemoryCache.clear();
     this.posterCache.clear();
+    try {
+      storageService.removeItem(TMDB_POSTER_DISK_CACHE_KEY as any);
+    } catch {}
   }
 
   /**
@@ -203,6 +253,7 @@ class TmdbService {
         if (best?.poster_path) {
           const posterUrl = `${TMDB_IMAGE_BASE}/w342${best.poster_path}`;
           this.posterCache.set(cacheKey, posterUrl);
+          this.persistPostersDebounced();
           return posterUrl;
         }
       }
@@ -398,7 +449,7 @@ class TmdbService {
         return null;
       }
 
-      // 2. Fetch full details with append_to_response=credits,videos,recommendations,similar,release_dates,content_ratings,external_ids
+      // 2. Fetch full details with append_to_response=credits,videos,recommendations,similar
       const detailEndpoint = `${TMDB_BASE_URL}/${matchedMediaType}/${matchedId}?api_key=${apiKey}&append_to_response=credits,videos,recommendations,similar,release_dates,content_ratings,external_ids`;
       const detailRes = await fetch(detailEndpoint);
       if (!detailRes.ok) {
@@ -677,7 +728,7 @@ class TmdbService {
         overview: ep.overview || '',
         stillPath: ep.still_path,
         stillUrl: ep.still_path ? `${TMDB_IMAGE_BASE}/w500${ep.still_path}` : null,
-        airDate: ep.air_date ? formatReleaseDate(ep.air_date) : '',
+        airDate: ep.air_date ? formatShortDate(ep.air_date) : '',
         voteAverage: ep.vote_average || 0,
         runtime: ep.runtime,
       }));
