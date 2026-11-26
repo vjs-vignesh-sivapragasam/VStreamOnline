@@ -249,6 +249,69 @@ function parseQualityMeta(title: string) {
   };
 }
 
+function getQualityScore(item: TorrentItem): { rank: number; sizeMB: number } {
+  const text = `${item.title || ''} ${item.name || ''}`.toLowerCase();
+  const meta = parseQualityMeta(item.title || item.name || '');
+
+  let rank = 2; // Default 720p / HD
+  if (meta.is4K || /\b(4k|2160p|uhd)\b/i.test(text)) {
+    rank = 4;
+  } else if (meta.is1080p || /\b(1080p|fhd)\b/i.test(text)) {
+    rank = 3;
+  } else if (meta.is720p || /\b(720p|hd)\b/i.test(text)) {
+    rank = 2;
+  } else if (/\b(480p|360p|240p|sd|predvd|cam|dvdrip|tc|ts)\b/i.test(text)) {
+    rank = 1; // Lowest quality
+  }
+
+  // Parse file size in MB
+  let sizeMB = 1000; // default 1GB
+  if (meta.fileSize) {
+    const m = meta.fileSize.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
+    if (m) {
+      const val = parseFloat(m[1]);
+      sizeMB = m[2].toUpperCase() === 'GB' ? val * 1024 : val;
+    }
+  } else {
+    const sizeMatch = text.match(/(\d+(?:\.\d+)?)\s*(gb|mb)/i);
+    if (sizeMatch) {
+      const val = parseFloat(sizeMatch[1]);
+      sizeMB = sizeMatch[2].toUpperCase() === 'GB' ? val * 1024 : val;
+    }
+  }
+
+  return { rank, sizeMB };
+}
+
+function pickLowestQualityItem(
+  items: TorrentItem[],
+  targetLang: string = 'Tamil',
+  movieTitle?: string
+): TorrentItem | null {
+  const validItems = items.filter((i) => Boolean(i.infoHash || i.magnetUrl || (i as any).url));
+  if (validItems.length === 0) return items[0] || null;
+
+  // 1. Filter for items matching targetLang (default 'Tamil')
+  const langMatches = validItems.filter((item) => {
+    const langs = getItemLanguages(item, movieTitle);
+    return langs.some((l) => l.toLowerCase() === targetLang.toLowerCase());
+  });
+
+  const candidatePool = langMatches.length > 0 ? [...langMatches] : [...validItems];
+
+  // 2. Sort candidatePool in ASCENDING order of quality rank and file size
+  candidatePool.sort((a, b) => {
+    const scoreA = getQualityScore(a);
+    const scoreB = getQualityScore(b);
+    if (scoreA.rank !== scoreB.rank) {
+      return scoreA.rank - scoreB.rank; // Lowest rank first (1 -> 2 -> 3 -> 4)
+    }
+    return scoreA.sizeMB - scoreB.sizeMB; // Smallest file size first
+  });
+
+  return candidatePool[0] || null;
+}
+
 const LANGUAGE_NAMES: Record<Language, string> = {
   tamil: 'Tamil',
   english: 'English',
@@ -741,6 +804,12 @@ const TorrentDetails = () => {
     }
 
     if (allItems.length > 0) {
+      const targetLang = preselectedLang || 'Tamil';
+      const best = pickLowestQualityItem(allItems, targetLang, title);
+      if (best) {
+        handleStream(best);
+        return;
+      }
       setSelectedModalLanguage(preselectedLang || 'All');
       setQualityModalMode('watch');
       setQualityModalVisible(true);
@@ -866,10 +935,13 @@ const TorrentDetails = () => {
       const files = await client.getTorrentFiles(item.infoHash, 4000, item.magnetUrl).catch(() => []);
 
       if (files && files.length > 1) {
-        // Filter out non-video files (txt, nfo, sample)
+        // Filter out non-video files (txt, nfo) and small sample videos (< 100MB)
         const videoFiles = files.filter((f) => {
-          const ext = f.name.split('.').pop()?.toLowerCase();
-          return ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(ext || '');
+          const lowerName = f.name.toLowerCase();
+          const ext = lowerName.split('.').pop() || '';
+          const isVideo = ['mkv', 'mp4', 'avi', 'mov', 'ts', 'webm', 'm4v'].includes(ext);
+          const isSample = lowerName.includes('sample') && f.length < 100 * 1024 * 1024;
+          return isVideo && !isSample;
         });
 
         if (videoFiles.length === 1) {
@@ -1074,6 +1146,13 @@ const TorrentDetails = () => {
         });
 
         setItems(converted);
+        if (mode === 'watch') {
+          const best = pickLowestQualityItem(converted, 'Tamil', title);
+          if (best) {
+            handleStream(best);
+            return;
+          }
+        }
         setSelectedModalLanguage('All');
         setQualityModalMode(mode);
         setQualityModalVisible(true);
@@ -1266,15 +1345,15 @@ const TorrentDetails = () => {
             style={styles.watchNowBtn}
             onPress={() => handleWatchNow()}
             activeOpacity={0.8}
-            disabled={isLoadingVariants}
+            disabled={isLoadingVariants || Boolean(loadingItem)}
           >
-            {isLoadingVariants ? (
-              <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: 8 }} />
+            {isLoadingVariants || loadingItem ? (
+              <ActivityIndicator size="small" color="#000000" style={{ marginRight: 8 }} />
             ) : (
               <Ionicons name="play" size={20} color="#000000" style={{ marginRight: 8 }} />
             )}
             <Text style={styles.watchNowBtnText}>
-              {isLoadingVariants ? 'Loading...' : 'Play'}
+              {isLoadingVariants ? 'Loading...' : loadingItem ? 'Starting...' : 'Play'}
             </Text>
           </TouchableOpacity>
 
