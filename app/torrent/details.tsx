@@ -2131,6 +2131,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
+    flexShrink: 0,
   },
   circularActionBtnActive: {
     backgroundColor: 'rgba(83, 90, 255, 0.2)',
@@ -2141,11 +2142,13 @@ const styles = StyleSheet.create({
     borderColor: '#00e676',
   },
   watchNowBtn: {
+    flex: 1,
+    minWidth: 160,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     height: 50,
     borderRadius: 25,
     shadowColor: '#000',
