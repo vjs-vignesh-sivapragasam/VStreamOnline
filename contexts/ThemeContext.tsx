@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { StorageKeys, storageService } from '@/utils/StorageService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppTheme, THEMES, ThemeId, DEFAULT_THEME_ID, getTheme } from '@/constants/Colors';
@@ -14,12 +14,28 @@ export interface ThemeContextType {
   isCurrent: (id: ThemeId) => boolean;
 }
 
+const fallbackTheme: AppTheme = (THEMES && THEMES[DEFAULT_THEME_ID]) || {
+  id: 'yellow',
+  name: 'Yellow',
+  displayName: 'Yellow',
+  subtitle: 'Vibrant Amber',
+  primary: '#FFB800',
+  primaryLight: '#FFCA3A',
+  primaryDark: '#D99B00',
+  cardBorder: 'rgba(255, 184, 0, 0.25)',
+  iconBg: 'rgba(255, 184, 0, 0.15)',
+  indicator: 'rgba(255, 184, 0, 0.35)',
+  ripple: 'rgba(255, 184, 0, 0.2)',
+  glow: 'rgba(255, 184, 0, 0.4)',
+  gradientColors: ['#000000', '#1a1300', '#261b00'],
+};
+
 const ThemeContext = createContext<ThemeContextType>({
   themeId: DEFAULT_THEME_ID,
-  theme: THEMES[DEFAULT_THEME_ID],
+  theme: fallbackTheme,
   setThemeId: async () => {},
   resetToDefault: async () => {},
-  availableThemes: Object.values(THEMES),
+  availableThemes: THEMES ? Object.values(THEMES) : [fallbackTheme],
   isCurrent: (id) => id === DEFAULT_THEME_ID,
 });
 
@@ -85,20 +101,24 @@ export const AppThemeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await setThemeId(DEFAULT_THEME_ID);
   }, [setThemeId]);
 
-  const theme = getTheme(themeId);
+  const theme = useMemo(() => getTheme(themeId) || fallbackTheme, [themeId]);
   const isCurrent = useCallback((id: ThemeId) => id === themeId, [themeId]);
+  const availableThemes = useMemo(() => (THEMES ? Object.values(THEMES) : [fallbackTheme]), []);
+
+  const contextValue = useMemo(
+    () => ({
+      themeId,
+      theme,
+      setThemeId,
+      resetToDefault,
+      availableThemes,
+      isCurrent,
+    }),
+    [themeId, theme, setThemeId, resetToDefault, availableThemes, isCurrent]
+  );
 
   return (
-    <ThemeContext.Provider
-      value={{
-        themeId,
-        theme,
-        setThemeId,
-        resetToDefault,
-        availableThemes: Object.values(THEMES),
-        isCurrent,
-      }}
-    >
+    <ThemeContext.Provider value={contextValue}>
       {children}
     </ThemeContext.Provider>
   );
