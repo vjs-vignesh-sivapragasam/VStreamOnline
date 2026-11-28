@@ -68,16 +68,6 @@ export function startEmbeddedNodeServer(): boolean {
       return false;
     }
 
-    // In dev mode on Android where legacy APK might not have the wrapper/server patches compiled into APK assets,
-    // prevent calling nodejs.start to avoid unhandled native exit.
-    if (__DEV__ && Platform.OS === 'android') {
-      console.log(
-        '[StremioServerManager] Embedded node server startup skipped in dev mode on Android to prevent process exit. ' +
-        'Run "npm run server" on your computer for dev mode streaming.'
-      );
-      return false;
-    }
-
     console.log('[StremioServerManager] 3. Requiring nodejs-mobile-react-native module...');
     const nodejs = require('nodejs-mobile-react-native');
     console.log('[StremioServerManager] 4. Calling nodejs.start("wrapper.js")...');
