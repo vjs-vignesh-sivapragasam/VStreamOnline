@@ -30,7 +30,6 @@ import {
     ExtendedMediaPlayerProps
 } from "../coreplayer";
 import { View, Text } from "../Themed";
-import { GlassView } from 'expo-glass-effect';
 import VLCPlayerView, { isVLCPlayerAvailable } from './VLCPlayerView';
 
 const RNResizeMode = { COVER: 'cover', CONTAIN: 'contain', STRETCH: 'stretch' };
@@ -606,7 +605,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                             <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
                         </View>
 
-                        <GlassView glassEffectStyle="clear" style={styles.topRightControls}>
+                        <View style={styles.topRightControls}>
                             {streams.length > 1 && (
                                 <MenuWrapper
                                     style={{ zIndex: 1000 }}
@@ -691,7 +690,7 @@ export const MediaPlayer: React.FC<ExtendedMediaPlayerProps> = ({
                                     <MaterialIcons name="settings" size={24} color="white" />
                                 </TouchableOpacity>
                             </MenuWrapper>
-                        </GlassView>
+                        </View>
                     </View>
 
                     <CenterControls
