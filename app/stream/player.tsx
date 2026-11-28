@@ -434,15 +434,9 @@ const MediaPlayerScreen: React.FC = () => {
         let client = stremioClient ?? (await resolveStreamingServerClient());
         let isOnline = await client.isServerOnline(2500);
         if (!isOnline) {
-          ensureEmbeddedServerRunning().catch(() => {});
-          for (let attempt = 0; attempt < 5; attempt++) {
-            await new Promise((r) => setTimeout(r, 1000));
-            client = await resolveStreamingServerClient();
-            if (await client.isServerOnline(2000)) {
-              isOnline = true;
-              break;
-            }
-          }
+          const started = await ensureEmbeddedServerRunning(8000);
+          client = await resolveStreamingServerClient();
+          isOnline = started || (await client.isServerOnline(2000));
         }
         if (!isOnline) {
           throw new Error(`Stremio streaming server is offline (${client.getBaseURL()}). Please make sure the server is running.`);
@@ -651,7 +645,7 @@ const MediaPlayerScreen: React.FC = () => {
             </Text>
             <Text style={[styles.loadingText, { color: '#ffffff', opacity: 0.85, fontSize: 13, textAlign: 'center', marginHorizontal: 28, marginTop: 4, marginBottom: 12 }]}>
               {isServerOffline
-                ? 'Direct torrent playback requires a background engine (Stremio server) on port 11470 to convert P2P pieces into video. In development mode, run "npm run server" on your PC, or open the magnet in VLC / external player.'
+                ? 'The streaming engine is starting up. Please tap "Retry Stream" in a moment, or open directly in VLC / External Player.'
                 : streamError}
             </Text>
 

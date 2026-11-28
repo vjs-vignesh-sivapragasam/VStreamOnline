@@ -84,9 +84,16 @@ export function startEmbeddedNodeServer(): boolean {
 /**
  * Verifies if the embedded server is responding, and starts it if not already started.
  */
-export async function ensureEmbeddedServerRunning(): Promise<boolean> {
+export async function ensureEmbeddedServerRunning(maxWaitMs: number = 8000): Promise<boolean> {
   startEmbeddedNodeServer();
-  return await pingEmbeddedServer(1500);
+  const startTime = Date.now();
+  while (Date.now() - startTime < maxWaitMs) {
+    if (await pingEmbeddedServer(1200)) {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  return false;
 }
 
 /**
