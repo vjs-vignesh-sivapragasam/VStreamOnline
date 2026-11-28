@@ -342,6 +342,32 @@ if (fs.existsSync(stackJsPath)) {
   }
 }
 
+const stackUtilsIndexPath = path.join(rootDir, 'node_modules', 'expo-router', 'build', 'layouts', 'stack-utils', 'index.js');
+if (fs.existsSync(stackUtilsIndexPath)) {
+  let content = fs.readFileSync(stackUtilsIndexPath, 'utf8');
+  if (content.includes('__exportStar(require("./toolbar"), exports);') && !content.includes('try { __exportStar(require("./toolbar")')) {
+    content = content.replace(
+      '__exportStar(require("./toolbar"), exports);',
+      'try { __exportStar(require("./toolbar"), exports); } catch (e) {}'
+    );
+    fs.writeFileSync(stackUtilsIndexPath, content, 'utf8');
+    console.log('✅ Patched expo-router stack-utils/index.js toolbar error boundary');
+  }
+}
+
+const routerToolbarNativePath = path.join(rootDir, 'node_modules', 'expo-router', 'build', 'toolbar', 'native.android.js');
+if (fs.existsSync(routerToolbarNativePath)) {
+  let content = fs.readFileSync(routerToolbarNativePath, 'utf8');
+  if (content.includes('const jetpack_compose_1 = require("@expo/ui/jetpack-compose");') && !content.includes('try {')) {
+    content = content.replace(
+      'const jetpack_compose_1 = require("@expo/ui/jetpack-compose");',
+      'let jetpack_compose_1; try { jetpack_compose_1 = require("@expo/ui/jetpack-compose"); } catch (e) { jetpack_compose_1 = {}; }'
+    );
+    fs.writeFileSync(routerToolbarNativePath, content, 'utf8');
+    console.log('✅ Patched expo-router toolbar native.android.js for missing ExpoUI');
+  }
+}
+
 // ── 7. Patch expo-router useScreens.js (prevent TypeError: Cannot read property 'ErrorBoundary' of undefined) ──
 const expoRouterUseScreensPath = path.join(
   rootDir,
